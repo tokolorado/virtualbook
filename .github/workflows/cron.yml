@@ -1,0 +1,26 @@
+name: VirtualBook Cron
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  run-crons:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call results cron
+        run: |
+          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/results" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+      - name: Call settle cron
+        run: |
+          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/settle" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+
+      - name: Call pipeline cron
+        run: |
+          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/pipeline" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
