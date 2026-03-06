@@ -1,6 +1,7 @@
 // app/api/admin/send-surprise/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireAdmin } from "@/lib/requireAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,11 @@ function json(status: number, body: any) {
 }
 
 export async function POST(req: Request) {
+  const guard = await requireAdmin(req);
+  if (!guard.ok) {
+    return json(guard.status, { ok: false, error: guard.error });
+  }
+
   try {
     const supabase = supabaseAdmin();
     const body = await req.json().catch(() => ({}));
@@ -61,6 +67,11 @@ export async function POST(req: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  const guard = await requireAdmin(req);
+  if (!guard.ok) {
+    return json(guard.status, { ok: false, error: guard.error });
+  }
+
   return json(405, { ok: false, error: "Method Not Allowed" });
 }
