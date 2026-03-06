@@ -49,6 +49,23 @@ function isoStartOfNextUtcDay(dateYYYYMMDD: string) {
   return dt.toISOString().slice(0, 10) + "T00:00:00.000Z";
 }
 
+type DbMatchRow = {
+  id: number;
+  utc_date: string;
+  status: string | null;
+  matchday: number | null;
+  season: string | null;
+  home_team: string;
+  away_team: string;
+  home_score: number | null;
+  away_score: number | null;
+  competition_id: string;
+  competition_name: string | null;
+  home_team_id: number | null;
+  away_team_id: number | null;
+  last_sync_at: string | null;
+};
+
 export async function GET(req: Request) {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -70,7 +87,6 @@ export async function GET(req: Request) {
     return jsonError("Invalid date. Use YYYY-MM-DD", 400);
   }
 
-  // ✅ HORYZONT
   const HORIZON_DAYS = 14;
   const horizonToYmd = addDaysLocal(todayLocalYYYYMMDD(), HORIZON_DAYS);
   const isBeyondHorizon = date > horizonToYmd;
@@ -88,14 +104,7 @@ export async function GET(req: Request) {
     });
   }
 
-  // standings cache (6h)
-  const STANDINGS_TTL_MS = 6 * 60 * 60 * 1000;
-
-  // ✅ anty-spam: cache refresh matchy
   const FIXTURES_REFRESH_TTL_MS = 15 * 60 * 1000;
-
-  // ✅ stale DB threshold dla matches = 18h
-  const MATCHES_STALE_TTL_MS = 18 * 60 * 60 * 1000;
 
   // okno 3 dni (UTC safety), UI i tak filtruje na selectedDate
   const dateFrom = addDaysLocal(date, -1);
@@ -104,7 +113,6 @@ export async function GET(req: Request) {
   const rangeStart = isoStartOfUtcDay(dateFrom);
   const rangeEnd = isoStartOfNextUtcDay(dateTo);
 
-  // --- api_cache helpers ---
   const readCache = async (key: string) => {
     const { data, error } = await supabase
       .from("api_cache")
@@ -126,26 +134,27 @@ export async function GET(req: Request) {
     });
   };
 
-  // --- DB helper: read matches for league+window ---
-  async function readMatchesFromDb(leagueCode: string) {
+  async function readAllMatchesFromDb() {
     const { data, error } = await supabase
       .from("matches")
       .select(
         "id, utc_date, status, matchday, season, home_team, away_team, home_score, away_score, competition_id, competition_name, home_team_id, away_team_id, last_sync_at"
       )
-      .eq("competition_id", leagueCode)
+      .in(
+        "competition_id",
+        LEAGUES.map((l) => l.code)
+      )
       .gte("utc_date", rangeStart)
       .lt("utc_date", rangeEnd)
       .order("utc_date", { ascending: true });
 
     if (error) {
-      throw new Error(`DB matches read error (${leagueCode}): ${error.message}`);
+      throw new Error(`DB matches read error: ${error.message}`);
     }
 
-    return (data ?? []) as any[];
+    return (data ?? []) as DbMatchRow[];
   }
 
-  // --- DB helper: read 1x2 odds for matches ---
   async function readOddsMapFromDb(matchIds: number[]) {
     const safeIds = Array.from(
       new Set(matchIds.filter((x) => Number.isFinite(x)))
@@ -194,7 +203,6 @@ export async function GET(req: Request) {
     return oddsMap;
   }
 
-  // --- FD -> DB upsert (okno 3 dni) ---
   async function fetchAndUpsertMatches(leagueCode: string, leagueName: string) {
     const fxUrl = new URL(`${BASE}/competitions/${leagueCode}/matches`);
     fxUrl.searchParams.set("dateFrom", dateFrom);
@@ -287,62 +295,35 @@ export async function GET(req: Request) {
   const results: any[] = [];
   const errors: any[] = [];
 
+  // 1) Jedno zbiorcze czytanie z DB
+  let allDbMatches: DbMatchRow[] = [];
+  try {
+    allDbMatches = await readAllMatchesFromDb();
+  } catch (e: any) {
+    errors.push({
+      type: "db_matches_read",
+      error: e?.message ?? String(e),
+    });
+    allDbMatches = [];
+  }
+
+  const matchesByLeague = new Map<string, DbMatchRow[]>();
   for (const lg of LEAGUES) {
-    // ---- standings (cache 6h)
-    const stKey = `st:${lg.code}`;
-    let standings: any = null;
+    matchesByLeague.set(lg.code, []);
+  }
+  for (const m of allDbMatches) {
+    const arr = matchesByLeague.get(m.competition_id) ?? [];
+    arr.push(m);
+    matchesByLeague.set(m.competition_id, arr);
+  }
 
-    const stHit = await readCache(stKey);
-    if (stHit && stHit.age < STANDINGS_TTL_MS) {
-      standings = stHit.payload;
-    } else {
-      const stUrl = `${BASE}/competitions/${lg.code}/standings`;
-      const st = await fetchFD(stUrl, apiKeySafe);
+  // 2) Refresh tylko dla lig, które nie mają żadnych meczów w DB
+  for (const lg of LEAGUES) {
+    const leagueMatches = matchesByLeague.get(lg.code) ?? [];
+    const needsRefresh = leagueMatches.length === 0;
 
-      if (st.ok) {
-        standings = st.data;
-        await writeCache(stKey, standings);
-      } else {
-        errors.push({
-          type: "standings",
-          league: lg.code,
-          status: st.status,
-          data: st.data,
-        });
-      }
-    }
+    if (!needsRefresh) continue;
 
-    // ---- fixtures: DB FIRST
-    let dbMatches: any[] = [];
-    try {
-      dbMatches = await readMatchesFromDb(lg.code);
-    } catch (e: any) {
-      errors.push({
-        type: "db_matches_read",
-        league: lg.code,
-        error: e?.message ?? String(e),
-      });
-      dbMatches = [];
-    }
-
-    const hasMissingTeamIds =
-      dbMatches.length > 0 &&
-      dbMatches.some(
-        (m: any) => m.home_team_id == null || m.away_team_id == null
-      );
-
-    const hasStaleMatches =
-      dbMatches.length > 0 &&
-      dbMatches.some((m: any) => {
-        if (!m?.last_sync_at) return true;
-        const age = Date.now() - new Date(String(m.last_sync_at)).getTime();
-        return !Number.isFinite(age) || age > MATCHES_STALE_TTL_MS;
-      });
-
-    const needsRefresh =
-      !dbMatches.length || hasMissingTeamIds || hasStaleMatches;
-
-    // ✅ anty-spam cache dla refreshu meczów
     const fxRefreshKey = `fx_refresh:${lg.code}:${dateFrom}:${dateTo}`;
     let canRefresh = true;
 
@@ -351,56 +332,68 @@ export async function GET(req: Request) {
       canRefresh = false;
     }
 
-    if (needsRefresh && canRefresh) {
-      const fx = await fetchAndUpsertMatches(lg.code, lg.name);
-      await writeCache(fxRefreshKey, { refreshedAt: new Date().toISOString() });
+    if (!canRefresh) continue;
 
-      if (!fx.ok) {
-        errors.push({
-          type: "fixtures_fetch",
-          league: lg.code,
-          status: fx.status,
-          data: fx.data,
-        });
-      }
+    const fx = await fetchAndUpsertMatches(lg.code, lg.name);
+    await writeCache(fxRefreshKey, { refreshedAt: new Date().toISOString() });
 
-      // reread DB
-      try {
-        dbMatches = await readMatchesFromDb(lg.code);
-      } catch (e: any) {
-        errors.push({
-          type: "db_matches_read_after_upsert",
-          league: lg.code,
-          error: e?.message ?? String(e),
-        });
-        dbMatches = [];
-      }
-    }
-
-    // ---- odds from DB for current league matches
-    let oddsMap = new Map<
-      number,
-      { "1": number | null; X: number | null; "2": number | null }
-    >();
-
-    try {
-      const matchIds = dbMatches
-        .map((m: any) => Number(m?.id))
-        .filter((x: number) => Number.isFinite(x));
-
-      oddsMap = await readOddsMapFromDb(matchIds);
-    } catch (e: any) {
+    if (!fx.ok) {
       errors.push({
-        type: "db_odds_read",
+        type: "fixtures_fetch",
         league: lg.code,
-        error: e?.message ?? String(e),
+        status: fx.status,
+        data: fx.data,
       });
     }
+  }
 
-    // z DB robimy “football-data like” payload
+  // 3) Drugie, końcowe czytanie z DB po ewentualnych refreshach
+  try {
+    allDbMatches = await readAllMatchesFromDb();
+  } catch (e: any) {
+    errors.push({
+      type: "db_matches_read_after_upsert",
+      error: e?.message ?? String(e),
+    });
+    allDbMatches = [];
+  }
+
+  const finalMatchesByLeague = new Map<string, DbMatchRow[]>();
+  for (const lg of LEAGUES) {
+    finalMatchesByLeague.set(lg.code, []);
+  }
+  for (const m of allDbMatches) {
+    const arr = finalMatchesByLeague.get(m.competition_id) ?? [];
+    arr.push(m);
+    finalMatchesByLeague.set(m.competition_id, arr);
+  }
+
+  // 4) Jedno zbiorcze czytanie odds
+  let oddsMap = new Map<
+    number,
+    { "1": number | null; X: number | null; "2": number | null }
+  >();
+
+  try {
+    const allMatchIds = allDbMatches
+      .map((m) => Number(m.id))
+      .filter((x) => Number.isFinite(x));
+
+    oddsMap = await readOddsMapFromDb(allMatchIds);
+  } catch (e: any) {
+    errors.push({
+      type: "db_odds_read",
+      error: e?.message ?? String(e),
+    });
+  }
+
+  // 5) Składanie odpowiedzi bez standings
+  for (const lg of LEAGUES) {
+    const leagueMatches = finalMatchesByLeague.get(lg.code) ?? [];
+
     const fixtures = {
       competition: { name: lg.name, code: lg.code },
-      matches: dbMatches.map((m: any) => {
+      matches: leagueMatches.map((m) => {
         const odds = oddsMap.get(Number(m.id)) ?? {
           "1": null,
           X: null,
@@ -423,7 +416,7 @@ export async function GET(req: Request) {
       }),
     };
 
-    results.push({ league: lg, fixtures, standings });
+    results.push({ league: lg, fixtures });
   }
 
   return NextResponse.json({
