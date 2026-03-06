@@ -1,4 +1,6 @@
 // app/api/cron/results/route.ts
+
+import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 

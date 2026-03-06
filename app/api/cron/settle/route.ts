@@ -1,6 +1,7 @@
 // app/api/cron/settle/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,18 +21,37 @@ function json(status: number, body: any) {
 }
 
 export async function POST(req: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  const gotSecret = req.headers.get("x-cron-secret") || "";
-
-  if (!cronSecret) return json(500, { ok: false, error: "Missing CRON_SECRET in env" });
-  if (gotSecret !== cronSecret) return json(401, { ok: false, error: "Unauthorized" });
-
-  const supabase = supabaseAdmin();
-
-  const BATCH_LIMIT = Number(process.env.SETTLE_BATCH_LIMIT ?? "25");
-  const LIMIT = Number.isFinite(BATCH_LIMIT) && BATCH_LIMIT > 0 ? BATCH_LIMIT : 25;
+  let logId: number | null = null;
 
   try {
+    logId = await cronLogStart("settle", "github-actions");
+
+    const cronSecret = process.env.CRON_SECRET;
+    const gotSecret = req.headers.get("x-cron-secret") || "";
+
+    if (!cronSecret) {
+      await cronLogSuccess(logId, {
+        ok: false,
+        job: "settle",
+        reason: "missing_cron_secret_env",
+      });
+      return json(500, { ok: false, error: "Missing CRON_SECRET in env" });
+    }
+
+    if (gotSecret !== cronSecret) {
+      await cronLogSuccess(logId, {
+        ok: false,
+        job: "settle",
+        reason: "unauthorized",
+      });
+      return json(401, { ok: false, error: "Unauthorized" });
+    }
+
+    const supabase = supabaseAdmin();
+
+    const BATCH_LIMIT = Number(process.env.SETTLE_BATCH_LIMIT ?? "25");
+    const LIMIT = Number.isFinite(BATCH_LIMIT) && BATCH_LIMIT > 0 ? BATCH_LIMIT : 25;
+
     // 1) Candidate matches: takie, które mają bet_items.settled = false/null
     const { data: candRows, error: candErr } = await supabase
       .from("bet_items")
@@ -52,6 +72,15 @@ export async function POST(req: Request) {
     );
 
     if (!candidateIds.length) {
+      await cronLogSuccess(logId, {
+        ok: true,
+        job: "settle",
+        requested: 0,
+        settledOk: 0,
+        skipped: 0,
+        note: "No unsettled bet_items found",
+      });
+
       return json(200, {
         ok: true,
         requested: 0,
@@ -78,6 +107,15 @@ export async function POST(req: Request) {
       .filter((x: number) => Number.isFinite(x));
 
     if (!matchIdsToSettle.length) {
+      await cronLogSuccess(logId, {
+        ok: true,
+        job: "settle",
+        requested: 0,
+        settledOk: 0,
+        skipped: 0,
+        note: "No FINISHED matches among candidates",
+      });
+
       return json(200, {
         ok: true,
         requested: 0,
@@ -162,6 +200,15 @@ export async function POST(req: Request) {
       }
     }
 
+    await cronLogSuccess(logId, {
+      ok: true,
+      job: "settle",
+      requested: matchIdsToSettle.length,
+      settledOk,
+      skipped: skippedCount,
+      results,
+    });
+
     return json(200, {
       ok: true,
       requested: matchIdsToSettle.length,
@@ -170,6 +217,7 @@ export async function POST(req: Request) {
       results,
     });
   } catch (e: any) {
+    await cronLogError(logId, e);
     return json(500, { ok: false, error: e?.message ?? String(e) });
   }
 }
