@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { formatOdd, formatVB } from "@/lib/format";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -40,7 +41,6 @@ type SystemHealth = {
     missingPayoutLedger: any[];
   };
 };
-
 
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
@@ -155,10 +155,6 @@ export default function AdminPage() {
     const ok = confirm(`Rozliczyć kupon jako: ${status.toUpperCase()} ?`);
     if (!ok) return;
 
-    // ⚠️ UWAGA:
-    // Jeśli Twoja funkcja settle_bet NIE przyjmuje p_status (bo status jest liczony automatycznie),
-    // to te przyciski są "legacy".
-    // Na razie zostawiamy jak było u Ciebie — jeśli wywali błąd, w następnym kroku robimy osobną RPC: settle_bet_admin.
     const { error } = await supabase.rpc("settle_bet", {
       p_bet_id: betId,
       p_status: status,
@@ -198,7 +194,6 @@ export default function AdminPage() {
 
       alert("Auto-rozliczanie zakończone ✅");
 
-      // odśwież listę i liczniki
       await load();
       await refreshStats();
       await refreshHealth();
@@ -232,11 +227,20 @@ export default function AdminPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold">Admin — rozliczanie kuponów</h1>
-        <p className="text-neutral-400 mt-1 text-sm">
-          Kliknij WON/LOST/VOID — baza dopisze wypłatę do salda.
-        </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold">Admin — rozliczanie kuponów</h1>
+          <p className="text-neutral-400 mt-1 text-sm">
+            Kliknij WON/LOST/VOID — baza dopisze wypłatę do salda.
+          </p>
+        </div>
+
+        <Link
+          href="/admin/logs"
+          className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm text-center"
+        >
+          Zobacz logi cronów
+        </Link>
       </div>
 
       {/* System Health */}
