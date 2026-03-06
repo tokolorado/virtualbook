@@ -144,6 +144,11 @@ export default function EventsPage() {
   const [syncingOdds, setSyncingOdds] = useState(false);
   const oddsSyncInFlightRef = useRef(false);
 
+  // ✅ cache per dzień dla szybkiego przełączania
+  const matchesCacheRef = useRef<Record<string, Match[]>>({});
+  const horizonCacheRef = useRef<Record<string, string | null>>({});
+  const beyondCacheRef = useRef<Record<string, boolean>>({});
+
   useEffect(() => {
     supabase.auth.getSession().catch(() => {});
   }, []);
@@ -191,9 +196,12 @@ export default function EventsPage() {
       }
 
       // ✅ po sync po prostu przeładuj /api/events (odds są już zwracane z backendu)
-      const rr = await fetch(`/api/events?date=${encodeURIComponent(selectedDate)}`, {
-        cache: "no-store",
-      });
+      const rr = await fetch(
+        `/api/events?date=${encodeURIComponent(selectedDate)}`,
+        {
+          cache: "no-store",
+        }
+      );
 
       const text2 = await rr.text();
       let payload: any = null;
@@ -204,8 +212,7 @@ export default function EventsPage() {
       }
 
       if (!rr.ok) {
-        const msg =
-          payload?.error || `Błąd /api/events (HTTP ${rr.status})`;
+        const msg = payload?.error || `Błąd /api/events (HTTP ${rr.status})`;
         setMatchesError(msg);
         return;
       }
@@ -218,6 +225,10 @@ export default function EventsPage() {
       const uiSaysBeyond = isBeyondHorizonDay(selectedDate, apiHorizonTo);
 
       if (apiSaysBeyond || uiSaysBeyond) {
+        matchesCacheRef.current[selectedDate] = [];
+        horizonCacheRef.current[selectedDate] = apiHorizonTo;
+        beyondCacheRef.current[selectedDate] = true;
+
         setBeyondHorizon(true);
         setMatches([]);
         setMatchesError(null);
@@ -285,6 +296,10 @@ export default function EventsPage() {
         return a.competitionName.localeCompare(b.competitionName);
       });
 
+      matchesCacheRef.current[selectedDate] = onlySelectedDay;
+      horizonCacheRef.current[selectedDate] = apiHorizonTo;
+      beyondCacheRef.current[selectedDate] = false;
+
       setBeyondHorizon(false);
       setMatches(onlySelectedDay);
     } finally {
@@ -300,9 +315,20 @@ export default function EventsPage() {
     const load = async () => {
       setLoadingMatches(true);
       setMatchesError(null);
-      setMatches([]);
       setBeyondHorizon(false);
       setHorizonYmd(null);
+
+      const cachedMatches = matchesCacheRef.current[selectedDate];
+      const cachedHorizon = horizonCacheRef.current[selectedDate];
+      const cachedBeyond = beyondCacheRef.current[selectedDate];
+
+      if (cachedMatches) {
+        setMatches(cachedMatches);
+        setHorizonYmd(cachedHorizon ?? null);
+        setBeyondHorizon(Boolean(cachedBeyond));
+        setLoadingMatches(false);
+        return;
+      }
 
       try {
         const r = await fetch(
@@ -323,7 +349,6 @@ export default function EventsPage() {
             setMatchesError(
               payload?.error || `Błąd /api/events (HTTP ${r.status})`
             );
-            setMatches([]);
           }
           return;
         }
@@ -339,6 +364,10 @@ export default function EventsPage() {
 
         if (apiSaysBeyond || uiSaysBeyond) {
           if (!cancelled) {
+            matchesCacheRef.current[selectedDate] = [];
+            horizonCacheRef.current[selectedDate] = apiHorizonTo;
+            beyondCacheRef.current[selectedDate] = true;
+
             setBeyondHorizon(true);
             setMatches([]);
             setMatchesError(null);
@@ -408,6 +437,10 @@ export default function EventsPage() {
         });
 
         if (!cancelled) {
+          matchesCacheRef.current[selectedDate] = onlySelectedDay;
+          horizonCacheRef.current[selectedDate] = apiHorizonTo;
+          beyondCacheRef.current[selectedDate] = false;
+
           setBeyondHorizon(false);
           setMatches(onlySelectedDay);
         }
