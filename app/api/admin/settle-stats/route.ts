@@ -7,7 +7,6 @@ function jsonError(message: string, status = 500, extra?: any) {
   return NextResponse.json({ error: message, ...extra }, { status });
 }
 
-
 export async function GET(req: Request) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -15,13 +14,13 @@ export async function GET(req: Request) {
   if (!supabaseUrl) return jsonError("Missing SUPABASE_URL in env", 500);
   if (!serviceKey) return jsonError("Missing SUPABASE_SERVICE_ROLE_KEY in env", 500);
 
-    const guard = await requireAdmin(req);
-    if (!guard.ok) {
+  const guard = await requireAdmin(req);
+  if (!guard.ok) {
     return NextResponse.json(
-        { ok: false, error: guard.error },
-        { status: guard.status }
+      { ok: false, error: guard.error },
+      { status: guard.status }
     );
-    }
+  }
 
   const supabase = createClient(supabaseUrl, serviceKey);
 
@@ -33,9 +32,9 @@ export async function GET(req: Request) {
   // 1) policz nierozliczone bet_items "po kickoffie"
   const { data: rows, error } = await supabase
     .from("bet_items")
-    .select("match_id,kickoff_at,settled")
+    .select("match_id_bigint,kickoff_at,settled")
     .or("settled.is.false,settled.is.null")
-    .not("match_id", "is", null)
+    .not("match_id_bigint", "is", null)
     .lte("kickoff_at", cutoffIso)
     .limit(5000);
 
@@ -43,7 +42,7 @@ export async function GET(req: Request) {
 
   const uniq = new Set<string>();
   for (const r of rows ?? []) {
-    const id = String((r as any).match_id ?? "");
+    const id = String((r as any).match_id_bigint ?? "");
     if (id) uniq.add(id);
   }
 
