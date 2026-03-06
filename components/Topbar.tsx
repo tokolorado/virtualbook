@@ -42,7 +42,6 @@ export default function Topbar() {
     load();
 
     const onRefresh = (e?: Event) => {
-      // Jeśli przyszedł CustomEvent z balansem -> ustawiamy od razu bez refetch
       const ce = e as CustomEvent | undefined;
       const maybe = ce?.detail?.balance_vb ?? ce?.detail?.balanceAfter;
       if (maybe != null) {
@@ -79,6 +78,7 @@ export default function Topbar() {
           <nav className="hidden md:flex items-center gap-1">
             <NavLink href="/events" label="Mecze" />
             <NavLink href="/bets" label="Kupony" />
+            <NavLink href="/leaderboard" label="Ranking" />
             <NavLink href="/groups" label="Grupy" />
             <NavLink href="/admin" label="Admin" />
           </nav>
@@ -123,6 +123,7 @@ export default function Topbar() {
         <div className="mx-auto max-w-6xl px-2 py-2 flex items-center justify-around">
           <NavLink href="/events" label="Mecze" />
           <NavLink href="/bets" label="Kupony" />
+          <NavLink href="/leaderboard" label="Ranking" />
           <NavLink href="/groups" label="Grupy" />
           <NavLink href="/admin" label="Admin" />
         </div>
