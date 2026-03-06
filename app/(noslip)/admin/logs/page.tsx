@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type CronLog = {
@@ -16,11 +16,24 @@ type CronLog = {
   details: any;
 };
 
+type JobFilter = "all" | "results" | "settle" | "pipeline";
+
 export default function AdminCronLogsPage() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [logs, setLogs] = useState<CronLog[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const [jobFilter, setJobFilter] = useState<JobFilter>("all");
+  const [errorsOnly, setErrorsOnly] = useState(false);
+
+  const queryString = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set("limit", "100");
+    params.set("job", jobFilter);
+    params.set("errorsOnly", String(errorsOnly));
+    return params.toString();
+  }, [jobFilter, errorsOnly]);
 
   const load = async () => {
     try {
@@ -51,7 +64,7 @@ export default function AdminCronLogsPage() {
         return;
       }
 
-      const r = await fetch("/api/admin/cron-logs?limit=100", {
+      const r = await fetch(`/api/admin/cron-logs?${queryString}`, {
         cache: "no-store",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -75,7 +88,8 @@ export default function AdminCronLogsPage() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryString]);
 
   if (loading) {
     return <div className="text-neutral-400">Ładowanie logów...</div>;
@@ -116,6 +130,47 @@ export default function AdminCronLogsPage() {
         </div>
       </div>
 
+      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
+        <div className="flex flex-col gap-3">
+          <div>
+            <div className="font-semibold">Filtry</div>
+            <div className="text-xs text-neutral-400 mt-1">
+              Zawężaj logi po jobie albo pokaż tylko błędy.
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {(["all", "results", "settle", "pipeline"] as JobFilter[]).map((job) => {
+              const active = jobFilter === job;
+              return (
+                <button
+                  key={job}
+                  onClick={() => setJobFilter(job)}
+                  className={`px-3 py-2 rounded-xl border text-sm transition ${
+                    active
+                      ? "border-white bg-white text-black"
+                      : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800 text-white"
+                  }`}
+                >
+                  {job === "all" ? "Wszystkie" : job}
+                </button>
+              );
+            })}
+
+            <button
+              onClick={() => setErrorsOnly((v) => !v)}
+              className={`px-3 py-2 rounded-xl border text-sm transition ${
+                errorsOnly
+                  ? "border-red-500 bg-red-500/15 text-red-300"
+                  : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800 text-white"
+              }`}
+            >
+              {errorsOnly ? "Tylko errors: ON" : "Tylko errors"}
+            </button>
+          </div>
+        </div>
+      </div>
+
       {error && (
         <div className="rounded-2xl border border-red-900/50 bg-red-950/20 p-4 text-sm text-red-300">
           {error}
@@ -124,7 +179,7 @@ export default function AdminCronLogsPage() {
 
       {logs.length === 0 ? (
         <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 text-neutral-400">
-          Brak logów.
+          Brak logów dla wybranych filtrów.
         </div>
       ) : (
         <div className="space-y-3">
