@@ -22,8 +22,6 @@ type Match = {
   away: string;
   time: string;
   kickoffUtc: string;
-
-  // ✅ kursy zwracane już przez /api/events
   odds: { "1": number | null; X: number | null; "2": number | null };
 };
 
@@ -36,17 +34,14 @@ type StandingsRowUI = {
   position: number;
   teamId: number;
   teamName: string;
-
   playedGames: number;
   won: number;
   draw: number;
   lost: number;
-
   points: number;
   goalsFor: number;
   goalsAgainst: number;
   goalDifference: number;
-
   form?: string | null;
 };
 
@@ -80,7 +75,6 @@ function formatForm(form?: string | null) {
   return parts.filter(Boolean).slice(0, 5);
 }
 
-// ✅ PRE-MATCH ONLY: zamykamy zakłady 60s przed kickoff
 const BETTING_CLOSE_BUFFER_MS = 60_000;
 
 function isBettingClosed(kickoffUtc: string, nowMs: number) {
@@ -94,10 +88,6 @@ function ymdToUtcMs(ymd: string) {
   return Number.isFinite(t) ? t : NaN;
 }
 
-/**
- * UI helper: czy user wybrał dzień poza horyzontem danych (UTC).
- * horizonYmd to YYYY-MM-DD.
- */
 function isBeyondHorizonDay(selectedYmd: string, horizonYmd: string | null) {
   if (!horizonYmd) return false;
   const a = ymdToUtcMs(selectedYmd);
@@ -123,7 +113,6 @@ export default function EventsPage() {
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [matchesError, setMatchesError] = useState<string | null>(null);
 
-  // ✅ horyzont danych (z API)
   const [beyondHorizon, setBeyondHorizon] = useState(false);
   const [horizonYmd, setHorizonYmd] = useState<string | null>(null);
 
@@ -133,24 +122,62 @@ export default function EventsPage() {
 
   const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
 
-  // ✅ żeby UI samo “przeskakiwało” na zamknięte zakłady bez reload
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
+
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 10_000);
     return () => window.clearInterval(id);
   }, []);
 
-  // ✅ manualny przycisk “Synchronizuj kursy” (pomocniczy)
   const [syncingOdds, setSyncingOdds] = useState(false);
   const oddsSyncInFlightRef = useRef(false);
 
-  // ✅ cache per dzień dla szybkiego przełączania
   const matchesCacheRef = useRef<Record<string, Match[]>>({});
   const horizonCacheRef = useRef<Record<string, string | null>>({});
   const beyondCacheRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
     supabase.auth.getSession().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkAdmin = async () => {
+      try {
+        setCheckingAdmin(true);
+
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userId = sessionData.session?.user?.id;
+
+        if (!userId) {
+          if (!cancelled) setIsAdmin(false);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("admins")
+          .select("user_id")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (!cancelled) {
+          setIsAdmin(!error && !!data);
+        }
+      } catch {
+        if (!cancelled) setIsAdmin(false);
+      } finally {
+        if (!cancelled) setCheckingAdmin(false);
+      }
+    };
+
+    checkAdmin();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function manualSyncOddsForDay(args: { date: string; league: string }) {
@@ -195,7 +222,6 @@ export default function EventsPage() {
         return;
       }
 
-      // ✅ po sync po prostu przeładuj /api/events (odds są już zwracane z backendu)
       const rr = await fetch(
         `/api/events?date=${encodeURIComponent(selectedDate)}`,
         {
@@ -308,7 +334,6 @@ export default function EventsPage() {
     }
   }
 
-  // ===== LOAD MATCHES =====
   useEffect(() => {
     let cancelled = false;
 
@@ -353,7 +378,6 @@ export default function EventsPage() {
           return;
         }
 
-        // backend zwraca: isBeyondHorizon + horizonTo (YYYY-MM-DD)
         const apiHorizonTo =
           typeof payload?.horizonTo === "string" ? payload.horizonTo : null;
 
@@ -459,7 +483,6 @@ export default function EventsPage() {
     };
   }, [selectedDate]);
 
-  // ===== LOAD STANDINGS =====
   useEffect(() => {
     let cancelled = false;
 
@@ -611,24 +634,26 @@ export default function EventsPage() {
           <div className="flex items-center gap-3">
             <DayBar value={selectedDate} onChange={setSelectedDate} />
 
-            <button
-              onClick={() =>
-                manualSyncOddsForDay({
-                  date: selectedDate,
-                  league: selectedLeague,
-                })
-              }
-              disabled={syncingOdds}
-              className={[
-                "rounded-xl border px-3 py-2 text-sm transition",
-                syncingOdds
-                  ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
-                  : "border-neutral-200 bg-white text-black hover:opacity-90",
-              ].join(" ")}
-              title="Pomocniczo: uruchamia /api/odds/sync (normalnie robi to cron)"
-            >
-              {syncingOdds ? "Synchronizuję…" : "Synchronizuj kursy"}
-            </button>
+            {!checkingAdmin && isAdmin ? (
+              <button
+                onClick={() =>
+                  manualSyncOddsForDay({
+                    date: selectedDate,
+                    league: selectedLeague,
+                  })
+                }
+                disabled={syncingOdds}
+                className={[
+                  "rounded-xl border px-3 py-2 text-sm transition",
+                  syncingOdds
+                    ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
+                    : "border-neutral-200 bg-white text-black hover:opacity-90",
+                ].join(" ")}
+                title="Pomocniczo: uruchamia /api/odds/sync (normalnie robi to cron)"
+              >
+                {syncingOdds ? "Synchronizuję…" : "Synchronizuj kursy"}
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -653,7 +678,6 @@ export default function EventsPage() {
       </section>
 
       <div className="grid grid-cols-1 lg:grid-cols-[160px_1fr] gap-6">
-        {/* LEFT: leagues */}
         <aside className="h-fit lg:sticky lg:top-24 rounded-2xl border border-neutral-800 bg-neutral-900/40 p-3">
           <div className="text-sm font-semibold">Ligi</div>
 
@@ -704,9 +728,7 @@ export default function EventsPage() {
           </div>
         </aside>
 
-        {/* RIGHT */}
         <section className="space-y-3">
-          {/* Tabs */}
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-3">
             <div className="flex gap-2">
               <button
@@ -752,7 +774,6 @@ export default function EventsPage() {
             </div>
           </div>
 
-          {/* Matches */}
           {activeRightTab === "matches" ? (
             !loadingMatches && !matchesError && filteredMatches.length === 0 ? (
               <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
@@ -877,14 +898,12 @@ export default function EventsPage() {
                         )}
                       </div>
                     </div>
-
                   </div>
                 );
               })
             )
           ) : null}
 
-          {/* Table */}
           {activeRightTab === "table" ? (
             selectedLeague === "ALL" ? (
               <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
