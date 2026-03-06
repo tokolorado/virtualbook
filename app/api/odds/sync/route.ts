@@ -34,8 +34,8 @@ type SyncBody = {
 
   // model params
   maxGoals?: number; // default 7
-  homeAdv?: number; // default 1.10
-  drawBoost?: number; // default 1.05
+  homeAdv?: number; // default 1.05
+  drawBoost?: number; // default 1.18
   margin?: number; // default 1.06
 
   // rate-limit / pacing (tylko dla FD standings)
@@ -238,8 +238,8 @@ function buildStandingsCtx(standingsJson: any): StandingsCtx | null {
 
   return {
     byTeamId,
-    leagueAvgGoalsFor: Math.max(0.6, sumGF / sumPG),
-    leagueAvgGoalsAgainst: Math.max(0.6, sumGA / sumPG),
+    leagueAvgGoalsFor: Math.max(0.9, sumGF / sumPG),
+    leagueAvgGoalsAgainst: Math.max(0.9, sumGA / sumPG),
   };
 }
 
@@ -325,12 +325,12 @@ function computeLambdas(args: {
 }) {
   // fallback jeśli nie mamy standings ctx lub ID teamów
   if (!args.ctx || args.homeId == null || args.awayId == null) {
-    return { lambdaH: 1.35, lambdaA: 1.15 };
+    return { lambdaH: 1.32, lambdaA: 1.08 };
   }
 
   const h = args.ctx.byTeamId.get(args.homeId) ?? null;
   const a = args.ctx.byTeamId.get(args.awayId) ?? null;
-  if (!h || !a) return { lambdaH: 1.35, lambdaA: 1.15 };
+  if (!h || !a) return { lambdaH: 1.32, lambdaA: 1.08 };
 
   const hAtt = h.goalsFor / h.playedGames;
   const hDef = h.goalsAgainst / h.playedGames;
@@ -343,10 +343,17 @@ function computeLambdas(args: {
   const base = lgGF;
 
   // 1) baza standings
-  let lambdaH = base * (hAtt / lgGF) * (aDef / lgGA) * args.homeAdv;
-  let lambdaA = base * (aAtt / lgGF) * (hDef / lgGA);
+  let lambdaH_raw = base * (hAtt / lgGF) * (aDef / lgGA) * args.homeAdv;
+  let lambdaA_raw = base * (aAtt / lgGF) * (hDef / lgGA);
 
-  // 2) rating overall — większy wpływ niż wcześniej
+  // 2) shrinkage do średniej ligi, żeby nie robić zbyt skrajnych kursów
+  const neutralHome = base * 1.06;
+  const neutralAway = base * 0.94;
+
+  let lambdaH = lambdaH_raw * 0.65 + neutralHome * 0.35;
+  let lambdaA = lambdaA_raw * 0.65 + neutralAway * 0.35;
+
+  // 3) rating overall — mniejszy wpływ niż wcześniej
   const homeOverall = Number.isFinite(args.homeRating)
     ? Number(args.homeRating)
     : null;
@@ -355,12 +362,12 @@ function computeLambdas(args: {
     : null;
 
   if (homeOverall != null && awayOverall != null) {
-    const overallGap = (homeOverall - awayOverall) / 100; // np. 0.12 = 12 pkt różnicy
-    lambdaH *= 1 + overallGap * 0.55;
-    lambdaA *= 1 - overallGap * 0.55;
+    const overallGap = clamp((homeOverall - awayOverall) / 100, -0.25, 0.25);
+    lambdaH *= 1 + overallGap * 0.28;
+    lambdaA *= 1 - overallGap * 0.28;
   }
 
-  // 3) attack rating
+  // 4) attack rating
   const homeAttack = Number.isFinite(args.homeAttackRating)
     ? Number(args.homeAttackRating)
     : null;
@@ -369,13 +376,13 @@ function computeLambdas(args: {
     : null;
 
   if (homeAttack != null && awayAttack != null) {
-    const attackGap = (homeAttack - awayAttack) / 100;
-    lambdaH *= 1 + attackGap * 0.30;
-    lambdaA *= 1 - attackGap * 0.20;
+    const attackGap = clamp((homeAttack - awayAttack) / 100, -0.25, 0.25);
+    lambdaH *= 1 + attackGap * 0.16;
+    lambdaA *= 1 - attackGap * 0.10;
   }
 
-  // 4) defense rating
-  // u Ciebie defense jest ujemne — im bliżej zera, tym lepiej
+  // 5) defense rating
+  // defense ujemne — im bliżej zera, tym lepiej
   const homeDefense = Number.isFinite(args.homeDefenseRating)
     ? Number(args.homeDefenseRating)
     : null;
@@ -384,12 +391,12 @@ function computeLambdas(args: {
     : null;
 
   if (homeDefense != null && awayDefense != null) {
-    const defenseGap = (homeDefense - awayDefense) / 100;
-    lambdaH *= 1 - defenseGap * 0.25;
-    lambdaA *= 1 + defenseGap * 0.25;
+    const defenseGap = clamp((homeDefense - awayDefense) / 100, -0.25, 0.25);
+    lambdaH *= 1 - defenseGap * 0.14;
+    lambdaA *= 1 + defenseGap * 0.14;
   }
 
-  // 5) form rating
+  // 6) form rating
   const homeForm = Number.isFinite(args.homeFormRating)
     ? Number(args.homeFormRating)
     : null;
@@ -398,13 +405,14 @@ function computeLambdas(args: {
     : null;
 
   if (homeForm != null && awayForm != null) {
-    const formGap = (homeForm - awayForm) / 100;
-    lambdaH *= 1 + formGap * 0.18;
-    lambdaA *= 1 - formGap * 0.18;
+    const formGap = clamp((homeForm - awayForm) / 100, -0.25, 0.25);
+    lambdaH *= 1 + formGap * 0.10;
+    lambdaA *= 1 - formGap * 0.10;
   }
 
-  lambdaH = clamp(lambdaH, 0.2, 4.5);
-  lambdaA = clamp(lambdaA, 0.2, 4.5);
+  // 7) końcowe ograniczenie — mniej ekstremów
+  lambdaH = clamp(lambdaH, 0.45, 2.85);
+  lambdaA = clamp(lambdaA, 0.35, 2.45);
 
   return { lambdaH, lambdaA };
 }
@@ -447,17 +455,29 @@ function compute1X2FromLambdas(args: {
     }
   }
 
+  // mocniejszy boost na remis
   pX *= args.drawBoost;
-  const s = p1 + pX + p2;
+
+  let s = p1 + pX + p2;
   if (s > 0) {
     p1 /= s;
     pX /= s;
     p2 /= s;
   }
 
-  p1 = clamp(p1, 0.01, 0.98);
-  pX = clamp(pX, 0.01, 0.98);
-  p2 = clamp(p2, 0.01, 0.98);
+  // market smoothing — mniej skrajne kursy, bliżej realnych buków
+  const base1 = 0.42;
+  const baseX = 0.28;
+  const base2 = 0.30;
+  const mix = 0.75;
+
+  p1 = p1 * mix + base1 * (1 - mix);
+  pX = pX * mix + baseX * (1 - mix);
+  p2 = p2 * mix + base2 * (1 - mix);
+
+  p1 = clamp(p1, 0.03, 0.90);
+  pX = clamp(pX, 0.06, 0.50);
+  p2 = clamp(p2, 0.03, 0.90);
 
   const s2 = p1 + pX + p2;
   return { p1: p1 / s2, pX: pX / s2, p2: p2 / s2 };
@@ -598,10 +618,10 @@ export async function POST(req: Request) {
       : 7;
     const homeAdv = Number.isFinite(Number(body.homeAdv))
       ? Number(body.homeAdv)
-      : 1.1;
+      : 1.05;
     const drawBoost = Number.isFinite(Number(body.drawBoost))
       ? Number(body.drawBoost)
-      : 1.05;
+      : 1.18;
     const margin = Number.isFinite(Number(body.margin))
       ? Number(body.margin)
       : 1.06;
@@ -791,28 +811,28 @@ export async function POST(req: Request) {
     }
 
     // ✅ 3b) latest team_ratings dla lig z requestu
-const latestRatingsByLeague = new Map<string, Map<number, any>>();
+    const latestRatingsByLeague = new Map<string, Map<number, any>>();
 
-for (const code of leagues) {
-  const { data: ratingRows } = await sb
-    .from("team_ratings")
-    .select(
-      "team_id, competition_id, overall_rating, attack_rating, defense_rating, form_rating, rating_date"
-    )
-    .eq("competition_id", code)
-    .order("rating_date", { ascending: false });
+    for (const code of leagues) {
+      const { data: ratingRows } = await sb
+        .from("team_ratings")
+        .select(
+          "team_id, competition_id, overall_rating, attack_rating, defense_rating, form_rating, rating_date"
+        )
+        .eq("competition_id", code)
+        .order("rating_date", { ascending: false });
 
-  const byTeam = new Map<number, any>();
+      const byTeam = new Map<number, any>();
 
-  for (const row of ratingRows ?? []) {
-    const teamId = Number((row as any)?.team_id);
-    if (!Number.isFinite(teamId)) continue;
-    if (byTeam.has(teamId)) continue;
-    byTeam.set(teamId, row);
-  }
+      for (const row of ratingRows ?? []) {
+        const teamId = Number((row as any)?.team_id);
+        if (!Number.isFinite(teamId)) continue;
+        if (byTeam.has(teamId)) continue;
+        byTeam.set(teamId, row);
+      }
 
-  latestRatingsByLeague.set(code, byTeam);
-}
+      latestRatingsByLeague.set(code, byTeam);
+    }
 
     // ✅ 4) Liczenie + upsert odds
     let oddsUpserted = 0;
@@ -825,10 +845,6 @@ for (const code of leagues) {
       const compCode =
         typeof m?.competition_id === "string" ? String(m.competition_id) : null;
 
-      const standingsCtx = compCode
-        ? standingsByLeague.get(compCode) ?? null
-        : null;
-
       const homeId =
         typeof m?.home_team_id === "number" ? m.home_team_id : null;
       const awayId =
@@ -839,16 +855,16 @@ for (const code of leagues) {
       const awayTeamName =
         typeof m?.away_team === "string" ? m.away_team : null;
 
-        const ctx = compCode ? standingsByLeague.get(compCode) ?? null : null;
+      const ctx = compCode ? standingsByLeague.get(compCode) ?? null : null;
 
-        const latestRatings = compCode
+      const latestRatings = compCode
         ? latestRatingsByLeague.get(compCode) ?? new Map<number, any>()
         : new Map<number, any>();
 
-        const homeRatingRow = homeId != null ? latestRatings.get(homeId) ?? null : null;
-        const awayRatingRow = awayId != null ? latestRatings.get(awayId) ?? null : null;
+      const homeRatingRow = homeId != null ? latestRatings.get(homeId) ?? null : null;
+      const awayRatingRow = awayId != null ? latestRatings.get(awayId) ?? null : null;
 
-        const { lambdaH, lambdaA } = computeLambdas({
+      const { lambdaH, lambdaA } = computeLambdas({
         homeId,
         awayId,
         ctx,
@@ -865,7 +881,7 @@ for (const code of leagues) {
 
         homeFormRating: homeRatingRow?.form_rating ?? null,
         awayFormRating: awayRatingRow?.form_rating ?? null,
-        });
+      });
 
       const { p1, pX, p2 } = compute1X2FromLambdas({
         lambdaH,
@@ -1086,7 +1102,7 @@ for (const code of leagues) {
       horizon: { maxAheadDays: MAX_AHEAD_DAYS, horizonIso },
       kickoffGraceMinutes: KICKOFF_GRACE_MINUTES,
       note:
-        "Odds computed from DB matches. Queue prioritizes missing odds first, then oldest updated_at. Model uses standings as base and blends latest team_ratings when available.",
+        "Odds computed from DB matches. Queue prioritizes missing odds first, then oldest updated_at. Model uses standings as base and blends latest team_ratings when available. Added shrinkage and smoothing to reduce extreme odds.",
     });
   } catch (e: any) {
     return NextResponse.json(
