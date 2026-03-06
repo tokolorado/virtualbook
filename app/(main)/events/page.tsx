@@ -845,11 +845,6 @@ export default function EventsPage() {
                       </div>
                     </div>
 
-                    <div className="mt-3 text-xs text-neutral-500">
-                      Kursy są pobierane wyłącznie z bazy (public.odds). Auto-sync
-                      z UI jest wyłączony — przycisk “Synchronizuj kursy” jest tylko
-                      pomocniczy (normalnie robi to cron).
-                    </div>
                   </div>
                 );
               })

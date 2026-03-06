@@ -299,9 +299,6 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           </div>
         )}
 
-        <div className="mt-3 text-xs text-neutral-500">
-          Kursy są pobierane wyłącznie z bazy (public.odds).
-        </div>
       </div>
     </div>
   );
