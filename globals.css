@@ -13,3 +13,58 @@
 .animate-heartfall {
   animation: heartfall 6s linear infinite;
 }
+
+@keyframes heartburst {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+
+  100% {
+    transform: translate(
+        calc(-50% + (var(--x, 0) * 120px)),
+        calc(-50% + (var(--y, 0) * 120px))
+      )
+      scale(0.5);
+    opacity: 0;
+  }
+}
+
+.animate-heartburst {
+  animation: heartburst 0.7s ease-out forwards;
+}
+
+@keyframes surprisePulseBg {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+
+  50% {
+    transform: scale(1.02);
+    filter: brightness(1.08);
+  }
+
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+.surprise-popup-bg {
+  background:
+    radial-gradient(circle at top left, rgba(244, 114, 182, 0.28), transparent 40%),
+    radial-gradient(circle at top right, rgba(236, 72, 153, 0.22), transparent 42%),
+    radial-gradient(circle at bottom center, rgba(217, 70, 239, 0.18), transparent 48%),
+    linear-gradient(135deg, rgba(10, 10, 10, 0.96), rgba(24, 24, 27, 0.96));
+  animation: surprisePulseBg 2.4s ease-in-out infinite;
+  backdrop-filter: blur(10px);
+}
+
+.surprise-love-text {
+  color: #f9a8d4;
+  text-shadow:
+    0 0 10px rgba(244, 114, 182, 0.55),
+    0 0 22px rgba(236, 72, 153, 0.45),
+    0 0 40px rgba(217, 70, 239, 0.25);
+}
