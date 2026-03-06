@@ -829,17 +829,9 @@ export default function EventsPage() {
                         className="flex gap-2"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        {closed ? (
-                          <div className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-300">
-                            Mecz rozpoczęty — nie można już obstawiać
-                          </div>
-                        ) : (
-                          (["1", "X", "2"] as Pick[]).map((pick) => {
-                            const active = isActivePick(
-                              m.id,
-                              MARKET_ID_1X2,
-                              pick
-                            );
+                      {!closed &&
+                        (["1", "X", "2"] as Pick[]).map((pick) => {
+                          const active = isActivePick(m.id, MARKET_ID_1X2, pick);
 
                             const oddRaw = m.odds[pick];
                             const hasOdd =
@@ -894,8 +886,7 @@ export default function EventsPage() {
                                 </div>
                               </button>
                             );
-                          })
-                        )}
+                        })}
                       </div>
                     </div>
                   </div>
