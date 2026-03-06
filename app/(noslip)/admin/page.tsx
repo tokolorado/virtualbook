@@ -5,6 +5,7 @@ import { formatOdd, formatVB } from "@/lib/format";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+
 type Bet = {
   id: string;
   user_id: string;
@@ -58,6 +59,11 @@ export default function AdminPage() {
   // System health
   const [healthLoading, setHealthLoading] = useState(false);
   const [health, setHealth] = useState<SystemHealth | null>(null);
+
+  const [surpriseUserId, setSurpriseUserId] = useState("");
+  const [surpriseMessage, setSurpriseMessage] = useState("");
+  const [sendingSurprise, setSendingSurprise] = useState(false);
+  const [surpriseResult, setSurpriseResult] = useState<any>(null);
 
   const load = async () => {
     setLoading(true);
@@ -205,6 +211,51 @@ export default function AdminPage() {
     }
   };
 
+    const sendSurprise = async () => {
+    const userId = surpriseUserId.trim();
+    const message = surpriseMessage.trim();
+
+    if (!userId) {
+      alert("Podaj user ID.");
+      return;
+    }
+
+    if (!message) {
+      alert("Podaj treść niespodzianki.");
+      return;
+    }
+
+    try {
+      setSendingSurprise(true);
+      setSurpriseResult(null);
+
+      const res = await fetch("/api/admin/send-surprise", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId,
+          message,
+        }),
+      });
+
+      const data = await res.json();
+      setSurpriseResult(data);
+
+      if (!res.ok) {
+        alert(data?.error ?? "Nie udało się wysłać niespodzianki");
+        return;
+      }
+
+      alert("Niespodzianka zapisana ✅");
+    } catch (e) {
+      alert("Błąd requestu do /api/admin/send-surprise");
+    } finally {
+      setSendingSurprise(false);
+    }
+  };
+
   if (loading) return <div className="text-neutral-400">Ładowanie...</div>;
 
   if (!isAdmin) {
@@ -235,12 +286,21 @@ export default function AdminPage() {
           </p>
         </div>
 
-        <Link
-          href="/admin/logs"
-          className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm text-center"
-        >
-          Zobacz logi cronów
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/admin/logs"
+            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm"
+          >
+            Zobacz logi cronów
+          </Link>
+
+          <Link
+            href="/admin/surprises"
+            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm"
+          >
+            Wyślij niespodziankę
+          </Link>
+        </div>
       </div>
 
       {/* System Health */}
@@ -384,7 +444,8 @@ export default function AdminPage() {
             {JSON.stringify(autoResult, null, 2)}
           </pre>
         )}
-      </div>
+      </div> 
+
 
       {bets.length === 0 ? (
         <div className="text-neutral-400">Brak kuponów.</div>
