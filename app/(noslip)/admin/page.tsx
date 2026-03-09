@@ -2,9 +2,8 @@
 
 import Link from "next/link";
 import { formatOdd, formatVB } from "@/lib/format";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-
 
 type Bet = {
   id: string;
@@ -43,20 +42,67 @@ type SystemHealth = {
   };
 };
 
+type AdminUser = {
+  id: string;
+  username: string | null;
+  email: string | null;
+  balance_vb: number;
+  is_banned: boolean;
+  email_confirmation_sent_at: string | null;
+  email_confirmed_at: string | null;
+  email_status: "confirmation mail sent" | "mail confirmed";
+  created_at: string | null;
+  last_sign_in_at: string | null;
+  bets_count: number;
+  won_bets: number;
+  lost_bets: number;
+  void_bets: number;
+  profit: number;
+  roi: number;
+  winrate: number;
+};
+
+type AuditLog = {
+  id: string;
+  admin_user_id: string;
+  action: string;
+  target_user_id: string | null;
+  details: any;
+  created_at: string;
+};
+
+function fmtDate(v?: string | null) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString();
+}
+
+function fmtPct(v?: number | null) {
+  return `${Number(v ?? 0).toFixed(2)}%`;
+}
+
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [bets, setBets] = useState<Bet[]>([]);
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
-  // Auto settlement state
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
+  const [manualAmount, setManualAmount] = useState<string>("");
+
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
   const [autoLoading, setAutoLoading] = useState(false);
   const [autoResult, setAutoResult] = useState<any>(null);
 
-  // Settle stats
   const [statsLoading, setStatsLoading] = useState(false);
   const [settleStats, setSettleStats] = useState<SettleStats | null>(null);
 
-  // System health
   const [healthLoading, setHealthLoading] = useState(false);
   const [health, setHealth] = useState<SystemHealth | null>(null);
 
@@ -64,6 +110,11 @@ export default function AdminPage() {
   const [surpriseMessage, setSurpriseMessage] = useState("");
   const [sendingSurprise, setSendingSurprise] = useState(false);
   const [surpriseResult, setSurpriseResult] = useState<any>(null);
+
+  const selectedUser = useMemo(
+    () => users.find((u) => u.id === selectedUserId) ?? null,
+    [users, selectedUserId]
+  );
 
   const load = async () => {
     setLoading(true);
@@ -110,13 +161,73 @@ export default function AdminPage() {
     setLoading(false);
   };
 
+  const loadUsers = async () => {
+    try {
+      setUsersLoading(true);
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("No session token");
+
+      const res = await fetch("/api/admin/users", {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error ?? "Nie udało się pobrać użytkowników.");
+      }
+
+      const nextUsers = (data.users ?? []) as AdminUser[];
+      setUsers(nextUsers);
+
+      if (!selectedUserId && nextUsers.length) {
+        setSelectedUserId(nextUsers[0].id);
+      }
+    } catch (e) {
+      console.error(e);
+      setUsers([]);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const loadAuditLogs = async () => {
+    try {
+      setAuditLoading(true);
+
+      const { data, error } = await supabase
+        .from("admin_audit_logs")
+        .select("id,admin_user_id,action,target_user_id,details,created_at")
+        .order("created_at", { ascending: false })
+        .limit(25);
+
+      if (error) {
+        console.error(error);
+        setAuditLogs([]);
+        return;
+      }
+
+      setAuditLogs((data ?? []) as AuditLog[]);
+    } catch (e) {
+      console.error(e);
+      setAuditLogs([]);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
   const refreshStats = async () => {
     try {
       setStatsLoading(true);
-      const r = await fetch("/api/admin/settle-stats?bufferMinutes=10", { cache: "no-store" });
+      const r = await fetch("/api/admin/settle-stats?bufferMinutes=10", {
+        cache: "no-store",
+      });
       const data = await r.json();
       setSettleStats(data);
-    } catch (e) {
+    } catch {
       setSettleStats(null);
     } finally {
       setStatsLoading(false);
@@ -138,7 +249,7 @@ export default function AdminPage() {
 
       const data = await r.json();
       setHealth(data);
-    } catch (e) {
+    } catch {
       setHealth(null);
     } finally {
       setHealthLoading(false);
@@ -153,6 +264,8 @@ export default function AdminPage() {
     if (isAdmin) {
       refreshStats();
       refreshHealth();
+      loadUsers();
+      loadAuditLogs();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin]);
@@ -203,6 +316,7 @@ export default function AdminPage() {
       await load();
       await refreshStats();
       await refreshHealth();
+      await loadAuditLogs();
     } catch (e: any) {
       console.error(e);
       alert("Błąd requestu do /api/admin/run-settle");
@@ -211,7 +325,7 @@ export default function AdminPage() {
     }
   };
 
-    const sendSurprise = async () => {
+  const sendSurprise = async () => {
     const userId = surpriseUserId.trim();
     const message = surpriseMessage.trim();
 
@@ -249,10 +363,89 @@ export default function AdminPage() {
       }
 
       alert("Niespodzianka zapisana ✅");
-    } catch (e) {
+      await loadAuditLogs();
+    } catch {
       alert("Błąd requestu do /api/admin/send-surprise");
     } finally {
       setSendingSurprise(false);
+    }
+  };
+
+  const runUserAction = async (
+    action: "add_vb" | "reset_balance" | "ban_user" | "unban_user" | "delete_user"
+  ) => {
+    if (!selectedUserId) {
+      alert("Wybierz użytkownika.");
+      return;
+    }
+
+    if (action === "delete_user") {
+      const ok = confirm("Na pewno usunąć użytkownika całkowicie z bazy i auth?");
+      if (!ok) return;
+    }
+
+    if (action === "reset_balance") {
+      const ok = confirm("Wyzerować saldo użytkownika?");
+      if (!ok) return;
+    }
+
+    if (action === "ban_user") {
+      const ok = confirm("Zbanować użytkownika?");
+      if (!ok) return;
+    }
+
+    if (action === "unban_user") {
+      const ok = confirm("Odbanować użytkownika?");
+      if (!ok) return;
+    }
+
+    const normalizedAmount = manualAmount.replace(",", ".");
+    const amount = Number(normalizedAmount);
+
+    if (action === "add_vb" && (!Number.isFinite(amount) || amount <= 0)) {
+      alert("Podaj poprawną dodatnią kwotę VB.");
+      return;
+    }
+
+    try {
+      setActionLoading(action);
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("No session token");
+
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          action,
+          targetUserId: selectedUserId,
+          amount: action === "add_vb" ? amount : undefined,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data?.error ?? "Nie udało się wykonać akcji.");
+        return;
+      }
+
+      if (action === "add_vb") {
+        setManualAmount("");
+      }
+
+      alert("Akcja wykonana ✅");
+
+      await loadUsers();
+      await loadAuditLogs();
+    } catch (e: any) {
+      alert(e?.message ?? "Błąd akcji admina.");
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -277,7 +470,7 @@ export default function AdminPage() {
     (hm?.missingPayoutLedger ?? 0);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-4">
+    <div className="max-w-6xl mx-auto space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Admin — rozliczanie kuponów</h1>
@@ -303,7 +496,265 @@ export default function AdminPage() {
         </div>
       </div>
 
-      {/* System Health */}
+      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="font-semibold">Użytkownicy</div>
+            <div className="text-xs text-neutral-400 mt-1">
+              Saldo, status maila, statystyki, akcje admina i pełne usuwanie konta.
+            </div>
+          </div>
+
+          <button
+            onClick={loadUsers}
+            disabled={usersLoading}
+            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
+          >
+            {usersLoading ? "..." : "Odśwież users"}
+          </button>
+        </div>
+
+        {users.length === 0 ? (
+          <div className="text-sm text-neutral-400">
+            Brak użytkowników lub nie udało się pobrać listy.
+          </div>
+        ) : (
+          <>
+            <div className="overflow-auto rounded-2xl border border-neutral-800">
+              <table className="w-full text-sm min-w-[1200px]">
+                <thead className="bg-neutral-950/70 text-neutral-400">
+                  <tr className="border-b border-neutral-800">
+                    <th className="text-left px-4 py-3">User</th>
+                    <th className="text-left px-4 py-3">Email</th>
+                    <th className="text-right px-4 py-3">Saldo</th>
+                    <th className="text-left px-4 py-3">Mail status</th>
+                    <th className="text-left px-4 py-3">Sent at</th>
+                    <th className="text-left px-4 py-3">Confirmed at</th>
+                    <th className="text-left px-4 py-3">Ban</th>
+                    <th className="text-right px-4 py-3">Kupony</th>
+                    <th className="text-right px-4 py-3">Profit</th>
+                    <th className="text-right px-4 py-3">ROI</th>
+                    <th className="text-right px-4 py-3">Winrate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => (
+                    <tr
+                      key={u.id}
+                      onClick={() => {
+                        setSelectedUserId(u.id);
+                        setSurpriseUserId(u.id);
+                      }}
+                      className={[
+                        "border-b border-neutral-800/70 cursor-pointer hover:bg-neutral-950/40",
+                        selectedUserId === u.id ? "bg-neutral-950/50" : "",
+                      ].join(" ")}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-white">{u.username ?? "—"}</div>
+                        <div className="text-xs text-neutral-500 mt-1">{u.id}</div>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-200">{u.email ?? "—"}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-white">
+                        {formatVB(u.balance_vb)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={[
+                            "inline-flex rounded-full px-2.5 py-1 text-xs border",
+                            u.email_confirmed_at
+                              ? "border-green-500/30 bg-green-500/10 text-green-300"
+                              : "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
+                          ].join(" ")}
+                        >
+                          {u.email_status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-neutral-300">
+                        {fmtDate(u.email_confirmation_sent_at)}
+                      </td>
+                      <td className="px-4 py-3 text-neutral-300">
+                        {fmtDate(u.email_confirmed_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={[
+                            "inline-flex rounded-full px-2.5 py-1 text-xs border",
+                            u.is_banned
+                              ? "border-red-500/30 bg-red-500/10 text-red-300"
+                              : "border-neutral-700 bg-neutral-950 text-neutral-300",
+                          ].join(" ")}
+                        >
+                          {u.is_banned ? "banned" : "active"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-right text-white">{u.bets_count}</td>
+                      <td
+                        className={[
+                          "px-4 py-3 text-right font-semibold",
+                          u.profit > 0
+                            ? "text-green-400"
+                            : u.profit < 0
+                              ? "text-red-400"
+                              : "text-white",
+                        ].join(" ")}
+                      >
+                        {u.profit > 0 ? "+" : ""}
+                        {u.profit.toFixed(2)} VB
+                      </td>
+                      <td className="px-4 py-3 text-right text-white">{fmtPct(u.roi)}</td>
+                      <td className="px-4 py-3 text-right text-white">{fmtPct(u.winrate)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-4 space-y-4">
+              <div className="font-semibold">Akcje na wybranym użytkowniku</div>
+
+              {!selectedUser ? (
+                <div className="text-sm text-neutral-400">Wybierz użytkownika z tabeli.</div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+                      <div className="text-xs text-neutral-400">Username</div>
+                      <div className="mt-1 font-semibold text-white">
+                        {selectedUser.username ?? "—"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+                      <div className="text-xs text-neutral-400">Email</div>
+                      <div className="mt-1 font-semibold text-white">
+                        {selectedUser.email ?? "—"}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+                      <div className="text-xs text-neutral-400">Saldo</div>
+                      <div className="mt-1 font-semibold text-white">
+                        {formatVB(selectedUser.balance_vb)}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
+                      <div className="text-xs text-neutral-400">Status maila</div>
+                      <div className="mt-1 font-semibold text-white">
+                        {selectedUser.email_status}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-3 items-start">
+                    <div className="space-y-1">
+                      <div className="text-xs text-neutral-400">Dodaj VB</div>
+                      <input
+                        value={manualAmount}
+                        onChange={(e) => setManualAmount(e.target.value.replace(/[^\d.,-]/g, ""))}
+                        placeholder="np. 500"
+                        className="w-full px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-950 text-sm"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => runUserAction("add_vb")}
+                        disabled={actionLoading === "add_vb"}
+                        className="px-4 py-2 rounded-xl border border-neutral-800 bg-green-700 hover:bg-green-600 transition text-sm disabled:opacity-50"
+                      >
+                        {actionLoading === "add_vb" ? "..." : "Dodaj VB"}
+                      </button>
+
+                      <button
+                        onClick={() => runUserAction("reset_balance")}
+                        disabled={actionLoading === "reset_balance"}
+                        className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
+                      >
+                        {actionLoading === "reset_balance" ? "..." : "Reset balance"}
+                      </button>
+
+                      <button
+                        onClick={() =>
+                          runUserAction(selectedUser.is_banned ? "unban_user" : "ban_user")
+                        }
+                        disabled={actionLoading === "ban_user" || actionLoading === "unban_user"}
+                        className="px-4 py-2 rounded-xl border border-neutral-800 bg-yellow-700 hover:bg-yellow-600 transition text-sm disabled:opacity-50"
+                      >
+                        {actionLoading === "ban_user" || actionLoading === "unban_user"
+                          ? "..."
+                          : selectedUser.is_banned
+                            ? "Unban user"
+                            : "Ban user"}
+                      </button>
+
+                      <button
+                        onClick={() => runUserAction("delete_user")}
+                        disabled={actionLoading === "delete_user"}
+                        className="px-4 py-2 rounded-xl border border-red-900/50 bg-red-900/20 hover:bg-red-900/30 text-red-200 transition text-sm disabled:opacity-50"
+                      >
+                        {actionLoading === "delete_user" ? "..." : "Delete user"}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="font-semibold">Audit log admina</div>
+            <div className="text-xs text-neutral-400 mt-1">
+              Historia działań administracyjnych: podgląd users, dopisania VB, bany, usunięcia.
+            </div>
+          </div>
+
+          <button
+            onClick={loadAuditLogs}
+            disabled={auditLoading}
+            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
+          >
+            {auditLoading ? "..." : "Odśwież audit log"}
+          </button>
+        </div>
+
+        {auditLogs.length === 0 ? (
+          <div className="text-sm text-neutral-400">Brak wpisów audit log.</div>
+        ) : (
+          <div className="space-y-2">
+            {auditLogs.map((log) => (
+              <div
+                key={log.id}
+                className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-3"
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="font-medium text-white">{log.action}</div>
+                    <div className="text-xs text-neutral-500 mt-1">
+                      admin: {log.admin_user_id}
+                    </div>
+                    <div className="text-xs text-neutral-500">
+                      target: {log.target_user_id ?? "—"}
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-neutral-400">{fmtDate(log.created_at)}</div>
+                </div>
+
+                <pre className="mt-3 bg-black/30 border border-neutral-800 rounded-xl p-3 text-xs overflow-auto">
+                  {JSON.stringify(log.details ?? {}, null, 2)}
+                </pre>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -388,13 +839,13 @@ export default function AdminPage() {
         )}
       </div>
 
-      {/* Auto settlement + stats */}
       <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="font-semibold">Auto-rozliczanie zaległych meczów</div>
             <div className="text-xs text-neutral-400 mt-1">
-              Pobiera wyniki z football-data, zapisuje do match_results i rozlicza kupony (bez Edge/cron).
+              Pobiera wyniki z football-data, zapisuje do match_results i rozlicza kupony (bez
+              Edge/cron).
             </div>
 
             <div className="mt-2 text-xs text-neutral-300">
@@ -411,7 +862,9 @@ export default function AdminPage() {
                   <span>
                     Pozycje: <b className="text-white">{readyItems}</b>
                   </span>
-                  <span className="text-neutral-500">(buffer: {settleStats.bufferMinutes} min)</span>
+                  <span className="text-neutral-500">
+                    (buffer: {settleStats.bufferMinutes} min)
+                  </span>
                 </div>
               ) : (
                 <span className="text-neutral-400">Nie udało się pobrać statystyk.</span>
@@ -444,8 +897,43 @@ export default function AdminPage() {
             {JSON.stringify(autoResult, null, 2)}
           </pre>
         )}
-      </div> 
+      </div>
 
+      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
+        <div className="font-semibold">Wyślij niespodziankę</div>
+
+        <div className="grid grid-cols-1 gap-3">
+          <input
+            value={surpriseUserId}
+            onChange={(e) => setSurpriseUserId(e.target.value)}
+            placeholder="User ID"
+            className="px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-950 text-sm"
+          />
+
+          <textarea
+            value={surpriseMessage}
+            onChange={(e) => setSurpriseMessage(e.target.value)}
+            placeholder="Treść niespodzianki"
+            className="px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-950 text-sm min-h-[110px]"
+          />
+
+          <div>
+            <button
+              onClick={sendSurprise}
+              disabled={sendingSurprise}
+              className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
+            >
+              {sendingSurprise ? "Wysyłanie..." : "Wyślij niespodziankę"}
+            </button>
+          </div>
+        </div>
+
+        {surpriseResult && (
+          <pre className="bg-neutral-950/60 border border-neutral-800 rounded-xl p-3 text-xs overflow-auto">
+            {JSON.stringify(surpriseResult, null, 2)}
+          </pre>
+        )}
+      </div>
 
       {bets.length === 0 ? (
         <div className="text-neutral-400">Brak kuponów.</div>
@@ -525,10 +1013,12 @@ export default function AdminPage() {
           await load();
           await refreshStats();
           await refreshHealth();
+          await loadUsers();
+          await loadAuditLogs();
         }}
         className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm"
       >
-        Odśwież
+        Odśwież wszystko
       </button>
     </div>
   );
