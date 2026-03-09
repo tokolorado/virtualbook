@@ -68,3 +68,7 @@
     0 0 22px rgba(236, 72, 153, 0.45),
     0 0 40px rgba(217, 70, 239, 0.25);
 }
+
+html, body {
+  overflow-x: hidden;
+}

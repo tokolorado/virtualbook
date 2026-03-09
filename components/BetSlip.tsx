@@ -47,6 +47,9 @@ export default function BetSlip({ variant }: { variant?: string }) {
   // MOBILE drawer state
   const [open, setOpen] = useState(false);
 
+  // ✅ lokalny input stawki — naprawia problem z wpisywaniem wielu cyfr
+  const [stakeInput, setStakeInput] = useState(stake);
+
   // UX: flash on change
   const prevSlipRef = useRef<SlipItem[]>([]);
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -66,6 +69,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
   // ✅ Modal error (np. niewystarczające środki)
   const [errorModal, setErrorModal] = useState<string | null>(null);
+
+  // ✅ sync context -> local input
+  useEffect(() => {
+    setStakeInput(stake);
+  }, [stake]);
 
   useEffect(() => {
     const prev = prevSlipRef.current;
@@ -125,7 +133,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [errorModal]);
 
-  const stakeNum = useMemo(() => parseStake(stake), [stake]);
+  const stakeNum = useMemo(() => parseStake(stakeInput), [stakeInput]);
 
   const totalOdds = useMemo(() => {
     if (!slip.length) return 0;
@@ -146,12 +154,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
   const stakeError = useMemo(() => {
     if (!slip.length) return null;
-    if (stake.trim() === "") return "Wpisz stawkę.";
+    if (stakeInput.trim() === "") return "Wpisz stawkę.";
     if (stakeNum == null) return "Nieprawidłowa stawka.";
     if (stakeNum < MIN_STAKE) return `Minimalna stawka: ${MIN_STAKE}.`;
     if (stakeNum > MAX_STAKE) return `Maksymalna stawka: ${MAX_STAKE}.`;
     return null;
-  }, [stake, stakeNum, slip.length]);
+  }, [stakeInput, stakeNum, slip.length]);
 
   // ✅ blokuj postawienie jeśli w kuponie jest mecz rozpoczęty
   const hasStarted = useMemo(() => {
@@ -182,7 +190,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
     try {
       setSubmitting(true);
 
-      // ✅ TOKEN z Supabase (naprawia "Brak autoryzacji")
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token;
 
@@ -211,7 +218,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
         throw new Error(j?.error || `Błąd /api/bets (HTTP ${r.status})`);
       }
 
-      // ✅ Preferuj wartości z backendu (źródło prawdy)
       const betId = j?.betId ? String(j.betId) : null;
 
       const totalOddsServer = Number(j?.totalOdds ?? j?.total_odds);
@@ -230,8 +236,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
           ? potentialWinServer
           : Number(potentialWin ?? 0);
 
-      // ✅ NATYCHMIASTOWA AKTUALIZACJA SALDA:
-      // 1) CustomEvent z balansem (jeśli listener potrafi go użyć)
       if (Number.isFinite(balanceAfterServer)) {
         window.dispatchEvent(
           new CustomEvent("vb:refresh-balance", {
@@ -242,15 +246,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
           })
         );
       } else {
-        // jeśli backend nie zwrócił balansu, zrób klasyczne "odśwież"
         window.dispatchEvent(new Event("vb:refresh-balance"));
       }
 
-      // 2) Zostawiamy też stary sygnał refetch jako fallback (dla istniejących listenerów)
       window.dispatchEvent(new Event("vb:refresh-balance"));
 
-      // 3) Opcjonalnie: szybki refetch z klienta (żeby domknąć cache)
-      // (bezpieczne: jak nie przejdzie przez RLS, to po prostu zignorujemy)
       try {
         const uid = sessionData.session?.user?.id;
         if (uid) {
@@ -285,17 +285,16 @@ export default function BetSlip({ variant }: { variant?: string }) {
         betId,
       });
 
-      // Po sukcesie czyścimy kupon
       clearSlip();
       setStake("");
+      setStakeInput("");
       setOpen(false);
     } catch (e: any) {
       const msg = e?.message || "Nie udało się postawić kuponu.";
-      setSubmitError(msg); // zostawiamy do debug
+      setSubmitError(msg);
       setShake(true);
       window.setTimeout(() => setShake(false), 260);
 
-      // ✅ UX: mapowanie częstych błędów na czytelne komunikaty
       if (
         typeof msg === "string" &&
         msg.toLowerCase().includes("insufficient balance")
@@ -321,224 +320,220 @@ export default function BetSlip({ variant }: { variant?: string }) {
     }
   };
 
-  const Card = ({ children }: { children: React.ReactNode }) => (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-      {children}
-    </div>
-  );
+  const errorModalNode = errorModal ? (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={() => setErrorModal(null)} />
 
-  const ErrorModal = () => {
-    if (!errorModal) return null;
-
-    const close = () => setErrorModal(null);
-
-    return (
-      <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
-        <div className="absolute inset-0 bg-black/70" onClick={close} />
-
-        <div className="relative w-full max-w-md rounded-3xl border border-neutral-800 bg-neutral-950 p-5 shadow-2xl">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-lg font-semibold text-neutral-100">
-                Nie udało się postawić kuponu
-              </div>
-              <div className="text-sm text-neutral-400 mt-1">{errorModal}</div>
+      <div className="relative w-full max-w-md rounded-3xl border border-neutral-800 bg-neutral-950 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold text-neutral-100">
+              Nie udało się postawić kuponu
             </div>
-
-            <button
-              onClick={close}
-              className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 transition"
-            >
-              Zamknij
-            </button>
+            <div className="text-sm text-neutral-400 mt-1">{errorModal}</div>
           </div>
 
-          <div className="mt-4">
-            <button
-              onClick={close}
-              className="w-full rounded-xl bg-white text-black px-4 py-3 text-sm font-semibold active:scale-[0.99] transition"
-            >
-              OK
-            </button>
-          </div>
+          <button
+            onClick={() => setErrorModal(null)}
+            className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 transition"
+          >
+            Zamknij
+          </button>
+        </div>
+
+        <div className="mt-4">
+          <button
+            onClick={() => setErrorModal(null)}
+            className="w-full rounded-xl bg-white text-black px-4 py-3 text-sm font-semibold active:scale-[0.99] transition"
+          >
+            OK
+          </button>
         </div>
       </div>
-    );
-  };
+    </div>
+  ) : null;
 
-  const SuccessModal = () => {
-    if (!successModal) return null;
+  const successModalNode = successModal ? (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={() => setSuccessModal(null)} />
 
-    const close = () => setSuccessModal(null);
-
-    const onRepeat = () => {
-      restoreSlip(successModal.slipSnapshot);
-      close();
-    };
-
-    return (
-      <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
-        <div className="absolute inset-0 bg-black/70" onClick={close} />
-
-        <div className="relative w-full max-w-md rounded-3xl border border-neutral-800 bg-neutral-950 p-5 shadow-2xl">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-lg font-semibold text-neutral-100">
-                Kupon został postawiony ✅
-              </div>
-              <div className="text-sm text-neutral-400 mt-1">
-                Wirtualny zakład — bez prawdziwych pieniędzy.
-              </div>
-              {successModal.betId ? (
-                <div className="text-[11px] text-neutral-500 mt-1">
-                  ID kuponu: {successModal.betId}
-                </div>
-              ) : null}
+      <div className="relative w-full max-w-md rounded-3xl border border-neutral-800 bg-neutral-950 p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold text-neutral-100">
+              Kupon został postawiony ✅
             </div>
-
-            <button
-              onClick={close}
-              className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 transition"
-            >
-              Zamknij
-            </button>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-neutral-400">Zdarzeń</span>
-              <span className="text-neutral-100 font-semibold">
-                {successModal.itemsCount}
-              </span>
+            <div className="text-sm text-neutral-400 mt-1">
+              Wirtualny zakład — bez prawdziwych pieniędzy.
             </div>
-
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-neutral-400">Stawka</span>
-              <span className="text-neutral-100 font-semibold">
-                {formatVB(successModal.stake)}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-neutral-400">Kurs łączny</span>
-              <span className="text-neutral-100 font-semibold">
-                {formatOdd(successModal.totalOdds)}
-              </span>
-            </div>
-
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-              <div className="text-xs text-neutral-400">Potencjalna wygrana</div>
-              <div className="mt-1 text-2xl font-semibold text-white">
-                {formatVB(successModal.potentialWin)}
-              </div>
-              <div className="mt-1 text-[11px] text-neutral-500">
-                Wyliczone jako: stawka × kurs łączny
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <button
-              onClick={() => setShowTicket((v) => !v)}
-              className="w-full rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-2.5 text-sm text-neutral-200 hover:bg-neutral-800 transition"
-            >
-              {showTicket ? "Ukryj kupon" : "Zobacz kupon"}
-            </button>
-
-            {showTicket ? (
-              <div className="mt-3 space-y-2 max-h-[40vh] overflow-auto pr-1">
-                {successModal.slipSnapshot.map((it) => {
-                  const started = isStarted(it.kickoffUtc);
-                  return (
-                    <div
-                      key={`${it.matchId}__${it.market}`}
-                      className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3"
-                    >
-                      <div className="text-xs text-neutral-400">
-                        {it.competitionCode || it.league}
-                      </div>
-                      <div className="mt-1 text-sm font-semibold text-neutral-100">
-                        {it.home}{" "}
-                        <span className="text-neutral-400 font-normal">vs</span>{" "}
-                        {it.away}
-                      </div>
-                      <div className="mt-2 text-sm text-neutral-200">
-                        Rynek:{" "}
-                        <span className="text-neutral-100 font-semibold">
-                          {it.market}
-                        </span>{" "}
-                        • Typ:{" "}
-                        <span className="text-neutral-100 font-semibold">
-                          {it.pick}
-                        </span>
-                      </div>
-
-                      {!started ? (
-                        <div className="mt-1 text-sm text-neutral-300">
-                          Kurs:{" "}
-                          <span className="text-neutral-100 font-semibold">
-                            {formatOdd(it.odd)}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="mt-1 text-sm text-neutral-400">
-                          Kurs: —
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+            {successModal.betId ? (
+              <div className="text-[11px] text-neutral-500 mt-1">
+                ID kuponu: {successModal.betId}
               </div>
             ) : null}
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-2">
-            <button
-              onClick={onRepeat}
-              className="w-full rounded-xl bg-white text-black px-4 py-3 text-sm font-semibold active:scale-[0.99] transition"
-            >
-              Postaw ponownie
-            </button>
+          <button
+            onClick={() => setSuccessModal(null)}
+            className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 transition"
+          >
+            Zamknij
+          </button>
+        </div>
 
-            <button
-              onClick={close}
-              className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-200 hover:bg-neutral-900 active:scale-[0.99] transition"
-            >
-              Zamknij okienko
-            </button>
+        <div className="mt-4 space-y-3">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-neutral-400">Zdarzeń</span>
+            <span className="text-neutral-100 font-semibold">
+              {successModal.itemsCount}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-neutral-400">Stawka</span>
+            <span className="text-neutral-100 font-semibold">
+              {formatVB(successModal.stake)}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-neutral-400">Kurs łączny</span>
+            <span className="text-neutral-100 font-semibold">
+              {formatOdd(successModal.totalOdds)}
+            </span>
+          </div>
+
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+            <div className="text-xs text-neutral-400">Potencjalna wygrana</div>
+            <div className="mt-1 text-2xl font-semibold text-white">
+              {formatVB(successModal.potentialWin)}
+            </div>
+            <div className="mt-1 text-[11px] text-neutral-500">
+              Wyliczone jako: stawka × kurs łączny
+            </div>
           </div>
         </div>
-      </div>
-    );
-  };
 
-  const SlipContent = () => (
+        <div className="mt-4">
+          <button
+            onClick={() => setShowTicket((v) => !v)}
+            className="w-full rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-2.5 text-sm text-neutral-200 hover:bg-neutral-800 transition"
+          >
+            {showTicket ? "Ukryj kupon" : "Zobacz kupon"}
+          </button>
+
+          {showTicket ? (
+            <div className="mt-3 space-y-2 max-h-[40vh] overflow-auto pr-1">
+              {successModal.slipSnapshot.map((it) => {
+                const started = isStarted(it.kickoffUtc);
+                return (
+                  <div
+                    key={`${it.matchId}__${it.market}`}
+                    className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3"
+                  >
+                    <div className="text-xs text-neutral-400">
+                      {it.competitionCode || it.league}
+                    </div>
+                    <div className="mt-1 text-sm font-semibold text-neutral-100">
+                      {it.home}{" "}
+                      <span className="text-neutral-400 font-normal">vs</span>{" "}
+                      {it.away}
+                    </div>
+                    <div className="mt-2 text-sm text-neutral-200">
+                      Rynek:{" "}
+                      <span className="text-neutral-100 font-semibold">
+                        {it.market}
+                      </span>{" "}
+                      • Typ:{" "}
+                      <span className="text-neutral-100 font-semibold">
+                        {it.pick}
+                      </span>
+                    </div>
+
+                    {!started ? (
+                      <div className="mt-1 text-sm text-neutral-300">
+                        Kurs:{" "}
+                        <span className="text-neutral-100 font-semibold">
+                          {formatOdd(it.odd)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-sm text-neutral-400">Kurs: —</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-2">
+          <button
+            onClick={() => {
+              for (const it of successModal.slipSnapshot) addToSlip(it);
+              if (isMobile) setOpen(true);
+              setSuccessModal(null);
+            }}
+            className="w-full rounded-xl bg-white text-black px-4 py-3 text-sm font-semibold active:scale-[0.99] transition"
+          >
+            Postaw ponownie
+          </button>
+
+          <button
+            onClick={() => setSuccessModal(null)}
+            className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-200 hover:bg-neutral-900 active:scale-[0.99] transition"
+          >
+            Zamknij okienko
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  const slipContent = (
     <div className="space-y-4">
       <style jsx global>{`
         @keyframes vb-shake {
-          0% { transform: translateX(0); }
-          25% { transform: translateX(-6px); }
-          50% { transform: translateX(6px); }
-          75% { transform: translateX(-4px); }
-          100% { transform: translateX(0); }
+          0% {
+            transform: translateX(0);
+          }
+          25% {
+            transform: translateX(-6px);
+          }
+          50% {
+            transform: translateX(6px);
+          }
+          75% {
+            transform: translateX(-4px);
+          }
+          100% {
+            transform: translateX(0);
+          }
         }
-        .vb-shake { animation: vb-shake 0.26s ease-in-out 1; }
+        .vb-shake {
+          animation: vb-shake 0.26s ease-in-out 1;
+        }
 
         @keyframes vb-pop {
-          0% { transform: scale(1); }
-          45% { transform: scale(1.02); }
-          100% { transform: scale(1); }
+          0% {
+            transform: scale(1);
+          }
+          45% {
+            transform: scale(1.02);
+          }
+          100% {
+            transform: scale(1);
+          }
         }
-        .vb-pop { animation: vb-pop 0.45s ease-in-out 1; }
+        .vb-pop {
+          animation: vb-pop 0.45s ease-in-out 1;
+        }
       `}</style>
 
       <div className="flex items-center justify-between">
         <h3 className="text-xl font-semibold">Kupon</h3>
         <div className="text-sm text-neutral-400">{slip.length} zdarzeń</div>
       </div>
-
-      {/* Usuwamy czerwony box w UI; błędy pokazujemy w modalu */}
-      {/* submitError zostaje w stanie do debugowania */}
 
       {hasStarted ? (
         <div className="rounded-xl border border-red-400/40 bg-red-950/20 p-3 text-sm text-red-200">
@@ -647,9 +642,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
       <div>
         <label className="text-sm text-neutral-300">Stawka</label>
         <input
-          value={stake}
+          value={stakeInput}
           onChange={(e) => {
-            const v = e.target.value.replace(/[^\d.,\s]/g, "");
+            const v = e.target.value.replace(/[^\d.,]/g, "");
+            setStakeInput(v);
             setStake(v);
           }}
           inputMode="decimal"
@@ -685,7 +681,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
         </button>
 
         <button
-          onClick={() => clearSlip()}
+          onClick={() => {
+            clearSlip();
+            setStake("");
+            setStakeInput("");
+          }}
           disabled={!slip.length || submitting}
           className={[
             "w-full rounded-xl border px-4 py-3 text-sm transition",
@@ -704,16 +704,18 @@ export default function BetSlip({ variant }: { variant?: string }) {
     </div>
   );
 
+  const cardWrap = (content: React.ReactNode) => (
+    <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+      {content}
+    </div>
+  );
+
   if (isDesktop) {
     return (
       <>
-        <SuccessModal />
-        <ErrorModal />
-        <div className="sticky top-24">
-          <Card>
-            <SlipContent />
-          </Card>
-        </div>
+        {successModalNode}
+        {errorModalNode}
+        <div className="sticky top-24">{cardWrap(slipContent)}</div>
       </>
     );
   }
@@ -721,8 +723,8 @@ export default function BetSlip({ variant }: { variant?: string }) {
   if (isMobile) {
     return (
       <>
-        <SuccessModal />
-        <ErrorModal />
+        {successModalNode}
+        {errorModalNode}
 
         <div className="fixed left-0 right-0 bottom-0 z-40 border-t border-neutral-800 bg-neutral-950/95 backdrop-blur">
           <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3">
@@ -731,8 +733,8 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 Kupon ({slip.length})
               </div>
               <div className="text-xs text-neutral-400 truncate">
-                Kurs: {slip.length ? formatOdd(totalOdds) : "—"} • 
-                Potencjalna wygrana: {potentialWin != null ? formatVB(potentialWin) : "—"}
+                Kurs: {slip.length ? formatOdd(totalOdds) : "—"} • Potencjalna wygrana:{" "}
+                {potentialWin != null ? formatVB(potentialWin) : "—"}
               </div>
             </div>
 
@@ -764,9 +766,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 </button>
               </div>
 
-              <div className="p-4">
-                <SlipContent />
-              </div>
+              <div className="p-4">{slipContent}</div>
             </div>
           </div>
         ) : null}
@@ -776,11 +776,9 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
   return (
     <>
-      <SuccessModal />
-      <ErrorModal />
-      <Card>
-        <SlipContent />
-      </Card>
+      {successModalNode}
+      {errorModalNode}
+      {cardWrap(slipContent)}
     </>
   );
 }

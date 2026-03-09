@@ -722,10 +722,6 @@ export default function EventsPage() {
               );
             })}
           </div>
-
-          <div className="mt-4 text-[10px] text-neutral-500">
-            football-data.org
-          </div>
         </aside>
 
         <section className="space-y-3">
