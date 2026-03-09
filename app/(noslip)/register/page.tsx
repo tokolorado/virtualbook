@@ -1,4 +1,3 @@
-// app/(noslip)/register/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -144,9 +143,13 @@ export default function RegisterPage() {
     }
   };
 
+  const inputClass =
+    "w-full p-3 rounded-xl bg-neutral-900 text-white placeholder:text-neutral-500 border border-neutral-800 focus:border-neutral-600 outline-none transition";
+
   return (
     <div className="max-w-md mx-auto mt-20 space-y-4">
-      <h1 className="text-2xl font-semibold">Rejestracja</h1>
+      <h1 className="text-2xl font-semibold text-white">Rejestracja</h1>
+
       <p className="text-sm text-neutral-400">
         Załóż konto, żeby dostać wirtualne saldo i grać ze znajomymi.
       </p>
@@ -155,7 +158,7 @@ export default function RegisterPage() {
         type="text"
         placeholder="Imię"
         required
-        className="w-full p-3 rounded-xl bg-neutral-900 border border-neutral-800"
+        className={inputClass}
         value={firstName}
         onChange={(e) => setFirstName(e.target.value)}
       />
@@ -164,7 +167,7 @@ export default function RegisterPage() {
         type="text"
         placeholder="Nazwisko"
         required
-        className="w-full p-3 rounded-xl bg-neutral-900 border border-neutral-800"
+        className={inputClass}
         value={lastName}
         onChange={(e) => setLastName(e.target.value)}
       />
@@ -173,7 +176,7 @@ export default function RegisterPage() {
         type="text"
         placeholder="Nazwa użytkownika"
         required
-        className="w-full p-3 rounded-xl bg-neutral-900 border border-neutral-800"
+        className={inputClass}
         value={username}
         onChange={(e) => setUsername(e.target.value)}
       />
@@ -182,7 +185,7 @@ export default function RegisterPage() {
         type="email"
         placeholder="Email"
         required
-        className="w-full p-3 rounded-xl bg-neutral-900 border border-neutral-800"
+        className={inputClass}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
       />
@@ -191,7 +194,7 @@ export default function RegisterPage() {
         type="password"
         placeholder="Hasło (min. 6 znaków)"
         required
-        className="w-full p-3 rounded-xl bg-neutral-900 border border-neutral-800"
+        className={inputClass}
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
@@ -199,7 +202,7 @@ export default function RegisterPage() {
       <button
         onClick={handleSignUp}
         disabled={loading}
-        className="w-full bg-white text-black py-3 rounded-xl font-semibold disabled:opacity-60"
+        className="w-full bg-white text-black py-3 rounded-xl font-semibold disabled:opacity-60 hover:opacity-95 transition"
       >
         {loading ? "Tworzenie konta..." : "Utwórz konto"}
       </button>

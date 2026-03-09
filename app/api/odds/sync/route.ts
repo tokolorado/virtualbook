@@ -1,4 +1,3 @@
-// app/api/odds/sync/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 
@@ -11,40 +10,36 @@ const DEFAULT_LEAGUES = ["CL", "PL", "BL1", "FL1", "SA", "PD", "WC"] as const;
 // standings cache w api_cache
 const STANDINGS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h
 
-// ✅ HORYZONT: maks 30 dni do przodu
+// maks 30 dni do przodu
 const MAX_AHEAD_DAYS = 30;
 
-// ✅ “grace” dla kickoffu: żeby nie wyciąć meczów, które właśnie się zaczęły
+// grace dla kickoffu
 const KICKOFF_GRACE_MINUTES = 20;
 
-// ✅ Odświeżanie wg najstarszego updated_at (lub brak odds)
+// odświeżanie wg najstarszego updated_at
 const ODDS_TTL_HOURS_DEFAULT = 6;
 
-// ✅ Batch (żeby nie spalać limitów): ile meczów maks. na jedno wywołanie
+// batch
 const BATCH_LIMIT_DEFAULT = 30;
 
-// ✅ Lock anty-spam (60s): tylko jedno liczenie na raz
+// lock anty-spam
 const ODDS_LOCK_KEY = "lock:odds_sync";
 const ODDS_LOCK_TTL_MS = 60 * 1000;
 
 type SyncBody = {
-  // ogranicz do konkretnego dnia (UTC) – opcjonalnie
   date?: string; // YYYY-MM-DD
   leagues?: string[];
 
-  // model params
-  maxGoals?: number; // default 7
-  homeAdv?: number; // default 1.05
-  drawBoost?: number; // default 1.18
-  margin?: number; // default 1.06
+  maxGoals?: number;
+  homeAdv?: number;
+  drawBoost?: number;
+  margin?: number;
 
-  // rate-limit / pacing (tylko dla FD standings)
-  throttleMs?: number; // default 0
-  maxRetries?: number; // default 2
+  throttleMs?: number;
+  maxRetries?: number;
 
-  // batch / TTL
-  oddsTtlHours?: number; // default 6
-  batchLimit?: number; // default 30
+  oddsTtlHours?: number;
+  batchLimit?: number;
 };
 
 function jsonError(message: string, status = 400, extra?: any) {
@@ -95,7 +90,7 @@ function isRateLimitMessage(msg: unknown): msg is string {
   );
 }
 
-// ✅ globalny pacing między requestami do FD w ramach całego route call
+// globalny pacing między requestami
 let lastFdCallAt = 0;
 async function globalThrottle(throttleMs: number) {
   if (throttleMs <= 0) return;
@@ -309,7 +304,88 @@ function poissonCdf(lambda: number, k: number) {
   return clamp(s, 0, 1);
 }
 
+function getCompetitionModel(competitionId: string | null) {
+  const isCL = competitionId === "CL";
+
+  if (isCL) {
+    return {
+      // Liga Mistrzów: mniejszy wpływ “ligowych” standings, większy ratingów
+      homeAdv: 1.025,
+      standingsWeight: 0.38,
+      neutralWeight: 0.62,
+      neutralHome: 1.34,
+      neutralAway: 1.18,
+
+      overallImpact: 0.42,
+      attackHomeImpact: 0.24,
+      attackAwayImpact: 0.16,
+      defenseImpact: 0.22,
+      formImpact: 0.08,
+
+      maxOverallGap: 0.22,
+      maxAttackGap: 0.22,
+      maxDefenseGap: 0.22,
+      maxFormGap: 0.18,
+
+      minLambdaH: 0.55,
+      maxLambdaH: 2.35,
+      minLambdaA: 0.45,
+      maxLambdaA: 2.10,
+
+      drawBoost: 1.08,
+      smoothMix: 0.84,
+      base1: 0.39,
+      baseX: 0.27,
+      base2: 0.34,
+      minP1: 0.08,
+      maxP1: 0.82,
+      minPX: 0.14,
+      maxPX: 0.38,
+      minP2: 0.08,
+      maxP2: 0.82,
+    };
+  }
+
+  return {
+    // ligi krajowe: zostają blisko obecnego zachowania
+    homeAdv: 1.05,
+    standingsWeight: 0.65,
+    neutralWeight: 0.35,
+    neutralHome: 1.06,
+    neutralAway: 0.94,
+
+    overallImpact: 0.28,
+    attackHomeImpact: 0.16,
+    attackAwayImpact: 0.10,
+    defenseImpact: 0.14,
+    formImpact: 0.10,
+
+    maxOverallGap: 0.25,
+    maxAttackGap: 0.25,
+    maxDefenseGap: 0.25,
+    maxFormGap: 0.25,
+
+    minLambdaH: 0.45,
+    maxLambdaH: 2.85,
+    minLambdaA: 0.35,
+    maxLambdaA: 2.45,
+
+    drawBoost: 1.18,
+    smoothMix: 0.75,
+    base1: 0.42,
+    baseX: 0.28,
+    base2: 0.30,
+    minP1: 0.03,
+    maxP1: 0.90,
+    minPX: 0.06,
+    maxPX: 0.50,
+    minP2: 0.03,
+    maxP2: 0.90,
+  };
+}
+
 function computeLambdas(args: {
+  competitionId: string | null;
   homeId: number | null;
   awayId: number | null;
   ctx: StandingsCtx | null;
@@ -323,14 +399,42 @@ function computeLambdas(args: {
   homeFormRating: number | null;
   awayFormRating: number | null;
 }) {
-  // fallback jeśli nie mamy standings ctx lub ID teamów
+  const model = getCompetitionModel(args.competitionId);
+
+  // fallback bez standings
   if (!args.ctx || args.homeId == null || args.awayId == null) {
-    return { lambdaH: 1.32, lambdaA: 1.08 };
+    let fallbackH = args.competitionId === "CL" ? 1.34 : 1.32;
+    let fallbackA = args.competitionId === "CL" ? 1.18 : 1.08;
+
+    const homeOverall =
+      Number.isFinite(args.homeRating) ? Number(args.homeRating) : null;
+    const awayOverall =
+      Number.isFinite(args.awayRating) ? Number(args.awayRating) : null;
+
+    if (homeOverall != null && awayOverall != null) {
+      const gap = clamp(
+        (homeOverall - awayOverall) / 100,
+        -model.maxOverallGap,
+        model.maxOverallGap
+      );
+      fallbackH *= 1 + gap * model.overallImpact;
+      fallbackA *= 1 - gap * model.overallImpact;
+    }
+
+    return {
+      lambdaH: clamp(fallbackH, model.minLambdaH, model.maxLambdaH),
+      lambdaA: clamp(fallbackA, model.minLambdaA, model.maxLambdaA),
+    };
   }
 
   const h = args.ctx.byTeamId.get(args.homeId) ?? null;
   const a = args.ctx.byTeamId.get(args.awayId) ?? null;
-  if (!h || !a) return { lambdaH: 1.32, lambdaA: 1.08 };
+  if (!h || !a) {
+    return {
+      lambdaH: clamp(1.32, model.minLambdaH, model.maxLambdaH),
+      lambdaA: clamp(1.08, model.minLambdaA, model.maxLambdaA),
+    };
+  }
 
   const hAtt = h.goalsFor / h.playedGames;
   const hDef = h.goalsAgainst / h.playedGames;
@@ -342,87 +446,95 @@ function computeLambdas(args: {
 
   const base = lgGF;
 
-  // 1) baza standings
-  let lambdaH_raw = base * (hAtt / lgGF) * (aDef / lgGA) * args.homeAdv;
-  let lambdaA_raw = base * (aAtt / lgGF) * (hDef / lgGA);
+  // standings-driven raw
+  const lambdaH_raw = base * (hAtt / lgGF) * (aDef / lgGA) * model.homeAdv;
+  const lambdaA_raw = base * (aAtt / lgGF) * (hDef / lgGA);
 
-  // 2) shrinkage do średniej ligi, żeby nie robić zbyt skrajnych kursów
-  const neutralHome = base * 1.06;
-  const neutralAway = base * 0.94;
+  // shrinkage
+  let lambdaH =
+    lambdaH_raw * model.standingsWeight +
+    model.neutralHome * model.neutralWeight;
 
-  let lambdaH = lambdaH_raw * 0.65 + neutralHome * 0.35;
-  let lambdaA = lambdaA_raw * 0.65 + neutralAway * 0.35;
+  let lambdaA =
+    lambdaA_raw * model.standingsWeight +
+    model.neutralAway * model.neutralWeight;
 
-  // 3) rating overall — mniejszy wpływ niż wcześniej
-  const homeOverall = Number.isFinite(args.homeRating)
-    ? Number(args.homeRating)
-    : null;
-  const awayOverall = Number.isFinite(args.awayRating)
-    ? Number(args.awayRating)
-    : null;
+  const homeOverall =
+    Number.isFinite(args.homeRating) ? Number(args.homeRating) : null;
+  const awayOverall =
+    Number.isFinite(args.awayRating) ? Number(args.awayRating) : null;
 
   if (homeOverall != null && awayOverall != null) {
-    const overallGap = clamp((homeOverall - awayOverall) / 100, -0.25, 0.25);
-    lambdaH *= 1 + overallGap * 0.28;
-    lambdaA *= 1 - overallGap * 0.28;
+    const overallGap = clamp(
+      (homeOverall - awayOverall) / 100,
+      -model.maxOverallGap,
+      model.maxOverallGap
+    );
+    lambdaH *= 1 + overallGap * model.overallImpact;
+    lambdaA *= 1 - overallGap * model.overallImpact;
   }
 
-  // 4) attack rating
-  const homeAttack = Number.isFinite(args.homeAttackRating)
-    ? Number(args.homeAttackRating)
-    : null;
-  const awayAttack = Number.isFinite(args.awayAttackRating)
-    ? Number(args.awayAttackRating)
-    : null;
+  const homeAttack =
+    Number.isFinite(args.homeAttackRating) ? Number(args.homeAttackRating) : null;
+  const awayAttack =
+    Number.isFinite(args.awayAttackRating) ? Number(args.awayAttackRating) : null;
 
   if (homeAttack != null && awayAttack != null) {
-    const attackGap = clamp((homeAttack - awayAttack) / 100, -0.25, 0.25);
-    lambdaH *= 1 + attackGap * 0.16;
-    lambdaA *= 1 - attackGap * 0.10;
+    const attackGap = clamp(
+      (homeAttack - awayAttack) / 100,
+      -model.maxAttackGap,
+      model.maxAttackGap
+    );
+    lambdaH *= 1 + attackGap * model.attackHomeImpact;
+    lambdaA *= 1 - attackGap * model.attackAwayImpact;
   }
 
-  // 5) defense rating
-  // defense ujemne — im bliżej zera, tym lepiej
-  const homeDefense = Number.isFinite(args.homeDefenseRating)
-    ? Number(args.homeDefenseRating)
-    : null;
-  const awayDefense = Number.isFinite(args.awayDefenseRating)
-    ? Number(args.awayDefenseRating)
-    : null;
+  const homeDefense =
+    Number.isFinite(args.homeDefenseRating) ? Number(args.homeDefenseRating) : null;
+  const awayDefense =
+    Number.isFinite(args.awayDefenseRating) ? Number(args.awayDefenseRating) : null;
 
   if (homeDefense != null && awayDefense != null) {
-    const defenseGap = clamp((homeDefense - awayDefense) / 100, -0.25, 0.25);
-    lambdaH *= 1 - defenseGap * 0.14;
-    lambdaA *= 1 + defenseGap * 0.14;
+    const defenseGap = clamp(
+      (homeDefense - awayDefense) / 100,
+      -model.maxDefenseGap,
+      model.maxDefenseGap
+    );
+    lambdaH *= 1 - defenseGap * model.defenseImpact;
+    lambdaA *= 1 + defenseGap * model.defenseImpact;
   }
 
-  // 6) form rating
-  const homeForm = Number.isFinite(args.homeFormRating)
-    ? Number(args.homeFormRating)
-    : null;
-  const awayForm = Number.isFinite(args.awayFormRating)
-    ? Number(args.awayFormRating)
-    : null;
+  const homeForm =
+    Number.isFinite(args.homeFormRating) ? Number(args.homeFormRating) : null;
+  const awayForm =
+    Number.isFinite(args.awayFormRating) ? Number(args.awayFormRating) : null;
 
   if (homeForm != null && awayForm != null) {
-    const formGap = clamp((homeForm - awayForm) / 100, -0.25, 0.25);
-    lambdaH *= 1 + formGap * 0.10;
-    lambdaA *= 1 - formGap * 0.10;
+    const formGap = clamp(
+      (homeForm - awayForm) / 100,
+      -model.maxFormGap,
+      model.maxFormGap
+    );
+    lambdaH *= 1 + formGap * model.formImpact;
+    lambdaA *= 1 - formGap * model.formImpact;
   }
 
-  // 7) końcowe ograniczenie — mniej ekstremów
-  lambdaH = clamp(lambdaH, 0.45, 2.85);
-  lambdaA = clamp(lambdaA, 0.35, 2.45);
+  lambdaH = clamp(lambdaH, model.minLambdaH, model.maxLambdaH);
+  lambdaA = clamp(lambdaA, model.minLambdaA, model.maxLambdaA);
 
   return { lambdaH, lambdaA };
 }
 
 function compute1X2FromLambdas(args: {
+  competitionId: string | null;
   lambdaH: number;
   lambdaA: number;
   drawBoost: number;
   maxGoals: number;
 }) {
+  const model = getCompetitionModel(args.competitionId);
+  const effectiveDrawBoost = args.competitionId === "CL" ? model.drawBoost : args.drawBoost;
+
   const maxGoals = Math.max(3, Math.min(10, Math.floor(args.maxGoals)));
 
   const ph: number[] = [];
@@ -442,9 +554,9 @@ function compute1X2FromLambdas(args: {
   if (sumH > 0) for (let i = 0; i < ph.length; i++) ph[i] /= sumH;
   if (sumA > 0) for (let i = 0; i < pa.length; i++) pa[i] /= sumA;
 
-  let p1 = 0,
-    pX = 0,
-    p2 = 0;
+  let p1 = 0;
+  let pX = 0;
+  let p2 = 0;
 
   for (let i = 0; i < ph.length; i++) {
     for (let j = 0; j < pa.length; j++) {
@@ -455,8 +567,7 @@ function compute1X2FromLambdas(args: {
     }
   }
 
-  // mocniejszy boost na remis
-  pX *= args.drawBoost;
+  pX *= effectiveDrawBoost;
 
   let s = p1 + pX + p2;
   if (s > 0) {
@@ -465,19 +576,14 @@ function compute1X2FromLambdas(args: {
     p2 /= s;
   }
 
-  // market smoothing — mniej skrajne kursy, bliżej realnych buków
-  const base1 = 0.42;
-  const baseX = 0.28;
-  const base2 = 0.30;
-  const mix = 0.75;
+  // smoothing
+  p1 = p1 * model.smoothMix + model.base1 * (1 - model.smoothMix);
+  pX = pX * model.smoothMix + model.baseX * (1 - model.smoothMix);
+  p2 = p2 * model.smoothMix + model.base2 * (1 - model.smoothMix);
 
-  p1 = p1 * mix + base1 * (1 - mix);
-  pX = pX * mix + baseX * (1 - mix);
-  p2 = p2 * mix + base2 * (1 - mix);
-
-  p1 = clamp(p1, 0.03, 0.90);
-  pX = clamp(pX, 0.06, 0.50);
-  p2 = clamp(p2, 0.03, 0.90);
+  p1 = clamp(p1, model.minP1, model.maxP1);
+  pX = clamp(pX, model.minPX, model.maxPX);
+  p2 = clamp(p2, model.minP2, model.maxP2);
 
   const s2 = p1 + pX + p2;
   return { p1: p1 / s2, pX: pX / s2, p2: p2 / s2 };
@@ -557,7 +663,6 @@ async function tryAcquireLock(
   return { ok: true };
 }
 
-// ✅ horyzont w UTC
 function utcTodayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -595,7 +700,6 @@ export async function POST(req: Request) {
       return jsonError("date must be YYYY-MM-DD", 400, { date });
     }
 
-    // ✅ jeśli podano date, blokujemy od razu wszystko > dziś+30 dni
     if (date) {
       const today = utcTodayYYYYMMDD();
       const lastAllowed = plusDaysISODate(today, MAX_AHEAD_DAYS);
@@ -646,7 +750,6 @@ export async function POST(req: Request) {
     const nowMs = Date.now();
     const kickoffGraceMs = KICKOFF_GRACE_MINUTES * 60 * 1000;
 
-    // ✅ LOCK: jeśli UI/Cron odpali równolegle, drugi call nie liczy nic
     const lock = await tryAcquireLock(sb, nowIso);
     if (!lock.ok) {
       return NextResponse.json({
@@ -657,12 +760,10 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ twardy cutoff (żeby route NIGDY nie liczył rzeczy > dziś+30)
     const horizonIso = new Date(
       Date.now() + MAX_AHEAD_DAYS * 24 * 60 * 60 * 1000
     ).toISOString();
 
-    // ✅ 1) Wybierz kandydatów z DB (matches)
     const rangeStart = date ? isoStartOfUtcDay(date) : null;
     const rangeEnd = date ? isoStartOfNextUtcDay(date) : null;
 
@@ -691,7 +792,6 @@ export async function POST(req: Request) {
 
     const candidates = (matchCandidates ?? []) as any[];
 
-    // odetnij mecze “po czasie” (kickoff + grace)
     const eligible = candidates.filter((m) => {
       const utc = typeof m?.utc_date === "string" ? m.utc_date : null;
       if (!utc) return false;
@@ -727,9 +827,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ 2) “kolejka” wg odds.updated_at:
-    // - NULL (brak odds) first
-    // - potem najstarszy updated_at
     const { data: oddsRows, error: oReadErr } = await sb
       .from("odds")
       .select("match_id, updated_at")
@@ -780,7 +877,6 @@ export async function POST(req: Request) {
       });
     }
 
-    // ✅ 3) Standings ctx per liga
     const standingsByLeague = new Map<string, StandingsCtx | null>();
     const fetchOpts = { throttleMs, maxRetries };
 
@@ -810,7 +906,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ 3b) latest team_ratings dla lig z requestu
     const latestRatingsByLeague = new Map<string, Map<number, any>>();
 
     for (const code of leagues) {
@@ -834,7 +929,6 @@ export async function POST(req: Request) {
       latestRatingsByLeague.set(code, byTeam);
     }
 
-    // ✅ 4) Liczenie + upsert odds
     let oddsUpserted = 0;
     let processedMatches = 0;
 
@@ -865,6 +959,7 @@ export async function POST(req: Request) {
       const awayRatingRow = awayId != null ? latestRatings.get(awayId) ?? null : null;
 
       const { lambdaH, lambdaA } = computeLambdas({
+        competitionId: compCode,
         homeId,
         awayId,
         ctx,
@@ -884,6 +979,7 @@ export async function POST(req: Request) {
       });
 
       const { p1, pX, p2 } = compute1X2FromLambdas({
+        competitionId: compCode,
         lambdaH,
         lambdaA,
         drawBoost,
@@ -913,7 +1009,6 @@ export async function POST(req: Request) {
         away_team: awayTeamName,
       };
 
-      // 1x2
       {
         const b1 = bookify(p1, margin);
         const bX = bookify(pX, margin);
@@ -953,7 +1048,6 @@ export async function POST(req: Request) {
         );
       }
 
-      // ou_2_5
       {
         const bOver = bookify(pOver25, margin);
         const bUnder = bookify(pUnder25, margin);
@@ -982,7 +1076,6 @@ export async function POST(req: Request) {
         );
       }
 
-      // btts
       {
         const bYes = bookify(pBttsYes, margin);
         const bNo = bookify(pBttsNo, margin);
@@ -1011,7 +1104,6 @@ export async function POST(req: Request) {
         );
       }
 
-      // home_ou_1_5
       {
         const bOver = bookify(pHomeOver15, margin);
         const bUnder = bookify(pHomeUnder15, margin);
@@ -1040,7 +1132,6 @@ export async function POST(req: Request) {
         );
       }
 
-      // away_ou_0_5
       {
         const bOver = bookify(pAwayOver05, margin);
         const bUnder = bookify(pAwayUnder05, margin);
@@ -1102,7 +1193,7 @@ export async function POST(req: Request) {
       horizon: { maxAheadDays: MAX_AHEAD_DAYS, horizonIso },
       kickoffGraceMinutes: KICKOFF_GRACE_MINUTES,
       note:
-        "Odds computed from DB matches. Queue prioritizes missing odds first, then oldest updated_at. Model uses standings as base and blends latest team_ratings when available. Added shrinkage and smoothing to reduce extreme odds.",
+        "Odds computed from DB matches. Domestic leagues keep prior behavior, while CL uses separate tuning with lower standings influence, lower home advantage, stronger rating blend and softer draw/home-away extremes.",
     });
   } catch (e: any) {
     return NextResponse.json(

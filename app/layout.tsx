@@ -8,10 +8,14 @@ export const metadata: Metadata = {
   description: "Wirtualne zakłady piłkarskie bez prawdziwych pieniędzy",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="pl">
-      <body className="bg-neutral-950 text-white">
+    <html lang="pl" className="dark">
+      <body className="min-h-screen bg-neutral-950 text-white antialiased">
         <Topbar />
         <ClientProviders>{children}</ClientProviders>
       </body>

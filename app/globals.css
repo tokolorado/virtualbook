@@ -1,8 +1,15 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+
+  --background: #0a0a0a;
+  --foreground: #ededed;
+
+  --color-input-bg: #171717;
+  --color-input-border: #262626;
+  --color-input-text: #ffffff;
+  --color-input-placeholder: #8a8a8a;
 }
 
 @theme inline {
@@ -12,15 +19,64 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--background);
 }
 
 body {
+  min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Wymuszenie jednolitego dark UI niezależnie od systemu */
+html,
+body,
+input,
+textarea,
+select,
+button {
+  color-scheme: dark;
+}
+
+/* Formularze */
+input,
+textarea,
+select {
+  color: var(--color-input-text);
+  background-color: var(--color-input-bg);
+  border-color: var(--color-input-border);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-input-placeholder);
+  opacity: 1;
+}
+
+/* Autofill w Chrome / Edge / Safari */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: #ffffff;
+  -webkit-box-shadow: 0 0 0px 1000px #171717 inset;
+  box-shadow: 0 0 0px 1000px #171717 inset;
+  transition: background-color 9999s ease-in-out 0s;
+  caret-color: #ffffff;
+}
+
+/* Lepsza widoczność focusa */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* Zaznaczenie tekstu */
+::selection {
+  background: #3f3f46;
+  color: #ffffff;
 }
