@@ -1,3 +1,4 @@
+//app/api/users/[username]/balance-chart/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 
