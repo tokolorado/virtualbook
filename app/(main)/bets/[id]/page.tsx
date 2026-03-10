@@ -1,3 +1,4 @@
+//app/(main)/bets/[id]/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -36,6 +37,16 @@ type BetItemRow = {
 };
 
 const fmt2 = (n: number | null | undefined) => Number(n ?? 0).toFixed(2);
+
+function pickLabel(pick: string, home: string, away: string) {
+  const p = String(pick || "").toUpperCase();
+
+  if (p === "1") return home;
+  if (p === "2") return away;
+  if (p === "X") return "Remis";
+
+  return pick;
+}
 
 function badgeClass(status: string) {
   const s = String(status || "").toLowerCase();
@@ -303,7 +314,9 @@ export default function BetDetailsPage() {
                     </td>
 
                     <td className="px-4 py-3 text-neutral-200">{it.market}</td>
-                    <td className="px-4 py-3 text-neutral-200">{it.pick}</td>
+                    <td className="px-4 py-3 text-neutral-200">
+                      {pickLabel(it.pick, it.home, it.away)}
+                    </td>
 
                     <td className="px-4 py-3 text-right font-semibold text-neutral-200">
                       {fmt2(it.odds)}

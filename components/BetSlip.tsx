@@ -1,3 +1,4 @@
+//components/BetSlip.tsx
 "use client";
 
 import { formatOdd, formatVB } from "@/lib/format";
@@ -27,6 +28,19 @@ function parseStake(raw: string): number | null {
 function keyOf(it: SlipItem) {
   return `${it.matchId}__${it.market}`;
 }
+
+            function pickLabel(it: SlipItem) {
+            const p = String(it.pick || "").toUpperCase();
+
+            if (it.market === "1x2") {
+              if (p === "1") return it.home;
+              if (p === "2") return it.away;
+              if (p === "X") return "Remis";
+            }
+
+            return it.pick;
+          }
+
 
 type SuccessModalData = {
   itemsCount: number;
@@ -446,7 +460,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                       </span>{" "}
                       • Typ:{" "}
                       <span className="text-neutral-100 font-semibold">
-                        {it.pick}
+                        {pickLabel(it)}
                       </span>
                     </div>
 
@@ -553,6 +567,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         ) : (
           slip.map((it) => {
             const k = keyOf(it);
+
             const flash = flashKey === k;
             const started = isStarted(it.kickoffUtc);
 
@@ -592,7 +607,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                     <div>
                       Typ:{" "}
                       <span className="text-neutral-100 font-semibold">
-                        {it.pick}
+                        {pickLabel(it)}
                       </span>
                     </div>
                   </div>

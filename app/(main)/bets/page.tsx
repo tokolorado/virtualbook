@@ -1,3 +1,4 @@
+//app/(main)/bets/page.tsx
 "use client";
 import { formatOdd, formatVB } from "@/lib/format";
 import { useEffect, useState } from "react";
@@ -27,6 +28,17 @@ type BetItem = {
   kickoff_at: string | null;
   created_at: string;
 };
+
+
+function pickLabel(pick: string, home: string, away: string) {
+  const p = String(pick || "").toUpperCase();
+
+  if (p === "1") return home;
+  if (p === "2") return away;
+  if (p === "X") return "Remis";
+
+  return pick;
+}
 
 
 export default function BetsPage() {
@@ -219,7 +231,7 @@ export default function BetsPage() {
                           </div>
                           <div className="mt-2 flex items-center justify-between text-xs text-neutral-300">
                             <span>
-                              Typ: <b className="text-white">{it.pick}</b>
+                              Typ: <b className="text-white">{pickLabel(it.pick, it.home, it.away)}</b>
                             </span>
                             <span>
                               Kurs:{" "}

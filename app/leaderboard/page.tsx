@@ -9,6 +9,7 @@ type LeaderboardRow = {
   username: string | null;
   balance_vb: number | string | null;
   bets_count: number | string | null;
+  active_bets: number | string | null;
   won_bets: number | string | null;
   lost_bets: number | string | null;
   void_bets: number | string | null;
@@ -47,9 +48,12 @@ function sortLabel(sortBy: SortKey) {
 }
 
 function medalBg(index: number) {
-  if (index === 0) return "from-yellow-500/20 to-amber-500/5 border-yellow-500/30";
-  if (index === 1) return "from-slate-300/15 to-slate-500/5 border-slate-300/20";
-  if (index === 2) return "from-orange-500/15 to-amber-700/5 border-orange-500/25";
+  if (index === 0)
+    return "from-yellow-500/20 to-amber-500/5 border-yellow-500/30";
+  if (index === 1)
+    return "from-slate-300/15 to-slate-500/5 border-slate-300/20";
+  if (index === 2)
+    return "from-orange-500/15 to-amber-700/5 border-orange-500/25";
   return "from-neutral-800/40 to-neutral-900/20 border-neutral-800";
 }
 
@@ -67,7 +71,8 @@ function trendLabel(profit: number, roi: number, winrate: number) {
 }
 
 function trendClasses(label: string) {
-  if (label === "HOT") return "border-green-500/30 bg-green-500/10 text-green-300";
+  if (label === "HOT")
+    return "border-green-500/30 bg-green-500/10 text-green-300";
   if (label === "UP") return "border-sky-500/30 bg-sky-500/10 text-sky-300";
   if (label === "DOWN") return "border-red-500/30 bg-red-500/10 text-red-300";
   return "border-neutral-700 bg-neutral-800/40 text-neutral-300";
@@ -173,6 +178,7 @@ function PodiumCard({
   const winrate = toNum(row.winrate);
   const balance = toNum(row.balance_vb);
   const betsCount = toNum(row.bets_count);
+  const activeBets = toNum(row.active_bets);
   const rateEligible = betsCount >= MIN_BETS_FOR_RATE_RANKING;
   const trend = trendLabel(profit, roi, winrate);
 
@@ -242,10 +248,8 @@ function PodiumCard({
         </div>
 
         <div className="rounded-xl border border-neutral-800 bg-black/20 p-3">
-          <div className="text-xs text-neutral-400">Winrate</div>
-          <div className="mt-1 font-semibold text-white">
-            {rateEligible ? `${fmt(winrate)}%` : "—"}
-          </div>
+          <div className="text-xs text-neutral-400">W grze</div>
+          <div className="mt-1 font-semibold text-yellow-300">{activeBets}</div>
         </div>
       </div>
     </div>
@@ -329,7 +333,6 @@ export default function LeaderboardPage() {
   }, [rows, sortBy]);
 
   const podiumRows = sortedRows.slice(0, 3);
-  const tableRows = sortedRows.slice(3);
 
   if (loading) {
     return (
@@ -401,7 +404,9 @@ export default function LeaderboardPage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold">Top 3</h2>
-            <div className="text-xs text-neutral-500">Podium aktualnego rankingu</div>
+            <div className="text-xs text-neutral-500">
+              Podium aktualnego rankingu
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -436,6 +441,7 @@ export default function LeaderboardPage() {
                 <HeaderLabel label="Winrate" active={sortBy === "winrate"} />
               </th>
               <th className="text-right px-2 py-3 w-[70px]">Kupony</th>
+              <th className="text-right px-2 py-3 w-[70px]">W grze</th>
               <th className="text-right px-2 py-3 w-[55px]">Won</th>
               <th className="text-right px-2 py-3 w-[55px]">Lost</th>
               <th className="text-right px-2 py-3 w-[55px]">Void</th>
@@ -443,11 +449,12 @@ export default function LeaderboardPage() {
           </thead>
 
           <tbody>
-            {tableRows.map((row, index) => {
+            {sortedRows.map((row, index) => {
               const profit = toNum(row.profit);
               const roi = toNum(row.roi);
               const winrate = toNum(row.winrate);
               const betsCount = toNum(row.bets_count);
+              const activeBets = toNum(row.active_bets);
               const rateEligible = betsCount >= MIN_BETS_FOR_RATE_RANKING;
               const username = row.username?.trim() || "gracz";
               const trend = trendLabel(profit, roi, winrate);
@@ -458,7 +465,7 @@ export default function LeaderboardPage() {
                   className="border-b border-neutral-800 hover:bg-neutral-800/40 transition animate-[fadeIn_.35s_ease]"
                 >
                   <td className="px-3 py-6 text-base font-semibold text-neutral-300 align-top">
-                    {rankLabel(index + 3)}
+                    {rankLabel(index)}
                   </td>
 
                   <td className="px-3 py-6 align-top">
@@ -533,6 +540,10 @@ export default function LeaderboardPage() {
 
                   <td className="px-3 py-6 text-right text-neutral-200 align-top">
                     {betsCount}
+                  </td>
+
+                  <td className="px-3 py-6 text-right text-yellow-300 align-top font-semibold">
+                    {activeBets}
                   </td>
 
                   <td className="px-3 py-6 text-right text-green-400 align-top">
