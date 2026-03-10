@@ -19,6 +19,8 @@ const NavLink = ({ href, label }: { href: string; label: string }) => (
 export default function Topbar() {
   const { session, loading } = useSession();
   const [balanceVb, setBalanceVb] = useState<number | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,10 +64,54 @@ export default function Topbar() {
     };
   }, [session?.user?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const checkAdmin = async () => {
+      try {
+        setCheckingAdmin(true);
+
+        if (!session?.user?.id) {
+          if (!cancelled) {
+            setIsAdmin(false);
+            setCheckingAdmin(false);
+          }
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("admins")
+          .select("user_id")
+          .eq("user_id", session.user.id)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        setIsAdmin(!error && !!data);
+      } catch {
+        if (!cancelled) {
+          setIsAdmin(false);
+        }
+      } finally {
+        if (!cancelled) {
+          setCheckingAdmin(false);
+        }
+      }
+    };
+
+    checkAdmin();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id]);
+
   const logout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/login";
   };
+
+  const isLoggedIn = !!session;
 
   return (
     <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/80 backdrop-blur">
@@ -77,10 +123,11 @@ export default function Topbar() {
 
           <nav className="hidden md:flex items-center gap-1">
             <NavLink href="/events" label="Mecze" />
-            <NavLink href="/bets" label="Kupony" />
             <NavLink href="/leaderboard" label="Ranking" />
-            <NavLink href="/groups" label="Grupy" />
-            <NavLink href="/admin" label="Admin" />
+
+            {isLoggedIn ? <NavLink href="/bets" label="Kupony" /> : null}
+            {isLoggedIn ? <NavLink href="/groups" label="Grupy" /> : null}
+            {!checkingAdmin && isAdmin ? <NavLink href="/admin" label="Admin" /> : null}
           </nav>
         </div>
 
@@ -122,10 +169,10 @@ export default function Topbar() {
       <div className="md:hidden border-t border-neutral-800">
         <div className="mx-auto max-w-6xl px-2 py-2 flex items-center justify-around">
           <NavLink href="/events" label="Mecze" />
-          <NavLink href="/bets" label="Kupony" />
           <NavLink href="/leaderboard" label="Ranking" />
-          <NavLink href="/groups" label="Grupy" />
-          <NavLink href="/admin" label="Admin" />
+          {isLoggedIn ? <NavLink href="/bets" label="Kupony" /> : null}
+          {isLoggedIn ? <NavLink href="/groups" label="Grupy" /> : null}
+          {!checkingAdmin && isAdmin ? <NavLink href="/admin" label="Admin" /> : null}
         </div>
       </div>
     </header>

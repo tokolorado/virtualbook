@@ -1,4 +1,4 @@
-// (noslip)/wallet/page.tsx
+// app/(noslip)/wallet/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -94,9 +94,14 @@ export default function WalletPage() {
 
     const { data: prof } = await supabase
       .from("profiles")
-      .select("balance_vb")
+      .select("balance_vb,is_banned")
       .eq("id", userId)
       .single();
+
+    if (prof?.is_banned) {
+      router.replace("/");
+      return;
+    }
 
     setBalance(prof?.balance_vb ?? 0);
 

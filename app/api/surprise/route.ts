@@ -1,9 +1,13 @@
 // app/api/surprise/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireUser } from "@/lib/requireUser";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+
+
 
 async function getUserFromBearer(req: Request) {
   const auth = req.headers.get("authorization") || "";
@@ -24,6 +28,13 @@ async function getUserFromBearer(req: Request) {
 }
 
 export async function GET(req: Request) {
+    const guard = await requireUser(req);
+  if (!guard.ok) {
+    return NextResponse.json({ error: guard.error }, { status: guard.status });
+  }
+
+  const supabase = guard.supabase;
+  const userId = guard.userId;
   try {
     const { user, error } = await getUserFromBearer(req);
     if (error || !user) {

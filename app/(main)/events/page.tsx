@@ -138,9 +138,39 @@ export default function EventsPage() {
   const horizonCacheRef = useRef<Record<string, string | null>>({});
   const beyondCacheRef = useRef<Record<string, boolean>>({});
 
-  useEffect(() => {
-    supabase.auth.getSession().catch(() => {});
-  }, []);
+    useEffect(() => {
+      let cancelled = false;
+
+      const checkBanned = async () => {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const userId = sessionData.session?.user?.id;
+
+          if (!userId) return;
+
+          const { data: profile, error } = await supabase
+            .from("profiles")
+            .select("is_banned")
+            .eq("id", userId)
+            .maybeSingle();
+
+          if (cancelled) return;
+          if (error) return;
+
+          if (profile?.is_banned) {
+            router.replace("/");
+          }
+        } catch {
+          // ignore
+        }
+      };
+
+      checkBanned();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [router]);
 
   useEffect(() => {
     let cancelled = false;
