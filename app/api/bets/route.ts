@@ -66,7 +66,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 🔐 JWT
+    // JWT
     const authHeader = req.headers.get("authorization") || "";
     const jwt = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
@@ -85,6 +85,47 @@ export async function POST(req: Request) {
         },
       }
     );
+
+    // sprawdzenie usera z sesji
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser();
+
+    if (userErr || !user?.id) {
+      return NextResponse.json(
+        { error: "Nieprawidłowa sesja." },
+        { status: 401 }
+      );
+    }
+
+    // blokada dla zbanowanego użytkownika
+    const { data: profile, error: profileErr } = await supabase
+      .from("profiles")
+      .select("id,is_banned")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileErr) {
+      return NextResponse.json(
+        { error: profileErr.message },
+        { status: 500 }
+      );
+    }
+
+    if (!profile) {
+      return NextResponse.json(
+        { error: "Nie znaleziono profilu użytkownika." },
+        { status: 404 }
+      );
+    }
+
+    if (profile.is_banned) {
+      return NextResponse.json(
+        { error: "Twoje konto zostało zablokowane." },
+        { status: 403 }
+      );
+    }
 
     const payloadItems = body.slip.map((it) => {
       const matchId = toNumber(it.matchId);
@@ -130,7 +171,6 @@ export async function POST(req: Request) {
       potentialWin: data?.potentialWin ?? 0,
       balanceAfter: data?.balanceAfter ?? null,
     });
-
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message || "Server error" },

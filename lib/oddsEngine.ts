@@ -1,3 +1,4 @@
+//lib/oddsEngine.ts
 export type SelectionProbs = Record<string, number>;
 
 function clamp(x: number, a: number, b: number) {
