@@ -420,7 +420,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
             <div className="text-xs text-neutral-400">Potencjalna wygrana</div>
             <div className="mt-1 text-2xl font-semibold text-white">
-              {formatVB(successModal.potentialWin)} VB
+              {potentialWin ? `${formatVB(potentialWin)} VB` : "—"}
             </div>
             <div className="mt-1 text-[11px] text-neutral-500">
               Wyliczone jako: stawka × kurs łączny
@@ -649,7 +649,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         <div className="mt-2 flex items-center justify-between text-sm">
           <span className="text-neutral-300">Potencjalna wygrana</span>
           <span className="font-semibold">
-            {potentialWin != null ? formatVB(potentialWin) : "—"}
+            {potentialWin ? `${formatVB(potentialWin)} VB` : "—"}
           </span>
         </div>
       </div>
@@ -749,7 +749,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
               </div>
               <div className="text-xs text-neutral-400 truncate">
                 Kurs: {slip.length ? formatOdd(totalOdds) : "—"} • Potencjalna wygrana:{" "}
-                {potentialWin != null ? formatVB(potentialWin) : "—"}
+                {potentialWin != null ? formatVB(potentialWin) : "—"} VB
               </div>
             </div>
 
