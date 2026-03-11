@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import DayBar from "@/components/DayBar";
-import { todayLocalYYYYMMDD, localDateKeyFromISO } from "@/lib/date";
+import { addDaysLocal, todayLocalYYYYMMDD, localDateKeyFromISO } from "@/lib/date";
 import { useBetSlip } from "@/lib/BetSlipContext";
 
 type Pick = "1" | "X" | "2";
@@ -157,6 +157,7 @@ export default function EventsPage() {
     "matches"
   );
   const [enabledDates, setEnabledDates] = useState<string[]>([]);
+  const [enabledDatesLoaded, setEnabledDatesLoaded] = useState(false);
 
   const [matches, setMatches] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -259,78 +260,57 @@ export default function EventsPage() {
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+    useEffect(() => {
+      let cancelled = false;
 
-    const loadEnabledDates = async () => {
-      try {
-        const base = todayLocalYYYYMMDD();
-        const found = new Set<string>();
+      const loadEnabledDates = async () => {
+        try {
+          setEnabledDatesLoaded(false);
 
-        for (let i = 0; i < 14; i++) {
-          const day = new Date(base);
-          day.setDate(day.getDate() + i);
+          const base = todayLocalYYYYMMDD();
 
-          const yyyy = day.getFullYear();
-          const mm = String(day.getMonth() + 1).padStart(2, "0");
-          const dd = String(day.getDate()).padStart(2, "0");
-          const ymd = `${yyyy}-${mm}-${dd}`;
-
-          const r = await fetch(`/api/events?date=${encodeURIComponent(ymd)}`, {
-            cache: "no-store",
-          });
+          const r = await fetch(
+            `/api/events-enabled-dates?from=${encodeURIComponent(base)}&days=14`,
+            { cache: "no-store" }
+          );
 
           const text = await r.text();
           let payload: any = null;
+
           try {
             payload = JSON.parse(text);
           } catch {
             payload = null;
           }
 
-          if (!r.ok || !payload?.results) continue;
+          if (!r.ok || !Array.isArray(payload?.enabledDates)) {
+            throw new Error(payload?.error || "Nie udało się pobrać dni z meczami.");
+          }
 
-          let hasMatches = false;
+          if (!cancelled) {
+            const arr = [...payload.enabledDates].sort();
+            setEnabledDates(arr);
 
-          for (const item of payload.results ?? []) {
-            const fixtures = Array.isArray(item?.fixtures?.matches)
-              ? item.fixtures.matches
-              : [];
-
-            if (
-              fixtures.some(
-                (m: any) => m?.utcDate && localDateKeyFromISO(m.utcDate) === ymd
-              )
-            ) {
-              hasMatches = true;
-              break;
+            if (arr.length > 0 && !arr.includes(selectedDate)) {
+              setSelectedDate(arr[0]);
             }
+
+            setEnabledDatesLoaded(true);
           }
-
-          if (hasMatches) found.add(ymd);
-        }
-
-        if (!cancelled) {
-          const arr = Array.from(found).sort();
-          setEnabledDates(arr);
-
-          if (arr.length > 0 && !found.has(selectedDate)) {
-            setSelectedDate(arr[0]);
+        } catch {
+          if (!cancelled) {
+            setEnabledDates([]);
+            setEnabledDatesLoaded(true);
           }
         }
-      } catch {
-        if (!cancelled) {
-          setEnabledDates([]);
-        }
-      }
-    };
+      };
 
-    loadEnabledDates();
+      loadEnabledDates();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedDate]);
+      return () => {
+        cancelled = true;
+      };
+    }, []);
 
   async function manualSyncOddsForDay(args: { date: string; league: string }) {
     if (oddsSyncInFlightRef.current) return;
@@ -944,6 +924,7 @@ export default function EventsPage() {
               value={selectedDate}
               onChange={setSelectedDate}
               enabledDates={enabledDates}
+              enabledDatesLoaded={enabledDatesLoaded}
             />
 
             {!checkingAdmin && isAdmin ? (

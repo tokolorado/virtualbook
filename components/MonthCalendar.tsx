@@ -1,3 +1,4 @@
+//components/MonthCalendar.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -7,6 +8,7 @@ type Props = {
   value: string; // YYYY-MM-DD (lokalnie)
   onChange: (next: string) => void;
   enabledDates?: string[]; // dni, w których są mecze
+  enabledDatesLoaded?: boolean;
 };
 
 function parseLocalYYYYMMDD(s: string): Date {
@@ -42,6 +44,7 @@ export default function MonthCalendar({
   value,
   onChange,
   enabledDates = [],
+  enabledDatesLoaded = false,
 }: Props) {
   const selected = useMemo(() => parseLocalYYYYMMDD(value), [value]);
   const [viewMonth, setViewMonth] = useState<Date>(() => startOfMonth(selected));
@@ -119,8 +122,7 @@ export default function MonthCalendar({
           const key = cell.key;
           const isSelected = key === selectedKey;
           const isToday = key === todayKey;
-          const isEnabled =
-            enabledDates.length === 0 ? true : enabledSet.has(key);
+          const isEnabled = enabledDatesLoaded ? enabledSet.has(key) : false;
 
           return (
             <button
@@ -143,7 +145,7 @@ export default function MonthCalendar({
                   : "",
                 isToday ? "ring-1 ring-sky-500/70" : "",
                 isSelected
-                  ? "border-neutral-200 bg-white text-black hover:bg-neutral-200"
+                  ? "border-sky-400/60 bg-neutral-800 text-white ring-1 ring-sky-400/40 hover:bg-neutral-700"
                   : "",
                 !isSelected && isEnabled && cell.inMonth
                   ? "shadow-[inset_0_0_0_1px_rgba(250,204,21,0.05)]"

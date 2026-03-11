@@ -51,6 +51,24 @@ type SuccessModalData = {
   betId?: string | null;
 };
 
+
+function formatStakeInput(v: string) {
+  if (!v) return v;
+
+  const normalized = v.replace(",", ".");
+  const parts = normalized.split(".");
+
+  const int = parts[0].replace(/\D/g, "");
+  const formattedInt = Number(int).toLocaleString("pl-PL");
+
+  if (parts.length === 1) return formattedInt;
+
+  const decimals = parts[1].replace(/\D/g, "");
+  return `${formattedInt},${decimals}`;
+}
+
+
+
 export default function BetSlip({ variant }: { variant?: string }) {
   const { slip, stake, setStake, removeFromSlip, clearSlip, addToSlip } =
     useBetSlip();
@@ -88,6 +106,14 @@ export default function BetSlip({ variant }: { variant?: string }) {
   useEffect(() => {
     setStakeInput(stake);
   }, [stake]);
+
+  // ✅ auto-stawka 10 VB przy pierwszym dodaniu zdarzenia do pustego kuponu
+  useEffect(() => {
+    if (slip.length > 0 && (!stake || !String(stake).trim())) {
+      setStake("10");
+      setStakeInput(formatStakeInput("10"));
+    }
+  }, [slip.length, stake, setStake]);
 
   useEffect(() => {
     const prev = prevSlipRef.current;
@@ -188,6 +214,17 @@ export default function BetSlip({ variant }: { variant?: string }) {
     for (const it of snapshot) addToSlip(it);
     if (isMobile) setOpen(true);
   };
+
+  function addStake(amount: number) {
+    const current = parseStake(stakeInput) ?? 0;
+    const next = Math.min(current + amount, MAX_STAKE);
+
+    const formatted = formatStakeInput(String(next));
+
+    setStakeInput(formatted);
+    setStake(String(next));
+  }
+
 
   const onSubmit = async () => {
     setSubmitError(null);
@@ -420,7 +457,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
           <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
             <div className="text-xs text-neutral-400">Potencjalna wygrana</div>
             <div className="mt-1 text-2xl font-semibold text-white">
-              {potentialWin ? `${formatVB(potentialWin)} VB` : "—"}
+              {formatOdd(successModal.potentialWin)} VB
             </div>
             <div className="mt-1 text-[11px] text-neutral-500">
               Wyliczone jako: stawka × kurs łączny
@@ -656,22 +693,47 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
       <div>
         <label className="text-sm text-neutral-300">Stawka</label>
-        <input
-          value={stakeInput}
-          onChange={(e) => {
-            const v = e.target.value.replace(/[^\d.,]/g, "");
-            setStakeInput(v);
-            setStake(v);
-          }}
-          inputMode="decimal"
-          placeholder={`np. ${MIN_STAKE}`}
-          className={[
-            "mt-2 w-full rounded-xl border bg-neutral-950 px-3 py-3 text-sm outline-none transition",
-            stakeError
-              ? "border-red-400/60 focus:border-red-300"
-              : "border-neutral-800 focus:border-neutral-600",
-          ].join(" ")}
-        />
+
+        <div className="mt-2">
+          <div className="relative">
+            <input
+              value={stakeInput}
+              onChange={(e) => {
+                const raw = e.target.value.replace(/[^\d.,]/g, "");
+                const formatted = formatStakeInput(raw);
+
+                setStakeInput(formatted);
+                setStake(raw);
+              }}
+              inputMode="decimal"
+              placeholder={`np. ${MIN_STAKE}`}
+              className={[
+                "w-full rounded-xl border bg-neutral-950 px-3 py-3 pr-14 text-sm outline-none transition",
+                stakeError
+                  ? "border-red-400/60 focus:border-red-300"
+                  : "border-neutral-800 focus:border-neutral-600",
+              ].join(" ")}
+            />
+
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">
+              VB
+            </span>
+          </div>
+
+          <div className="mt-2 grid grid-cols-4 gap-2">
+            {[10, 50, 100, 500].map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => addStake(v)}
+                className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-300 hover:bg-neutral-900 transition"
+              >
+                +{v}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {stakeError ? (
           <div className="mt-2 text-xs text-red-300">{stakeError}</div>
         ) : (

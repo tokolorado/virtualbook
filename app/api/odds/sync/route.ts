@@ -1,3 +1,4 @@
+//app/api/odds/sync/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 
@@ -663,6 +664,37 @@ async function tryAcquireLock(
   return { ok: true };
 }
 
+
+async function clearEnabledDatesCache(
+  sb: ReturnType<typeof supabaseAdmin>
+) {
+  const { data, error } = await sb
+    .from("api_cache")
+    .select("key")
+    .like("key", "events_enabled_dates:%");
+
+  if (error) {
+    console.error("clearEnabledDatesCache select error:", error.message);
+    return;
+  }
+
+  const keys = (data ?? [])
+    .map((row: any) => row?.key)
+    .filter((key: unknown): key is string => typeof key === "string" && key.length > 0);
+
+  if (!keys.length) return;
+
+  const { error: deleteError } = await sb
+    .from("api_cache")
+    .delete()
+    .in("key", keys);
+
+  if (deleteError) {
+    console.error("clearEnabledDatesCache delete error:", deleteError.message);
+  }
+}
+
+
 function utcTodayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1174,6 +1206,13 @@ export async function POST(req: Request) {
       oddsUpserted += rows.length;
       processedMatches += 1;
     }
+
+    try {
+      await clearEnabledDatesCache(sb);
+    } catch (e) {
+      console.error("enabled dates cache clear failed:", e);
+    }
+
 
     return NextResponse.json({
       ok: true,

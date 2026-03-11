@@ -1,3 +1,4 @@
+//components/DayBar.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -8,6 +9,7 @@ type Props = {
   value: string; // YYYY-MM-DD
   onChange: (v: string) => void;
   enabledDates?: string[];
+  enabledDatesLoaded?: boolean;
 };
 
 function weekdayShortPL(d: Date) {
@@ -27,6 +29,7 @@ export default function DayBar({
   value,
   onChange,
   enabledDates = [],
+  enabledDatesLoaded = false,
 }: Props) {
   const [open, setOpen] = useState(false);
 
@@ -107,6 +110,7 @@ export default function DayBar({
             <MonthCalendar
               value={value}
               enabledDates={enabledDates}
+              enabledDatesLoaded={enabledDatesLoaded}
               onChange={(v) => {
                 onChange(v);
                 setOpen(false);
