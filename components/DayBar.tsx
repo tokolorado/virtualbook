@@ -1,4 +1,3 @@
-// components/DayBar.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -29,9 +28,9 @@ export default function DayBar({ value, onChange }: Props) {
     const tomorrow = addDaysLocal(today, 1);
     const yesterday = addDaysLocal(today, -1);
 
-    if (value === today) return "Today";
-    if (value === tomorrow) return "Tomorrow";
-    if (value === yesterday) return "Yesterday";
+    if (value === today) return "Dzisiaj";
+    if (value === tomorrow) return "Jutro";
+    if (value === yesterday) return "Wczoraj";
 
     const d = parseLocalYYYYMMDD(value);
     const dd = String(d.getDate()).padStart(2, "0");
@@ -90,7 +89,7 @@ export default function DayBar({ value, onChange }: Props) {
               }}
               className="mt-3 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm hover:bg-neutral-800 transition"
             >
-              Today
+              Dzisiaj
             </button>
           </div>
         </div>
