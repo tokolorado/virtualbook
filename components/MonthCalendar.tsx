@@ -1,4 +1,3 @@
-// components/MonthCalendar.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -7,6 +6,7 @@ import { formatLocalYYYYMMDD } from "@/lib/date";
 type Props = {
   value: string; // YYYY-MM-DD (lokalnie)
   onChange: (next: string) => void;
+  enabledDates?: string[]; // dni, w których są mecze
 };
 
 function parseLocalYYYYMMDD(s: string): Date {
@@ -24,18 +24,36 @@ function addMonths(d: Date, delta: number) {
 
 const WEEKDAYS = ["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"];
 const MONTHS_PL = [
-  "Styczeń","Luty","Marzec","Kwiecień","Maj","Czerwiec",
-  "Lipiec","Sierpień","Wrzesień","Październik","Listopad","Grudzień"
+  "Styczeń",
+  "Luty",
+  "Marzec",
+  "Kwiecień",
+  "Maj",
+  "Czerwiec",
+  "Lipiec",
+  "Sierpień",
+  "Wrzesień",
+  "Październik",
+  "Listopad",
+  "Grudzień",
 ];
 
-export default function MonthCalendar({ value, onChange }: Props) {
+export default function MonthCalendar({
+  value,
+  onChange,
+  enabledDates = [],
+}: Props) {
   const selected = useMemo(() => parseLocalYYYYMMDD(value), [value]);
   const [viewMonth, setViewMonth] = useState<Date>(() => startOfMonth(selected));
 
-  // jeśli user wybierze dzień z innego miesiąca, przestaw widok
+  const enabledSet = useMemo(() => new Set(enabledDates), [enabledDates]);
+
   React.useEffect(() => {
     const sm = startOfMonth(selected);
-    if (sm.getFullYear() !== viewMonth.getFullYear() || sm.getMonth() !== viewMonth.getMonth()) {
+    if (
+      sm.getFullYear() !== viewMonth.getFullYear() ||
+      sm.getMonth() !== viewMonth.getMonth()
+    ) {
       setViewMonth(sm);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -43,7 +61,6 @@ export default function MonthCalendar({ value, onChange }: Props) {
 
   const daysGrid = useMemo(() => {
     const first = startOfMonth(viewMonth);
-    // Monday=0 ... Sunday=6
     const firstWeekday = (first.getDay() + 6) % 7;
     const start = new Date(first);
     start.setDate(first.getDate() - firstWeekday);
@@ -91,7 +108,9 @@ export default function MonthCalendar({ value, onChange }: Props) {
 
       <div className="mt-3 grid grid-cols-7 gap-1 text-xs text-neutral-400">
         {WEEKDAYS.map((w) => (
-          <div key={w} className="text-center py-1">{w}</div>
+          <div key={w} className="text-center py-1">
+            {w}
+          </div>
         ))}
       </div>
 
@@ -100,29 +119,66 @@ export default function MonthCalendar({ value, onChange }: Props) {
           const key = cell.key;
           const isSelected = key === selectedKey;
           const isToday = key === todayKey;
+          const isEnabled =
+            enabledDates.length === 0 ? true : enabledSet.has(key);
 
           return (
             <button
               key={key}
-              onClick={() => onChange(key)}
+              onClick={() => {
+                if (!isEnabled) return;
+                onChange(key);
+              }}
+              disabled={!isEnabled}
               className={[
-                "h-10 rounded-xl border text-sm transition flex items-center justify-center",
+                "relative h-10 rounded-xl border text-sm transition flex items-center justify-center",
                 cell.inMonth
-                  ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
-                  : "border-neutral-900 bg-neutral-950/40 text-neutral-600 hover:bg-neutral-900/40",
-                isToday ? "ring-1 ring-neutral-500" : "",
-                isSelected ? "border-neutral-200 bg-white text-black hover:bg-neutral-200" : "",
+                  ? "border-neutral-800 bg-neutral-950"
+                  : "border-neutral-900 bg-neutral-950/30 text-neutral-600",
+                cell.inMonth && isEnabled
+                  ? "hover:bg-neutral-800 text-neutral-200"
+                  : "",
+                !isEnabled
+                  ? "opacity-45 cursor-not-allowed text-neutral-500"
+                  : "",
+                isToday ? "ring-1 ring-sky-500/70" : "",
+                isSelected
+                  ? "border-neutral-200 bg-white text-black hover:bg-neutral-200"
+                  : "",
+                !isSelected && isEnabled && cell.inMonth
+                  ? "shadow-[inset_0_0_0_1px_rgba(250,204,21,0.05)]"
+                  : "",
               ].join(" ")}
-              title={key}
+              title={
+                isEnabled
+                  ? `${key}${isToday ? " • Dzisiaj" : ""}`
+                  : `${key} • Brak meczów`
+              }
             >
-              {cell.date.getDate()}
+              <span>{cell.date.getDate()}</span>
+
+              {!isSelected && isEnabled && cell.inMonth ? (
+                <span className="absolute bottom-1 h-1.5 w-1.5 rounded-full bg-yellow-400" />
+              ) : null}
             </button>
           );
         })}
       </div>
 
-      <div className="mt-3 text-xs text-neutral-500">
-        Wybrany dzień: <span className="text-neutral-200">{value}</span>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-500">
+        <div>
+          Wybrany dzień: <span className="text-neutral-200">{value}</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-2 w-2 rounded-full bg-yellow-400" />
+          <span>Dzień z meczami</span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="inline-block h-2 w-2 rounded-full bg-neutral-600" />
+          <span>Brak meczów</span>
+        </div>
       </div>
     </div>
   );

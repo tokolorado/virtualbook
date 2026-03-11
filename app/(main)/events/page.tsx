@@ -22,6 +22,7 @@ type Match = {
   away: string;
   time: string;
   kickoffUtc: string;
+  status: string;
   odds: { "1": number | null; X: number | null; "2": number | null };
 };
 
@@ -63,6 +64,7 @@ const FREE_TIER_LEAGUES: League[] = [
 ];
 
 const MARKET_ID_1X2 = "1x2";
+const BETTING_CLOSE_BUFFER_MS = 60_000;
 
 function formatForm(form?: string | null) {
   if (!form) return null;
@@ -75,12 +77,20 @@ function formatForm(form?: string | null) {
   return parts.filter(Boolean).slice(0, 5);
 }
 
-const BETTING_CLOSE_BUFFER_MS = 60_000;
-
 function isBettingClosed(kickoffUtc: string, nowMs: number) {
   const t = Date.parse(kickoffUtc);
   if (!Number.isFinite(t)) return false;
   return nowMs >= t - BETTING_CLOSE_BUFFER_MS;
+}
+
+function isLiveStatus(status?: string | null) {
+  const s = String(status || "").toUpperCase();
+  return s === "LIVE" || s === "IN_PLAY" || s === "PAUSED";
+}
+
+function isFinishedStatus(status?: string | null) {
+  const s = String(status || "").toUpperCase();
+  return s === "FINISHED";
 }
 
 function ymdToUtcMs(ymd: string) {
@@ -96,6 +106,45 @@ function isBeyondHorizonDay(selectedYmd: string, horizonYmd: string | null) {
   return a > b;
 }
 
+function matchSortWeight(m: Match, nowMs: number) {
+  if (isLiveStatus(m.status)) return 0;
+
+  const kickoff = Date.parse(m.kickoffUtc);
+  if (!Number.isFinite(kickoff)) return 3;
+
+  if (kickoff > nowMs) return 1;
+
+  if (isFinishedStatus(m.status)) return 3;
+
+  return 2;
+}
+
+function SectionHeader({
+  title,
+  count,
+  badgeClassName,
+}: {
+  title: string;
+  count: number;
+  badgeClassName?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-semibold text-neutral-100">{title}</h3>
+        <span
+          className={[
+            "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+            badgeClassName ?? "border-neutral-800 bg-neutral-950 text-neutral-300",
+          ].join(" ")}
+        >
+          {count}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function EventsPage() {
   const router = useRouter();
   const { addToSlip, removeFromSlip, isActivePick } = useBetSlip();
@@ -104,10 +153,10 @@ export default function EventsPage() {
     todayLocalYYYYMMDD()
   );
   const [selectedLeague, setSelectedLeague] = useState<string>("ALL");
-
   const [activeRightTab, setActiveRightTab] = useState<"matches" | "table">(
     "matches"
   );
+  const [enabledDates, setEnabledDates] = useState<string[]>([]);
 
   const [matches, setMatches] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -138,39 +187,39 @@ export default function EventsPage() {
   const horizonCacheRef = useRef<Record<string, string | null>>({});
   const beyondCacheRef = useRef<Record<string, boolean>>({});
 
-    useEffect(() => {
-      let cancelled = false;
+  useEffect(() => {
+    let cancelled = false;
 
-      const checkBanned = async () => {
-        try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const userId = sessionData.session?.user?.id;
+    const checkBanned = async () => {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userId = sessionData.session?.user?.id;
 
-          if (!userId) return;
+        if (!userId) return;
 
-          const { data: profile, error } = await supabase
-            .from("profiles")
-            .select("is_banned")
-            .eq("id", userId)
-            .maybeSingle();
+        const { data: profile, error } = await supabase
+          .from("profiles")
+          .select("is_banned")
+          .eq("id", userId)
+          .maybeSingle();
 
-          if (cancelled) return;
-          if (error) return;
+        if (cancelled) return;
+        if (error) return;
 
-          if (profile?.is_banned) {
-            router.replace("/");
-          }
-        } catch {
-          // ignore
+        if (profile?.is_banned) {
+          router.replace("/");
         }
-      };
+      } catch {
+        // ignore
+      }
+    };
 
-      checkBanned();
+    checkBanned();
 
-      return () => {
-        cancelled = true;
-      };
-    }, [router]);
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   useEffect(() => {
     let cancelled = false;
@@ -209,6 +258,79 @@ export default function EventsPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadEnabledDates = async () => {
+      try {
+        const base = todayLocalYYYYMMDD();
+        const found = new Set<string>();
+
+        for (let i = 0; i < 14; i++) {
+          const day = new Date(base);
+          day.setDate(day.getDate() + i);
+
+          const yyyy = day.getFullYear();
+          const mm = String(day.getMonth() + 1).padStart(2, "0");
+          const dd = String(day.getDate()).padStart(2, "0");
+          const ymd = `${yyyy}-${mm}-${dd}`;
+
+          const r = await fetch(`/api/events?date=${encodeURIComponent(ymd)}`, {
+            cache: "no-store",
+          });
+
+          const text = await r.text();
+          let payload: any = null;
+          try {
+            payload = JSON.parse(text);
+          } catch {
+            payload = null;
+          }
+
+          if (!r.ok || !payload?.results) continue;
+
+          let hasMatches = false;
+
+          for (const item of payload.results ?? []) {
+            const fixtures = Array.isArray(item?.fixtures?.matches)
+              ? item.fixtures.matches
+              : [];
+
+            if (
+              fixtures.some(
+                (m: any) => m?.utcDate && localDateKeyFromISO(m.utcDate) === ymd
+              )
+            ) {
+              hasMatches = true;
+              break;
+            }
+          }
+
+          if (hasMatches) found.add(ymd);
+        }
+
+        if (!cancelled) {
+          const arr = Array.from(found).sort();
+          setEnabledDates(arr);
+
+          if (arr.length > 0 && !found.has(selectedDate)) {
+            setSelectedDate(arr[0]);
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setEnabledDates([]);
+        }
+      }
+    };
+
+    loadEnabledDates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate]);
 
   async function manualSyncOddsForDay(args: { date: string; league: string }) {
     if (oddsSyncInFlightRef.current) return;
@@ -332,6 +454,7 @@ export default function EventsPage() {
             away: awayName,
             time,
             kickoffUtc: utc,
+            status: String(m?.status ?? "SCHEDULED"),
             odds: {
               "1": m?.odds?.["1"] ?? null,
               X: m?.odds?.X ?? null,
@@ -346,9 +469,14 @@ export default function EventsPage() {
       );
 
       onlySelectedDay.sort((a, b) => {
+        const wa = matchSortWeight(a, nowMs);
+        const wb = matchSortWeight(b, nowMs);
+        if (wa !== wb) return wa - wb;
+
         const ta = new Date(a.kickoffUtc).getTime();
         const tb = new Date(b.kickoffUtc).getTime();
         if (ta !== tb) return ta - tb;
+
         return a.competitionName.localeCompare(b.competitionName);
       });
 
@@ -470,6 +598,7 @@ export default function EventsPage() {
               away: awayName,
               time,
               kickoffUtc: utc,
+              status: String(m?.status ?? "SCHEDULED"),
               odds: {
                 "1": m?.odds?.["1"] ?? null,
                 X: m?.odds?.X ?? null,
@@ -484,9 +613,14 @@ export default function EventsPage() {
         );
 
         onlySelectedDay.sort((a, b) => {
+          const wa = matchSortWeight(a, nowMs);
+          const wb = matchSortWeight(b, nowMs);
+          if (wa !== wb) return wa - wb;
+
           const ta = new Date(a.kickoffUtc).getTime();
           const tb = new Date(b.kickoffUtc).getTime();
           if (ta !== tb) return ta - tb;
+
           return a.competitionName.localeCompare(b.competitionName);
         });
 
@@ -511,7 +645,7 @@ export default function EventsPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedDate]);
+  }, [selectedDate, nowMs]);
 
   useEffect(() => {
     let cancelled = false;
@@ -584,9 +718,43 @@ export default function EventsPage() {
   }, [selectedLeague]);
 
   const filteredMatches = useMemo(() => {
-    if (selectedLeague === "ALL") return matches;
-    return matches.filter((m) => m.competitionCode === selectedLeague);
-  }, [matches, selectedLeague]);
+    const base =
+      selectedLeague === "ALL"
+        ? matches
+        : matches.filter((m) => m.competitionCode === selectedLeague);
+
+    return [...base].sort((a, b) => {
+      const wa = matchSortWeight(a, nowMs);
+      const wb = matchSortWeight(b, nowMs);
+      if (wa !== wb) return wa - wb;
+
+      const ta = new Date(a.kickoffUtc).getTime();
+      const tb = new Date(b.kickoffUtc).getTime();
+      if (ta !== tb) return ta - tb;
+
+      return a.competitionName.localeCompare(b.competitionName);
+    });
+  }, [matches, selectedLeague, nowMs]);
+
+  const liveMatches = useMemo(
+    () => filteredMatches.filter((m) => isLiveStatus(m.status)),
+    [filteredMatches]
+  );
+
+  const todayOpenMatches = useMemo(
+    () =>
+      filteredMatches.filter((m) => {
+        if (isLiveStatus(m.status)) return false;
+        if (isFinishedStatus(m.status)) return false;
+        return true;
+      }),
+    [filteredMatches]
+  );
+
+  const finishedMatches = useMemo(
+    () => filteredMatches.filter((m) => isFinishedStatus(m.status)),
+    [filteredMatches]
+  );
 
   const goMatch = (m: Match) => {
     const qs = new URLSearchParams();
@@ -650,6 +818,116 @@ export default function EventsPage() {
     };
   }, [selectedTeam, matches]);
 
+  const renderMatchCard = (m: Match) => {
+    const live = isLiveStatus(m.status);
+    const finished = isFinishedStatus(m.status);
+    const closed = live || finished || isBettingClosed(m.kickoffUtc, nowMs);
+
+    return (
+      <div
+        key={m.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => goMatch(m)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            goMatch(m);
+          }
+        }}
+        className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 hover:bg-neutral-900/60 transition cursor-pointer"
+      >
+        <div className="text-xs text-neutral-400 flex items-center justify-between gap-2">
+          <span>{m.leagueLine}</span>
+
+          {live ? (
+            <span className="text-[11px] px-2 py-1 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 font-semibold animate-pulse">
+              LIVE
+            </span>
+          ) : finished ? (
+            <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-300">
+              Zakończony
+            </span>
+          ) : closed ? (
+            <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-amber-300">
+              Mecz rozpoczęty • zakłady zamknięte
+            </span>
+          ) : (
+            <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-300">
+              Pre-match
+            </span>
+          )}
+        </div>
+
+        <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-lg font-semibold">
+            {m.home} <span className="text-neutral-400 font-normal">vs</span>{" "}
+            {m.away}
+          </div>
+
+          <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+            {!closed &&
+              (["1", "X", "2"] as Pick[]).map((pick) => {
+                const active = isActivePick(m.id, MARKET_ID_1X2, pick);
+
+                const oddRaw = m.odds[pick];
+                const hasOdd =
+                  typeof oddRaw === "number" &&
+                  Number.isFinite(oddRaw) &&
+                  oddRaw > 0;
+                const odd = hasOdd ? oddRaw : 0;
+
+                return (
+                  <button
+                    key={pick}
+                    disabled={!hasOdd}
+                    onClick={() => {
+                      if (!hasOdd) return;
+
+                      if (active) {
+                        removeFromSlip(m.id, MARKET_ID_1X2);
+                        return;
+                      }
+
+                      addToSlip({
+                        matchId: m.id,
+                        competitionCode: m.competitionCode,
+                        league: m.competitionName,
+                        home: m.home,
+                        away: m.away,
+                        market: MARKET_ID_1X2,
+                        pick,
+                        odd,
+                        kickoffUtc: m.kickoffUtc,
+                      });
+                    }}
+                    className={[
+                      "w-20 rounded-xl border px-3 py-2 text-sm transition",
+                      !hasOdd
+                        ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
+                        : active
+                          ? "border-neutral-200 bg-white text-black"
+                          : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800",
+                    ].join(" ")}
+                    title={
+                      hasOdd
+                        ? `Kurs: ${formatOdd(odd)}`
+                        : "Brak kursu w bazie (odds)"
+                    }
+                  >
+                    <div className="leading-none font-semibold">{pick}</div>
+                    <div className="text-[11px] opacity-80 mt-1">
+                      {hasOdd ? formatOdd(odd) : "—"}
+                    </div>
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
@@ -662,7 +940,11 @@ export default function EventsPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <DayBar value={selectedDate} onChange={setSelectedDate} />
+            <DayBar
+              value={selectedDate}
+              onChange={setSelectedDate}
+              enabledDates={enabledDates}
+            />
 
             {!checkingAdmin && isAdmin ? (
               <button
@@ -814,110 +1096,46 @@ export default function EventsPage() {
                 ) : null}
               </div>
             ) : (
-              filteredMatches.map((m) => {
-                const closed = isBettingClosed(m.kickoffUtc, nowMs);
-
-                return (
-                  <div
-                    key={m.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => goMatch(m)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        goMatch(m);
-                      }
-                    }}
-                    className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 hover:bg-neutral-900/60 transition cursor-pointer"
-                  >
-                    <div className="text-xs text-neutral-400 flex items-center justify-between gap-2">
-                      <span>{m.leagueLine}</span>
-                      {closed ? (
-                        <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-amber-300">
-                          Mecz rozpoczęty • zakłady zamknięte
-                        </span>
-                      ) : (
-                        <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-300">
-                          Pre-match
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="text-lg font-semibold">
-                        {m.home}{" "}
-                        <span className="text-neutral-400 font-normal">vs</span>{" "}
-                        {m.away}
-                      </div>
-
-                      <div
-                        className="flex gap-2"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                      {!closed &&
-                        (["1", "X", "2"] as Pick[]).map((pick) => {
-                          const active = isActivePick(m.id, MARKET_ID_1X2, pick);
-
-                            const oddRaw = m.odds[pick];
-                            const hasOdd =
-                              typeof oddRaw === "number" &&
-                              Number.isFinite(oddRaw) &&
-                              oddRaw > 0;
-                            const odd = hasOdd ? oddRaw : 0;
-
-                            return (
-                              <button
-                                key={pick}
-                                disabled={!hasOdd}
-                                onClick={() => {
-                                  if (!hasOdd) return;
-
-                                  if (active) {
-                                    removeFromSlip(m.id, MARKET_ID_1X2);
-                                    return;
-                                  }
-
-                                  addToSlip({
-                                    matchId: m.id,
-                                    competitionCode: m.competitionCode,
-                                    league: m.competitionName,
-                                    home: m.home,
-                                    away: m.away,
-                                    market: MARKET_ID_1X2,
-                                    pick,
-                                    odd,
-                                    kickoffUtc: m.kickoffUtc,
-                                  });
-                                }}
-                                className={[
-                                  "w-20 rounded-xl border px-3 py-2 text-sm transition",
-                                  !hasOdd
-                                    ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
-                                    : active
-                                      ? "border-neutral-200 bg-white text-black"
-                                      : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800",
-                                ].join(" ")}
-                                title={
-                                  hasOdd
-                                    ? `Kurs: ${formatOdd(odd)}`
-                                    : "Brak kursu w bazie (odds)"
-                                }
-                              >
-                                <div className="leading-none font-semibold">
-                                  {pick}
-                                </div>
-                                <div className="text-[11px] opacity-80 mt-1">
-                                  {hasOdd ? formatOdd(odd) : "—"}
-                                </div>
-                              </button>
-                            );
-                        })}
-                      </div>
+              <div className="space-y-4">
+                {liveMatches.length > 0 ? (
+                  <div className="space-y-3">
+                    <SectionHeader
+                      title="LIVE"
+                      count={liveMatches.length}
+                      badgeClassName="border-red-500/30 bg-red-500/10 text-red-300"
+                    />
+                    <div className="space-y-3">
+                      {liveMatches.map((m) => renderMatchCard(m))}
                     </div>
                   </div>
-                );
-              })
+                ) : null}
+
+                {todayOpenMatches.length > 0 ? (
+                  <div className="space-y-3">
+                    <SectionHeader
+                      title="Pre-match"
+                      count={todayOpenMatches.length}
+                      badgeClassName="border-neutral-800 bg-neutral-950 text-neutral-300"
+                    />
+                    <div className="space-y-3">
+                      {todayOpenMatches.map((m) => renderMatchCard(m))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {finishedMatches.length > 0 ? (
+                  <div className="space-y-3">
+                    <SectionHeader
+                      title="Zakończone"
+                      count={finishedMatches.length}
+                      badgeClassName="border-neutral-800 bg-neutral-950 text-neutral-300"
+                    />
+                    <div className="space-y-3">
+                      {finishedMatches.map((m) => renderMatchCard(m))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             )
           ) : null}
 
