@@ -3,10 +3,10 @@
 
 import { formatOdd } from "@/lib/format";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import DayBar from "@/components/DayBar";
-import { addDaysLocal, todayLocalYYYYMMDD, localDateKeyFromISO } from "@/lib/date";
+import { todayLocalYYYYMMDD, localDateKeyFromISO } from "@/lib/date";
 import { useBetSlip } from "@/lib/BetSlipContext";
 
 type Pick = "1" | "X" | "2";
@@ -119,6 +119,75 @@ function matchSortWeight(m: Match, nowMs: number) {
   return 2;
 }
 
+function sortMatches(list: Match[], nowMs: number) {
+  return [...list].sort((a, b) => {
+    const wa = matchSortWeight(a, nowMs);
+    const wb = matchSortWeight(b, nowMs);
+    if (wa !== wb) return wa - wb;
+
+    const ta = new Date(a.kickoffUtc).getTime();
+    const tb = new Date(b.kickoffUtc).getTime();
+    if (ta !== tb) return ta - tb;
+
+    return a.competitionName.localeCompare(b.competitionName);
+  });
+}
+
+function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
+  const all: Match[] = [];
+
+  for (const item of payload?.results ?? []) {
+    const league = item?.league;
+    const code = league?.code;
+    if (!code) continue;
+
+    const fixtures = item?.fixtures;
+    const competitionName =
+      fixtures?.competition?.name ?? league?.name ?? code;
+
+    const list = Array.isArray(fixtures?.matches) ? fixtures.matches : [];
+
+    for (const m of list) {
+      const utc = m?.utcDate;
+      if (!utc) continue;
+
+      const time = new Date(utc).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+
+      const homeId =
+        typeof m?.homeTeam?.id === "number" ? m.homeTeam.id : null;
+      const awayId =
+        typeof m?.awayTeam?.id === "number" ? m.awayTeam.id : null;
+
+      const homeName = m?.homeTeam?.name ?? "Home";
+      const awayName = m?.awayTeam?.name ?? "Away";
+
+      all.push({
+        id: String(m.id),
+        competitionCode: code,
+        competitionName,
+        leagueLine: `${competitionName} • ${time}`,
+        homeId,
+        awayId,
+        home: homeName,
+        away: awayName,
+        time,
+        kickoffUtc: utc,
+        status: String(m?.status ?? "SCHEDULED"),
+        odds: {
+          "1": m?.odds?.["1"] ?? null,
+          X: m?.odds?.X ?? null,
+          "2": m?.odds?.["2"] ?? null,
+        },
+      });
+    }
+  }
+
+  return all.filter((m) => localDateKeyFromISO(m.kickoffUtc) === selectedDate);
+}
+
 function SectionHeader({
   title,
   count,
@@ -145,6 +214,32 @@ function SectionHeader({
   );
 }
 
+function LoadingMatchesSkeleton() {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div
+          key={index}
+          className="animate-pulse rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="h-3 w-40 rounded bg-neutral-800" />
+            <div className="h-6 w-24 rounded-full bg-neutral-800" />
+          </div>
+
+          <div className="mt-4 h-6 w-64 rounded bg-neutral-800" />
+
+          <div className="mt-4 flex gap-2">
+            <div className="h-12 w-20 rounded-xl bg-neutral-800" />
+            <div className="h-12 w-20 rounded-xl bg-neutral-800" />
+            <div className="h-12 w-20 rounded-xl bg-neutral-800" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function EventsPage() {
   const router = useRouter();
   const { addToSlip, removeFromSlip, isActivePick } = useBetSlip();
@@ -156,12 +251,14 @@ export default function EventsPage() {
   const [activeRightTab, setActiveRightTab] = useState<"matches" | "table">(
     "matches"
   );
+
   const [enabledDates, setEnabledDates] = useState<string[]>([]);
   const [enabledDatesLoaded, setEnabledDatesLoaded] = useState(false);
 
   const [matches, setMatches] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [matchesError, setMatchesError] = useState<string | null>(null);
+  const [matchesLoadedAt, setMatchesLoadedAt] = useState<string | null>(null);
 
   const [beyondHorizon, setBeyondHorizon] = useState(false);
   const [horizonYmd, setHorizonYmd] = useState<string | null>(null);
@@ -176,6 +273,8 @@ export default function EventsPage() {
   const [checkingAdmin, setCheckingAdmin] = useState(true);
 
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [reloadKey, setReloadKey] = useState(0);
+
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 10_000);
     return () => window.clearInterval(id);
@@ -187,6 +286,59 @@ export default function EventsPage() {
   const matchesCacheRef = useRef<Record<string, Match[]>>({});
   const horizonCacheRef = useRef<Record<string, string | null>>({});
   const beyondCacheRef = useRef<Record<string, boolean>>({});
+
+  const selectedLeagueLabel = useMemo(() => {
+    if (selectedLeague === "ALL") return "Wszystkie ligi";
+    return (
+      FREE_TIER_LEAGUES.find((x) => x.code === selectedLeague)?.name ??
+      selectedLeague
+    );
+  }, [selectedLeague]);
+
+  const loadEnabledDates = useCallback(async (preferredDate?: string) => {
+    try {
+      setEnabledDatesLoaded(false);
+
+      const base = todayLocalYYYYMMDD();
+
+      const r = await fetch(
+        `/api/events-enabled-dates?from=${encodeURIComponent(base)}&days=14`,
+        { cache: "no-store" }
+      );
+
+      const text = await r.text();
+      let payload: any = null;
+
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = null;
+      }
+
+      if (!r.ok || !Array.isArray(payload?.enabledDates)) {
+        throw new Error(payload?.error || "Nie udało się pobrać dni z meczami.");
+      }
+
+      const arr = [...payload.enabledDates].sort();
+      setEnabledDates(arr);
+
+      if (arr.length > 0 && preferredDate && !arr.includes(preferredDate)) {
+        setSelectedDate(arr[0]);
+      }
+
+      setEnabledDatesLoaded(true);
+    } catch {
+      setEnabledDates([]);
+      setEnabledDatesLoaded(true);
+    }
+  }, []);
+
+  const refreshCurrentDay = () => {
+    delete matchesCacheRef.current[selectedDate];
+    delete horizonCacheRef.current[selectedDate];
+    delete beyondCacheRef.current[selectedDate];
+    setReloadKey((v) => v + 1);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -260,57 +412,9 @@ export default function EventsPage() {
     };
   }, []);
 
-    useEffect(() => {
-      let cancelled = false;
-
-      const loadEnabledDates = async () => {
-        try {
-          setEnabledDatesLoaded(false);
-
-          const base = todayLocalYYYYMMDD();
-
-          const r = await fetch(
-            `/api/events-enabled-dates?from=${encodeURIComponent(base)}&days=14`,
-            { cache: "no-store" }
-          );
-
-          const text = await r.text();
-          let payload: any = null;
-
-          try {
-            payload = JSON.parse(text);
-          } catch {
-            payload = null;
-          }
-
-          if (!r.ok || !Array.isArray(payload?.enabledDates)) {
-            throw new Error(payload?.error || "Nie udało się pobrać dni z meczami.");
-          }
-
-          if (!cancelled) {
-            const arr = [...payload.enabledDates].sort();
-            setEnabledDates(arr);
-
-            if (arr.length > 0 && !arr.includes(selectedDate)) {
-              setSelectedDate(arr[0]);
-            }
-
-            setEnabledDatesLoaded(true);
-          }
-        } catch {
-          if (!cancelled) {
-            setEnabledDates([]);
-            setEnabledDatesLoaded(true);
-          }
-        }
-      };
-
-      loadEnabledDates();
-
-      return () => {
-        cancelled = true;
-      };
-    }, []);
+  useEffect(() => {
+    void loadEnabledDates(selectedDate);
+  }, [loadEnabledDates, selectedDate]);
 
   async function manualSyncOddsForDay(args: { date: string; league: string }) {
     if (oddsSyncInFlightRef.current) return;
@@ -356,9 +460,7 @@ export default function EventsPage() {
 
       const rr = await fetch(
         `/api/events?date=${encodeURIComponent(selectedDate)}`,
-        {
-          cache: "no-store",
-        }
+        { cache: "no-store" }
       );
 
       const text2 = await rr.text();
@@ -389,76 +491,16 @@ export default function EventsPage() {
 
         setBeyondHorizon(true);
         setMatches([]);
+        setMatchesLoadedAt(new Date().toISOString());
         setMatchesError(null);
+        await loadEnabledDates(selectedDate);
         return;
       }
 
-      const all: Match[] = [];
-
-      for (const item of payload.results ?? []) {
-        const league = item?.league;
-        const code = league?.code;
-        if (!code) continue;
-
-        const fixtures = item?.fixtures;
-        const competitionName =
-          fixtures?.competition?.name ?? league?.name ?? code;
-
-        const list = Array.isArray(fixtures?.matches) ? fixtures.matches : [];
-
-        for (const m of list) {
-          const utc = m?.utcDate;
-          if (!utc) continue;
-
-          const time = new Date(utc).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-
-          const homeId =
-            typeof m?.homeTeam?.id === "number" ? m.homeTeam.id : null;
-          const awayId =
-            typeof m?.awayTeam?.id === "number" ? m.awayTeam.id : null;
-
-          const homeName = m?.homeTeam?.name ?? "Home";
-          const awayName = m?.awayTeam?.name ?? "Away";
-
-          all.push({
-            id: String(m.id),
-            competitionCode: code,
-            competitionName,
-            leagueLine: `${competitionName} • ${time}`,
-            homeId,
-            awayId,
-            home: homeName,
-            away: awayName,
-            time,
-            kickoffUtc: utc,
-            status: String(m?.status ?? "SCHEDULED"),
-            odds: {
-              "1": m?.odds?.["1"] ?? null,
-              X: m?.odds?.X ?? null,
-              "2": m?.odds?.["2"] ?? null,
-            },
-          });
-        }
-      }
-
-      const onlySelectedDay = all.filter(
-        (m) => localDateKeyFromISO(m.kickoffUtc) === selectedDate
+      const onlySelectedDay = sortMatches(
+        buildMatchesFromPayload(payload, selectedDate),
+        Date.now()
       );
-
-      onlySelectedDay.sort((a, b) => {
-        const wa = matchSortWeight(a, nowMs);
-        const wb = matchSortWeight(b, nowMs);
-        if (wa !== wb) return wa - wb;
-
-        const ta = new Date(a.kickoffUtc).getTime();
-        const tb = new Date(b.kickoffUtc).getTime();
-        if (ta !== tb) return ta - tb;
-
-        return a.competitionName.localeCompare(b.competitionName);
-      });
 
       matchesCacheRef.current[selectedDate] = onlySelectedDay;
       horizonCacheRef.current[selectedDate] = apiHorizonTo;
@@ -466,6 +508,8 @@ export default function EventsPage() {
 
       setBeyondHorizon(false);
       setMatches(onlySelectedDay);
+      setMatchesLoadedAt(new Date().toISOString());
+      await loadEnabledDates(selectedDate);
     } finally {
       setSyncingOdds(false);
       oddsSyncInFlightRef.current = false;
@@ -532,77 +576,16 @@ export default function EventsPage() {
 
             setBeyondHorizon(true);
             setMatches([]);
+            setMatchesLoadedAt(new Date().toISOString());
             setMatchesError(null);
           }
           return;
         }
 
-        const all: Match[] = [];
-
-        for (const item of payload.results ?? []) {
-          const league = item?.league;
-          const code = league?.code;
-          if (!code) continue;
-
-          const fixtures = item?.fixtures;
-          const competitionName =
-            fixtures?.competition?.name ?? league?.name ?? code;
-
-          const list = Array.isArray(fixtures?.matches) ? fixtures.matches : [];
-
-          for (const m of list) {
-            const utc = m?.utcDate;
-            if (!utc) continue;
-
-            const time = new Date(utc).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
-
-            const homeId =
-              typeof m?.homeTeam?.id === "number" ? m.homeTeam.id : null;
-            const awayId =
-              typeof m?.awayTeam?.id === "number" ? m.awayTeam.id : null;
-
-            const homeName = m?.homeTeam?.name ?? "Home";
-            const awayName = m?.awayTeam?.name ?? "Away";
-
-            all.push({
-              id: String(m.id),
-              competitionCode: code,
-              competitionName,
-              leagueLine: `${competitionName} • ${time}`,
-              homeId,
-              awayId,
-              home: homeName,
-              away: awayName,
-              time,
-              kickoffUtc: utc,
-              status: String(m?.status ?? "SCHEDULED"),
-              odds: {
-                "1": m?.odds?.["1"] ?? null,
-                X: m?.odds?.X ?? null,
-                "2": m?.odds?.["2"] ?? null,
-              },
-            });
-          }
-        }
-
-        const onlySelectedDay = all.filter(
-          (m) => localDateKeyFromISO(m.kickoffUtc) === selectedDate
+        const onlySelectedDay = sortMatches(
+          buildMatchesFromPayload(payload, selectedDate),
+          Date.now()
         );
-
-        onlySelectedDay.sort((a, b) => {
-          const wa = matchSortWeight(a, nowMs);
-          const wb = matchSortWeight(b, nowMs);
-          if (wa !== wb) return wa - wb;
-
-          const ta = new Date(a.kickoffUtc).getTime();
-          const tb = new Date(b.kickoffUtc).getTime();
-          if (ta !== tb) return ta - tb;
-
-          return a.competitionName.localeCompare(b.competitionName);
-        });
 
         if (!cancelled) {
           matchesCacheRef.current[selectedDate] = onlySelectedDay;
@@ -611,6 +594,7 @@ export default function EventsPage() {
 
           setBeyondHorizon(false);
           setMatches(onlySelectedDay);
+          setMatchesLoadedAt(new Date().toISOString());
         }
       } catch (e: any) {
         if (!cancelled) {
@@ -622,10 +606,11 @@ export default function EventsPage() {
     };
 
     load();
+
     return () => {
       cancelled = true;
     };
-  }, [selectedDate, nowMs]);
+  }, [selectedDate, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -692,6 +677,7 @@ export default function EventsPage() {
     };
 
     loadStandings();
+
     return () => {
       cancelled = true;
     };
@@ -703,17 +689,7 @@ export default function EventsPage() {
         ? matches
         : matches.filter((m) => m.competitionCode === selectedLeague);
 
-    return [...base].sort((a, b) => {
-      const wa = matchSortWeight(a, nowMs);
-      const wb = matchSortWeight(b, nowMs);
-      if (wa !== wb) return wa - wb;
-
-      const ta = new Date(a.kickoffUtc).getTime();
-      const tb = new Date(b.kickoffUtc).getTime();
-      if (ta !== tb) return ta - tb;
-
-      return a.competitionName.localeCompare(b.competitionName);
-    });
+    return sortMatches(base, nowMs);
   }, [matches, selectedLeague, nowMs]);
 
   const liveMatches = useMemo(
@@ -721,7 +697,7 @@ export default function EventsPage() {
     [filteredMatches]
   );
 
-  const todayOpenMatches = useMemo(
+  const openMatches = useMemo(
     () =>
       filteredMatches.filter((m) => {
         if (isLiveStatus(m.status)) return false;
@@ -735,6 +711,9 @@ export default function EventsPage() {
     () => filteredMatches.filter((m) => isFinishedStatus(m.status)),
     [filteredMatches]
   );
+
+  const openSectionTitle =
+    selectedDate === todayLocalYYYYMMDD() ? "Dziś" : "Zaplanowane";
 
   const goMatch = (m: Match) => {
     const qs = new URLSearchParams();
@@ -911,21 +890,35 @@ export default function EventsPage() {
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <h1 className="text-2xl font-semibold">Mecze</h1>
             <p className="text-neutral-400 mt-1">
-              Wybierz dzień — pokażemy mecze tylko z wybranego dnia
+              Wybierz dzień i ligę — pokażemy mecze tylko z wybranego dnia.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <DayBar
               value={selectedDate}
               onChange={setSelectedDate}
               enabledDates={enabledDates}
               enabledDatesLoaded={enabledDatesLoaded}
             />
+
+            <button
+              onClick={refreshCurrentDay}
+              disabled={loadingMatches}
+              className={[
+                "rounded-xl border px-3 py-2 text-sm transition",
+                loadingMatches
+                  ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
+                  : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800",
+              ].join(" ")}
+              title="Odśwież listę meczów dla wybranego dnia"
+            >
+              {loadingMatches ? "Odświeżam…" : "Odśwież mecze"}
+            </button>
 
             {!checkingAdmin && isAdmin ? (
               <button
@@ -950,6 +943,30 @@ export default function EventsPage() {
           </div>
         </div>
 
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+            Liga: <span className="font-semibold text-white">{selectedLeagueLabel}</span>
+          </span>
+
+          <span className="rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-red-300">
+            LIVE: {liveMatches.length}
+          </span>
+
+          <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+            {openSectionTitle}: {openMatches.length}
+          </span>
+
+          <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+            Zakończone: {finishedMatches.length}
+          </span>
+
+          {matchesLoadedAt ? (
+            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-500">
+              Ostatnia aktualizacja: {new Date(matchesLoadedAt).toLocaleTimeString()}
+            </span>
+          ) : null}
+        </div>
+
         <div className="mt-3 flex items-center gap-2 text-sm">
           {loadingMatches ? (
             <span className="text-neutral-400">Ładowanie…</span>
@@ -958,19 +975,14 @@ export default function EventsPage() {
           ) : (
             <span className="text-neutral-400">
               Wyświetlasz:{" "}
-              <span className="text-white font-semibold">
-                {selectedLeague === "ALL"
-                  ? "Wszystkie ligi"
-                  : FREE_TIER_LEAGUES.find((x) => x.code === selectedLeague)
-                      ?.name ?? selectedLeague}
-              </span>{" "}
+              <span className="text-white font-semibold">{selectedLeagueLabel}</span>{" "}
               • {filteredMatches.length} meczów
             </span>
           )}
         </div>
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[160px_1fr] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[170px_1fr] gap-6">
         <aside className="h-fit lg:sticky lg:top-24 rounded-2xl border border-neutral-800 bg-neutral-900/40 p-3">
           <div className="text-sm font-semibold">Ligi</div>
 
@@ -1056,19 +1068,29 @@ export default function EventsPage() {
             <div className="mt-2 text-xs text-neutral-400">
               {selectedLeague === "ALL"
                 ? "Wyświetlasz mecze ze wszystkich lig. Tabela dostępna po wybraniu ligi."
-                : `Liga: ${
-                    FREE_TIER_LEAGUES.find((x) => x.code === selectedLeague)
-                      ?.name ?? selectedLeague
-                  }`}
+                : `Liga: ${selectedLeagueLabel}`}
             </div>
           </div>
 
           {activeRightTab === "matches" ? (
-            !loadingMatches && !matchesError && filteredMatches.length === 0 ? (
+            loadingMatches ? (
+              <LoadingMatchesSkeleton />
+            ) : matchesError ? (
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-6">
+                <div className="text-sm font-medium text-red-200">Nie udało się pobrać meczów</div>
+                <div className="mt-1 text-sm text-red-300">{matchesError}</div>
+                <button
+                  onClick={refreshCurrentDay}
+                  className="mt-4 rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-neutral-200 transition hover:bg-neutral-900"
+                >
+                  Spróbuj ponownie
+                </button>
+              </div>
+            ) : filteredMatches.length === 0 ? (
               <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
                 {beyondHorizon
-                  ? "Jeszcze brak meczów, wkrótce się pojawią :) Dodajemy mecze na 2 tygodnie do przodu"
-                  : "Brak meczów dla wybranego dnia / filtra ligi."}
+                  ? "Jeszcze brak meczów, wkrótce się pojawią 🙂 Dodajemy mecze na 2 tygodnie do przodu."
+                  : "Brak meczów dla wybranego dnia lub filtra ligi."}
 
                 {beyondHorizon && horizonYmd ? (
                   <div className="text-xs text-neutral-500 mt-2">
@@ -1091,15 +1113,15 @@ export default function EventsPage() {
                   </div>
                 ) : null}
 
-                {todayOpenMatches.length > 0 ? (
+                {openMatches.length > 0 ? (
                   <div className="space-y-3">
                     <SectionHeader
-                      title="Pre-match"
-                      count={todayOpenMatches.length}
+                      title={openSectionTitle}
+                      count={openMatches.length}
                       badgeClassName="border-neutral-800 bg-neutral-950 text-neutral-300"
                     />
                     <div className="space-y-3">
-                      {todayOpenMatches.map((m) => renderMatchCard(m))}
+                      {openMatches.map((m) => renderMatchCard(m))}
                     </div>
                   </div>
                 ) : null}
@@ -1130,7 +1152,7 @@ export default function EventsPage() {
                 Ładowanie tabeli…
               </div>
             ) : standingsError ? (
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 text-red-300">
+              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-red-300">
                 {standingsError}
               </div>
             ) : standings?.rows?.length ? (
@@ -1149,43 +1171,26 @@ export default function EventsPage() {
                   <div className="text-xs text-neutral-500">Tabela</div>
                 </div>
 
-                <div className="mt-3">
+                <div className="mt-3 overflow-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-neutral-400 border-b border-neutral-800">
-                        <th className="text-left font-medium py-2 pr-2 w-10">
-                          #
-                        </th>
-                        <th className="text-left font-medium py-2 pr-2">
-                          Drużyna
-                        </th>
-                        <th className="text-right font-medium py-2 pl-2 w-10">
-                          M
-                        </th>
-                        <th className="text-right font-medium py-2 pl-2 w-10">
-                          Z
-                        </th>
-                        <th className="text-right font-medium py-2 pl-2 w-10">
-                          R
-                        </th>
-                        <th className="text-right font-medium py-2 pl-2 w-10">
-                          P
-                        </th>
-                        <th className="text-right font-medium py-2 pl-2 w-12">
-                          PKT
-                        </th>
-                        <th className="text-right font-medium py-2 pl-2 w-12">
-                          RB
-                        </th>
-                        <th className="text-left font-medium py-2 pl-2 w-44">
-                          Forma
-                        </th>
+                        <th className="text-left font-medium py-2 pr-2 w-10">#</th>
+                        <th className="text-left font-medium py-2 pr-2">Drużyna</th>
+                        <th className="text-right font-medium py-2 pl-2 w-10">M</th>
+                        <th className="text-right font-medium py-2 pl-2 w-10">Z</th>
+                        <th className="text-right font-medium py-2 pl-2 w-10">R</th>
+                        <th className="text-right font-medium py-2 pl-2 w-10">P</th>
+                        <th className="text-right font-medium py-2 pl-2 w-12">PKT</th>
+                        <th className="text-right font-medium py-2 pl-2 w-12">RB</th>
+                        <th className="text-left font-medium py-2 pl-2 w-44">Forma</th>
                       </tr>
                     </thead>
 
                     <tbody>
                       {standings.rows.map((r) => {
                         const form = formatForm(r.form);
+
                         return (
                           <tr
                             key={r.teamId}
@@ -1205,30 +1210,14 @@ export default function EventsPage() {
                                 : "hover:bg-neutral-900/40",
                             ].join(" ")}
                           >
-                            <td className="py-2 pr-2 text-neutral-300">
-                              {r.position}
-                            </td>
-                            <td className="py-2 pr-2 text-neutral-200">
-                              {r.teamName}
-                            </td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">
-                              {r.playedGames}
-                            </td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">
-                              {r.won}
-                            </td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">
-                              {r.draw}
-                            </td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">
-                              {r.lost}
-                            </td>
-                            <td className="py-2 pl-2 text-right text-neutral-100 font-semibold">
-                              {r.points}
-                            </td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">
-                              {r.goalDifference}
-                            </td>
+                            <td className="py-2 pr-2 text-neutral-300">{r.position}</td>
+                            <td className="py-2 pr-2 text-neutral-200">{r.teamName}</td>
+                            <td className="py-2 pl-2 text-right text-neutral-300">{r.playedGames}</td>
+                            <td className="py-2 pl-2 text-right text-neutral-300">{r.won}</td>
+                            <td className="py-2 pl-2 text-right text-neutral-300">{r.draw}</td>
+                            <td className="py-2 pl-2 text-right text-neutral-300">{r.lost}</td>
+                            <td className="py-2 pl-2 text-right text-neutral-100 font-semibold">{r.points}</td>
+                            <td className="py-2 pl-2 text-right text-neutral-300">{r.goalDifference}</td>
                             <td className="py-2 pl-2 text-neutral-300">
                               {form?.length ? (
                                 <div className="flex gap-1">
@@ -1271,8 +1260,7 @@ export default function EventsPage() {
                         <div className="text-[11px] text-neutral-400 mt-1">
                           M: {selectedTeam.playedGames} • Z: {selectedTeam.won} •
                           R: {selectedTeam.draw} • P: {selectedTeam.lost} • PKT:{" "}
-                          {selectedTeam.points} • RB:{" "}
-                          {selectedTeam.goalDifference}
+                          {selectedTeam.points} • RB: {selectedTeam.goalDifference}
                         </div>
                       </div>
 
@@ -1293,9 +1281,7 @@ export default function EventsPage() {
                       </div>
 
                       <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-2">
-                        <div className="text-[11px] text-neutral-400">
-                          Win/Draw/Loss
-                        </div>
+                        <div className="text-[11px] text-neutral-400">Win/Draw/Loss</div>
                         <div className="text-sm font-semibold">
                           {selectedTeamInsights.winRate.toFixed(0)}% /{" "}
                           {selectedTeamInsights.drawRate.toFixed(0)}% /{" "}
@@ -1329,9 +1315,7 @@ export default function EventsPage() {
                         </div>
                         <div className="text-sm font-semibold mt-0.5">
                           {selectedTeamInsights.todayMatch.home}{" "}
-                          <span className="text-neutral-400 font-normal">
-                            vs
-                          </span>{" "}
+                          <span className="text-neutral-400 font-normal">vs</span>{" "}
                           {selectedTeamInsights.todayMatch.away} •{" "}
                           {selectedTeamInsights.todayMatch.time}
                         </div>

@@ -99,6 +99,15 @@ function toIntOrNull(v: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+// ✅ wyliczenie goli w 2. połowie
+function secondHalfOrNull(full: any, half: any): number | null {
+  const ft = toIntOrNull(full);
+  const ht = toIntOrNull(half);
+  if (ft == null || ht == null) return null;
+  const diff = ft - ht;
+  return Number.isFinite(diff) && diff >= 0 ? diff : null;
+}
+
 function normalizeStatus(raw: string): string {
   const s = (raw || "").toUpperCase().trim();
 
@@ -157,7 +166,6 @@ function canonicalCompetitionName(code: string): string | null {
   return map[code] ?? null;
 }
 
-
 async function upsertOneMatchFromFD(sb: any, match: any, nowIso: string) {
   const matchId = Number(match?.id);
   if (!Number.isFinite(matchId)) return { updated: false, matchId: null, status: null };
@@ -181,10 +189,9 @@ async function upsertOneMatchFromFD(sb: any, match: any, nowIso: string) {
   const homeTeam = typeof match?.homeTeam?.name === "string" ? match.homeTeam.name : null;
   const awayTeam = typeof match?.awayTeam?.name === "string" ? match.awayTeam.name : null;
 
-
-    const homeTeamId =
+  const homeTeamId =
     Number.isFinite(Number(match?.homeTeam?.id)) ? Number(match.homeTeam.id) : null;
-    const awayTeamId =
+  const awayTeamId =
     Number.isFinite(Number(match?.awayTeam?.id)) ? Number(match.awayTeam.id) : null;
 
   const bettingClosed = computeBettingClosed(status, utcDateIso);
@@ -233,6 +240,9 @@ async function upsertOneMatchFromFD(sb: any, match: any, nowIso: string) {
 
   const canWriteScoreToResults = status === "FINISHED"; // analogicznie jak wyżej (dopisz IN_PLAY/PAUSED jeśli chcesz live)
 
+  const shHome = canWriteScoreToResults ? secondHalfOrNull(ftHome, htHome) : null;
+  const shAway = canWriteScoreToResults ? secondHalfOrNull(ftAway, htAway) : null;
+
   const resRow: any = {
     match_id: matchId,
     status,
@@ -240,8 +250,10 @@ async function upsertOneMatchFromFD(sb: any, match: any, nowIso: string) {
     away_score: canWriteScoreToResults ? ftAway : null,
     ht_home_score: canWriteScoreToResults ? htHome : null,
     ht_away_score: canWriteScoreToResults ? htAway : null,
-    sh_home_score: null,
-    sh_away_score: null,
+    sh_home_score: shHome,
+    sh_away_score: shAway,
+    home_goals_ht: canWriteScoreToResults ? htHome : null,
+    away_goals_ht: canWriteScoreToResults ? htAway : null,
     started_at: startedAt,
     finished_at: finishedAt,
     updated_at: nowIso,
@@ -279,9 +291,12 @@ async function fetchExistingMatchIds(sb: any, ids: number[]) {
   return existing;
 }
 
-
 export async function POST(req: Request) {
+  let logId: number | null = null;
+
   try {
+    logId = await cronLogStart("results", "github-actions");
+
     const secret = process.env.CRON_SECRET;
     if (secret) {
       const got = req.headers.get("x-cron-secret");
@@ -302,6 +317,13 @@ export async function POST(req: Request) {
       const dateFrom = url.searchParams.get("dateFrom");
       const dateTo = url.searchParams.get("dateTo");
       if (!dateFrom || !dateTo) {
+        await cronLogSuccess(logId, {
+          ok: false,
+          job: "results",
+          mode: "range",
+          reason: "missing_date_range",
+        });
+
         return jsonError("Missing dateFrom/dateTo (YYYY-MM-DD)", 400, {
           example: "?mode=range&dateFrom=2026-03-02&dateTo=2026-03-03",
         });
@@ -314,46 +336,59 @@ export async function POST(req: Request) {
         { maxRetries: 2 }
       );
 
-        const list = Array.isArray(data?.matches) ? data.matches : [];
-        const slice = list.slice(0, limit);
+      const list = Array.isArray(data?.matches) ? data.matches : [];
+      const slice = list.slice(0, limit);
 
-        // ✅ 1) wyciągamy ID z paczki
-        const incomingIds: number[] = [];
-        for (const m of slice) {
+      // ✅ 1) wyciągamy ID z paczki
+      const incomingIds: number[] = [];
+      for (const m of slice) {
         const id = Number((m as any)?.id);
         if (Number.isFinite(id)) incomingIds.push(id);
-        }
+      }
 
-        // ✅ 2) sprawdzamy co już mamy w DB
-        const existingIds = await fetchExistingMatchIds(sb, incomingIds);
+      // ✅ 2) sprawdzamy co już mamy w DB
+      const existingIds = await fetchExistingMatchIds(sb, incomingIds);
 
-        let inserted = 0; // realnie: nowe mecze dodane
-        let finished = 0;
-        let skippedUnsupported = 0;
-        let skippedExisting = 0;
+      let inserted = 0; // realnie: nowe mecze dodane
+      let finished = 0;
+      let skippedUnsupported = 0;
+      let skippedExisting = 0;
 
-        for (const m of slice) {
+      for (const m of slice) {
         const matchId = Number((m as any)?.id);
         if (!Number.isFinite(matchId)) continue;
 
         // jeśli już jest w DB → nie dotykamy, żeby nie robić upsertów
         if (existingIds.has(matchId)) {
-            skippedExisting++;
-            continue;
+          skippedExisting++;
+          continue;
         }
 
         const r = await upsertOneMatchFromFD(sb, m, nowIso);
 
         if ((r as any).skipped === "unsupported_competition") {
-            skippedUnsupported++;
-            continue;
+          skippedUnsupported++;
+          continue;
         }
 
         if (r.updated) {
-            inserted++;
-            if (r.status === "FINISHED") finished++;
+          inserted++;
+          if (r.status === "FINISHED") finished++;
         }
-        }
+      }
+
+      await cronLogSuccess(logId, {
+        ok: true,
+        job: "results",
+        mode: "range",
+        dateFrom,
+        dateTo,
+        inserted,
+        finished,
+        skippedExisting,
+        skippedUnsupported,
+        limit,
+      });
 
       return NextResponse.json({
         ok: true,
@@ -416,6 +451,10 @@ export async function POST(req: Request) {
 
       const ftHome = toIntOrNull(match?.score?.fullTime?.home);
       const ftAway = toIntOrNull(match?.score?.fullTime?.away);
+      const htHome = toIntOrNull(match?.score?.halfTime?.home);
+      const htAway = toIntOrNull(match?.score?.halfTime?.away);
+      const shHome = secondHalfOrNull(ftHome, htHome);
+      const shAway = secondHalfOrNull(ftAway, htAway);
 
       const compCode = String(match?.competition?.code ?? "").toUpperCase().trim();
       const compName = canonicalCompetitionName(compCode);
@@ -423,9 +462,9 @@ export async function POST(req: Request) {
       const homeTeam = typeof match?.homeTeam?.name === "string" ? match.homeTeam.name : null;
       const awayTeam = typeof match?.awayTeam?.name === "string" ? match.awayTeam.name : null;
       const homeTeamId =
-      Number.isFinite(Number(match?.homeTeam?.id)) ? Number(match.homeTeam.id) : null;
+        Number.isFinite(Number(match?.homeTeam?.id)) ? Number(match.homeTeam.id) : null;
       const awayTeamId =
-     Number.isFinite(Number(match?.awayTeam?.id)) ? Number(match.awayTeam.id) : null;
+        Number.isFinite(Number(match?.awayTeam?.id)) ? Number(match.awayTeam.id) : null;
 
       const bettingClosed = computeBettingClosed(status, utcDateIso);
 
@@ -459,9 +498,6 @@ export async function POST(req: Request) {
       if (uErr) return jsonError(uErr.message, 500, { stage: "matches_update", matchId });
 
       // match_results upsert
-      const htHome = toIntOrNull(match?.score?.halfTime?.home);
-      const htAway = toIntOrNull(match?.score?.halfTime?.away);
-
       const startedAt = utcDateIso;
       const finishedAt = status === "FINISHED" ? nowIso : null;
 
@@ -474,8 +510,10 @@ export async function POST(req: Request) {
         away_score: canWriteScoreToResults ? ftAway : null,
         ht_home_score: canWriteScoreToResults ? htHome : null,
         ht_away_score: canWriteScoreToResults ? htAway : null,
-        sh_home_score: null,
-        sh_away_score: null,
+        sh_home_score: canWriteScoreToResults ? shHome : null,
+        sh_away_score: canWriteScoreToResults ? shAway : null,
+        home_goals_ht: canWriteScoreToResults ? htHome : null,
+        away_goals_ht: canWriteScoreToResults ? htAway : null,
         started_at: startedAt,
         finished_at: finishedAt,
         updated_at: nowIso,
@@ -487,6 +525,18 @@ export async function POST(req: Request) {
       if (before !== "FINISHED" && status === "FINISHED") becameFinished++;
       processed++;
     }
+
+    await cronLogSuccess(logId, {
+      ok: true,
+      job: "results",
+      mode: "stale-timed",
+      processed,
+      becameFinished,
+      skippedUnsupported,
+      limit,
+      cutoffIso,
+      recentSyncIso,
+    });
 
     return NextResponse.json({
       ok: true,
@@ -502,6 +552,7 @@ export async function POST(req: Request) {
       horizon: { days: horizonDays, dateYmd: horizonDateYmd },
     });
   } catch (e: any) {
+    await cronLogError(logId, e);
     return NextResponse.json(
       { error: e?.message || "Server error", extra: { stage: "catch" } },
       { status: 500 }

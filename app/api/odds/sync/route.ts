@@ -27,6 +27,28 @@ const BATCH_LIMIT_DEFAULT = 30;
 const ODDS_LOCK_KEY = "lock:odds_sync";
 const ODDS_LOCK_TTL_MS = 60 * 1000;
 
+// model udziału goli w połowach
+const FIRST_HALF_SHARE = 0.45;
+
+// selekcje dla exact_score — muszą być zgodne z katalogiem market_selection_catalog
+const EXACT_SCORE_SELECTIONS = [
+  "0:0",
+  "1:0",
+  "2:0",
+  "2:1",
+  "1:1",
+  "0:1",
+  "0:2",
+  "1:2",
+  "3:0",
+  "3:1",
+  "2:2",
+  "1:3",
+  "0:3",
+  "3:2",
+  "2:3",
+] as const;
+
 type SyncBody = {
   date?: string; // YYYY-MM-DD
   leagues?: string[];
@@ -305,6 +327,14 @@ function poissonCdf(lambda: number, k: number) {
   return clamp(s, 0, 1);
 }
 
+function exactScoreProb(lambdaH: number, lambdaA: number, hg: number, ag: number) {
+  return poissonPmf(lambdaH, hg) * poissonPmf(lambdaA, ag);
+}
+
+function totalEvenProb(lambdaTotal: number) {
+  return clamp((1 + Math.exp(-2 * lambdaTotal)) / 2, 0.0001, 0.9999);
+}
+
 function getCompetitionModel(competitionId: string | null) {
   const isCL = competitionId === "CL";
 
@@ -534,7 +564,8 @@ function compute1X2FromLambdas(args: {
   maxGoals: number;
 }) {
   const model = getCompetitionModel(args.competitionId);
-  const effectiveDrawBoost = args.competitionId === "CL" ? model.drawBoost : args.drawBoost;
+  const effectiveDrawBoost =
+    args.competitionId === "CL" ? model.drawBoost : args.drawBoost;
 
   const maxGoals = Math.max(3, Math.min(10, Math.floor(args.maxGoals)));
 
@@ -590,11 +621,16 @@ function compute1X2FromLambdas(args: {
   return { p1: p1 / s2, pX: pX / s2, p2: p2 / s2 };
 }
 
-function bookify(prob: number, margin: number) {
-  const fairProb = clamp(prob, 0.01, 0.98);
+function bookify(
+  prob: number,
+  margin: number,
+  minProb = 0.01,
+  maxProb = 0.98
+) {
+  const fairProb = clamp(prob, minProb, maxProb);
   const fairOdds = 1 / fairProb;
 
-  const bookProb = clamp(fairProb * margin, 0.01, 0.98);
+  const bookProb = clamp(fairProb * margin, minProb, maxProb);
   const bookOdds = 1 / bookProb;
 
   return {
@@ -664,7 +700,6 @@ async function tryAcquireLock(
   return { ok: true };
 }
 
-
 async function clearEnabledDatesCache(
   sb: ReturnType<typeof supabaseAdmin>
 ) {
@@ -680,7 +715,10 @@ async function clearEnabledDatesCache(
 
   const keys = (data ?? [])
     .map((row: any) => row?.key)
-    .filter((key: unknown): key is string => typeof key === "string" && key.length > 0);
+    .filter(
+      (key: unknown): key is string =>
+        typeof key === "string" && key.length > 0
+    );
 
   if (!keys.length) return;
 
@@ -693,7 +731,6 @@ async function clearEnabledDatesCache(
     console.error("clearEnabledDatesCache delete error:", deleteError.message);
   }
 }
-
 
 function utcTodayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
@@ -987,8 +1024,10 @@ export async function POST(req: Request) {
         ? latestRatingsByLeague.get(compCode) ?? new Map<number, any>()
         : new Map<number, any>();
 
-      const homeRatingRow = homeId != null ? latestRatings.get(homeId) ?? null : null;
-      const awayRatingRow = awayId != null ? latestRatings.get(awayId) ?? null : null;
+      const homeRatingRow =
+        homeId != null ? latestRatings.get(homeId) ?? null : null;
+      const awayRatingRow =
+        awayId != null ? latestRatings.get(awayId) ?? null : null;
 
       const { lambdaH, lambdaA } = computeLambdas({
         competitionId: compCode,
@@ -1019,20 +1058,133 @@ export async function POST(req: Request) {
       });
 
       const lambdaT = clamp(lambdaH + lambdaA, 0.2, 8.0);
+
+      const pUnder15 = poissonCdf(lambdaT, 1);
+      const pOver15 = 1 - pUnder15;
+
       const pUnder25 = poissonCdf(lambdaT, 2);
       const pOver25 = 1 - pUnder25;
 
+      const pUnder35 = poissonCdf(lambdaT, 3);
+      const pOver35 = 1 - pUnder35;
+
       const pH0 = Math.exp(-lambdaH);
       const pA0 = Math.exp(-lambdaA);
-      const p00 = Math.exp(-(lambdaH + lambdaA));
+      const p00 = Math.exp(-lambdaT);
       const pBttsYes = clamp(1 - pH0 - pA0 + p00, 0.01, 0.98);
       const pBttsNo = 1 - pBttsYes;
 
+      const pHomeUnder05 = poissonCdf(lambdaH, 0);
+      const pHomeOver05 = 1 - pHomeUnder05;
       const pHomeUnder15 = poissonCdf(lambdaH, 1);
       const pHomeOver15 = 1 - pHomeUnder15;
+      const pHomeUnder25 = poissonCdf(lambdaH, 2);
+      const pHomeOver25 = 1 - pHomeUnder25;
 
       const pAwayUnder05 = poissonCdf(lambdaA, 0);
       const pAwayOver05 = 1 - pAwayUnder05;
+      const pAwayUnder15 = poissonCdf(lambdaA, 1);
+      const pAwayOver15 = 1 - pAwayUnder15;
+      const pAwayUnder25 = poissonCdf(lambdaA, 2);
+      const pAwayOver25 = 1 - pAwayUnder25;
+
+      const p1X = clamp(p1 + pX, 0.01, 0.99);
+      const p12 = clamp(p1 + p2, 0.01, 0.99);
+      const pX2 = clamp(pX + p2, 0.01, 0.99);
+
+      const lambdaH_HT = clamp(lambdaH * FIRST_HALF_SHARE, 0.05, 4.5);
+      const lambdaA_HT = clamp(lambdaA * FIRST_HALF_SHARE, 0.05, 4.5);
+      const lambdaT_HT = clamp(lambdaH_HT + lambdaA_HT, 0.1, 6.0);
+
+      const { p1: p1HT, pX: pXHT, p2: p2HT } = compute1X2FromLambdas({
+        competitionId: compCode,
+        lambdaH: lambdaH_HT,
+        lambdaA: lambdaA_HT,
+        drawBoost: drawBoost * 1.1,
+        maxGoals: Math.max(4, maxGoals - 1),
+      });
+
+      const pHTUnder05 = poissonCdf(lambdaT_HT, 0);
+      const pHTOver05 = 1 - pHTUnder05;
+      const pHTUnder15 = poissonCdf(lambdaT_HT, 1);
+      const pHTOver15 = 1 - pHTUnder15;
+
+      const pH0HT = Math.exp(-lambdaH_HT);
+      const pA0HT = Math.exp(-lambdaA_HT);
+      const p00HT = Math.exp(-lambdaT_HT);
+      const pHTBttsYes = clamp(1 - pH0HT - pA0HT + p00HT, 0.01, 0.98);
+      const pHTBttsNo = 1 - pHTBttsYes;
+
+      const lambdaH_ST = clamp(lambdaH - lambdaH_HT, 0.05, 4.5);
+      const lambdaA_ST = clamp(lambdaA - lambdaA_HT, 0.05, 4.5);
+      const lambdaT_ST = clamp(lambdaH_ST + lambdaA_ST, 0.1, 6.0);
+
+      const pSTUnder05 = poissonCdf(lambdaT_ST, 0);
+      const pSTOver05 = 1 - pSTUnder05;
+      const pSTUnder15 = poissonCdf(lambdaT_ST, 1);
+      const pSTOver15 = 1 - pSTUnder15;
+
+      const pEven = totalEvenProb(lambdaT);
+      const pOdd = 1 - pEven;
+
+            const p1XHT = clamp(p1HT + pXHT, 0.01, 0.99);
+      const p12HT = clamp(p1HT + p2HT, 0.01, 0.99);
+      const pX2HT = clamp(pXHT + p2HT, 0.01, 0.99);
+
+      const pHTHomeUnder05 = poissonCdf(lambdaH_HT, 0);
+      const pHTHomeOver05 = 1 - pHTHomeUnder05;
+      const pHTHomeUnder15 = poissonCdf(lambdaH_HT, 1);
+      const pHTHomeOver15 = 1 - pHTHomeUnder15;
+
+      const pHTAwayUnder05 = poissonCdf(lambdaA_HT, 0);
+      const pHTAwayOver05 = 1 - pHTAwayUnder05;
+      const pHTAwayUnder15 = poissonCdf(lambdaA_HT, 1);
+      const pHTAwayOver15 = 1 - pHTAwayUnder15;
+
+      const { p1: p1ST, pX: pXST, p2: p2ST } = compute1X2FromLambdas({
+        competitionId: compCode,
+        lambdaH: lambdaH_ST,
+        lambdaA: lambdaA_ST,
+        drawBoost: drawBoost * 1.05,
+        maxGoals: Math.max(4, maxGoals - 1),
+      });
+
+      const pH0ST = Math.exp(-lambdaH_ST);
+      const pA0ST = Math.exp(-lambdaA_ST);
+      const p00ST = Math.exp(-lambdaT_ST);
+      const pSTBttsYes = clamp(1 - pH0ST - pA0ST + p00ST, 0.01, 0.98);
+      const pSTBttsNo = 1 - pSTBttsYes;
+
+      const dnbDenom = Math.max(p1 + p2, 0.0001);
+      const pHomeDnb = clamp(p1 / dnbDenom, 0.01, 0.99);
+      const pAwayDnb = clamp(p2 / dnbDenom, 0.01, 0.99);
+
+      const pHomeWinToNilYes = clamp((1 - pH0) * pA0, 0.0005, 0.999);
+      const pHomeWinToNilNo = 1 - pHomeWinToNilYes;
+
+      const pAwayWinToNilYes = clamp((1 - pA0) * pH0, 0.0005, 0.999);
+      const pAwayWinToNilNo = 1 - pAwayWinToNilYes;
+
+      const pCleanSheetHomeYes = clamp(pA0, 0.0005, 0.999);
+      const pCleanSheetHomeNo = 1 - pCleanSheetHomeYes;
+
+      const pCleanSheetAwayYes = clamp(pH0, 0.0005, 0.999);
+      const pCleanSheetAwayNo = 1 - pCleanSheetAwayYes;
+
+
+      const exactScoreProbMap = new Map<string, number>();
+      let knownExactScoreSum = 0;
+
+      for (const key of EXACT_SCORE_SELECTIONS) {
+        const [hgRaw, agRaw] = key.split(":");
+        const hg = Number(hgRaw);
+        const ag = Number(agRaw);
+        const p = exactScoreProb(lambdaH, lambdaA, hg, ag);
+        exactScoreProbMap.set(key, p);
+        knownExactScoreSum += p;
+      }
+
+      const pExactOther = clamp(1 - knownExactScoreSum, 0.0005, 0.999);
 
       const rows: any[] = [];
 
@@ -1081,10 +1233,105 @@ export async function POST(req: Request) {
       }
 
       {
-        const bOver = bookify(pOver25, margin);
-        const bUnder = bookify(pUnder25, margin);
+        const b1X = bookify(p1X, margin);
+        const b12 = bookify(p12, margin);
+        const bX2 = bookify(pX2, margin);
 
         rows.push(
+          {
+            match_id: matchId,
+            market_id: "dc",
+            selection: "1X",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...b1X,
+          },
+          {
+            match_id: matchId,
+            market_id: "dc",
+            selection: "12",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...b12,
+          },
+          {
+            match_id: matchId,
+            market_id: "dc",
+            selection: "X2",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bX2,
+          }
+        );
+      }
+
+            {
+        const bHomeDnb = bookify(pHomeDnb, margin);
+        const bAwayDnb = bookify(pAwayDnb, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "dnb",
+            selection: "1",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHomeDnb,
+          },
+          {
+            match_id: matchId,
+            market_id: "dnb",
+            selection: "2",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bAwayDnb,
+          }
+        );
+      }
+
+
+
+
+
+      {
+        const bOver15 = bookify(pOver15, margin);
+        const bUnder15 = bookify(pUnder15, margin);
+        const bOver25 = bookify(pOver25, margin);
+        const bUnder25 = bookify(pUnder25, margin);
+        const bOver35 = bookify(pOver35, margin);
+        const bUnder35 = bookify(pUnder35, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "ou_1_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bOver15,
+          },
+          {
+            match_id: matchId,
+            market_id: "ou_1_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bUnder15,
+          },
           {
             match_id: matchId,
             market_id: "ou_2_5",
@@ -1093,7 +1340,7 @@ export async function POST(req: Request) {
             risk_adjustment: 0,
             updated_at: nowIso,
             ...baseMeta,
-            ...bOver,
+            ...bOver25,
           },
           {
             match_id: matchId,
@@ -1103,7 +1350,27 @@ export async function POST(req: Request) {
             risk_adjustment: 0,
             updated_at: nowIso,
             ...baseMeta,
-            ...bUnder,
+            ...bUnder25,
+          },
+          {
+            match_id: matchId,
+            market_id: "ou_3_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bOver35,
+          },
+          {
+            match_id: matchId,
+            market_id: "ou_3_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bUnder35,
           }
         );
       }
@@ -1137,10 +1404,34 @@ export async function POST(req: Request) {
       }
 
       {
-        const bOver = bookify(pHomeOver15, margin);
-        const bUnder = bookify(pHomeUnder15, margin);
+        const bHomeOver05 = bookify(pHomeOver05, margin);
+        const bHomeUnder05 = bookify(pHomeUnder05, margin);
+        const bHomeOver15 = bookify(pHomeOver15, margin);
+        const bHomeUnder15 = bookify(pHomeUnder15, margin);
+        const bHomeOver25 = bookify(pHomeOver25, margin);
+        const bHomeUnder25 = bookify(pHomeUnder25, margin);
 
         rows.push(
+          {
+            match_id: matchId,
+            market_id: "home_ou_0_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHomeOver05,
+          },
+          {
+            match_id: matchId,
+            market_id: "home_ou_0_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHomeUnder05,
+          },
           {
             match_id: matchId,
             market_id: "home_ou_1_5",
@@ -1149,7 +1440,7 @@ export async function POST(req: Request) {
             risk_adjustment: 0,
             updated_at: nowIso,
             ...baseMeta,
-            ...bOver,
+            ...bHomeOver15,
           },
           {
             match_id: matchId,
@@ -1159,14 +1450,38 @@ export async function POST(req: Request) {
             risk_adjustment: 0,
             updated_at: nowIso,
             ...baseMeta,
-            ...bUnder,
+            ...bHomeUnder15,
+          },
+          {
+            match_id: matchId,
+            market_id: "home_ou_2_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHomeOver25,
+          },
+          {
+            match_id: matchId,
+            market_id: "home_ou_2_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHomeUnder25,
           }
         );
       }
 
       {
-        const bOver = bookify(pAwayOver05, margin);
-        const bUnder = bookify(pAwayUnder05, margin);
+        const bAwayOver05 = bookify(pAwayOver05, margin);
+        const bAwayUnder05 = bookify(pAwayUnder05, margin);
+        const bAwayOver15 = bookify(pAwayOver15, margin);
+        const bAwayUnder15 = bookify(pAwayUnder15, margin);
+        const bAwayOver25 = bookify(pAwayOver25, margin);
+        const bAwayUnder25 = bookify(pAwayUnder25, margin);
 
         rows.push(
           {
@@ -1177,7 +1492,7 @@ export async function POST(req: Request) {
             risk_adjustment: 0,
             updated_at: nowIso,
             ...baseMeta,
-            ...bOver,
+            ...bAwayOver05,
           },
           {
             match_id: matchId,
@@ -1187,9 +1502,562 @@ export async function POST(req: Request) {
             risk_adjustment: 0,
             updated_at: nowIso,
             ...baseMeta,
-            ...bUnder,
+            ...bAwayUnder05,
+          },
+          {
+            match_id: matchId,
+            market_id: "away_ou_1_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bAwayOver15,
+          },
+          {
+            match_id: matchId,
+            market_id: "away_ou_1_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bAwayUnder15,
+          },
+          {
+            match_id: matchId,
+            market_id: "away_ou_2_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bAwayOver25,
+          },
+          {
+            match_id: matchId,
+            market_id: "away_ou_2_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bAwayUnder25,
           }
         );
+      }
+
+      {
+        const b1HT = bookify(p1HT, margin);
+        const bXHT = bookify(pXHT, margin);
+        const b2HT = bookify(p2HT, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "ht_1x2",
+            selection: "1",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...b1HT,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_1x2",
+            selection: "X",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bXHT,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_1x2",
+            selection: "2",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...b2HT,
+          }
+        );
+      }
+
+            {
+        const b1XHT = bookify(p1XHT, margin);
+        const b12HT = bookify(p12HT, margin);
+        const bX2HT = bookify(pX2HT, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "ht_dc",
+            selection: "1X",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...b1XHT,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_dc",
+            selection: "12",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...b12HT,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_dc",
+            selection: "X2",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bX2HT,
+          }
+        );
+      }
+
+      {
+        const bHTOver05 = bookify(pHTOver05, margin);
+        const bHTUnder05 = bookify(pHTUnder05, margin);
+        const bHTOver15 = bookify(pHTOver15, margin);
+        const bHTUnder15 = bookify(pHTUnder15, margin);
+        const bHTYes = bookify(pHTBttsYes, margin);
+        const bHTNo = bookify(pHTBttsNo, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "ht_ou_0_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTOver05,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_ou_0_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTUnder05,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_ou_1_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTOver15,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_ou_1_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTUnder15,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_btts",
+            selection: "yes",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTYes,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_btts",
+            selection: "no",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTNo,
+          }
+        );
+      }
+
+            {
+        const bHTHomeOver05 = bookify(pHTHomeOver05, margin);
+        const bHTHomeUnder05 = bookify(pHTHomeUnder05, margin);
+        const bHTHomeOver15 = bookify(pHTHomeOver15, margin);
+        const bHTHomeUnder15 = bookify(pHTHomeUnder15, margin);
+
+        const bHTAwayOver05 = bookify(pHTAwayOver05, margin);
+        const bHTAwayUnder05 = bookify(pHTAwayUnder05, margin);
+        const bHTAwayOver15 = bookify(pHTAwayOver15, margin);
+        const bHTAwayUnder15 = bookify(pHTAwayUnder15, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "ht_home_ou_0_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTHomeOver05,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_home_ou_0_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTHomeUnder05,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_home_ou_1_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTHomeOver15,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_home_ou_1_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTHomeUnder15,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_away_ou_0_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTAwayOver05,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_away_ou_0_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTAwayUnder05,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_away_ou_1_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTAwayOver15,
+          },
+          {
+            match_id: matchId,
+            market_id: "ht_away_ou_1_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHTAwayUnder15,
+          }
+        );
+      }
+
+      {
+        const bSTOver05 = bookify(pSTOver05, margin);
+        const bSTUnder05 = bookify(pSTUnder05, margin);
+        const bSTOver15 = bookify(pSTOver15, margin);
+        const bSTUnder15 = bookify(pSTUnder15, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "st_ou_0_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bSTOver05,
+          },
+          {
+            match_id: matchId,
+            market_id: "st_ou_0_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bSTUnder05,
+          },
+          {
+            match_id: matchId,
+            market_id: "st_ou_1_5",
+            selection: "over",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bSTOver15,
+          },
+          {
+            match_id: matchId,
+            market_id: "st_ou_1_5",
+            selection: "under",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bSTUnder15,
+          }
+        );
+      }
+
+            {
+        const b1ST = bookify(p1ST, margin);
+        const bXST = bookify(pXST, margin);
+        const b2ST = bookify(p2ST, margin);
+
+        const bSTYes = bookify(pSTBttsYes, margin);
+        const bSTNo = bookify(pSTBttsNo, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "st_1x2",
+            selection: "1",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...b1ST,
+          },
+          {
+            match_id: matchId,
+            market_id: "st_1x2",
+            selection: "X",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bXST,
+          },
+          {
+            match_id: matchId,
+            market_id: "st_1x2",
+            selection: "2",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...b2ST,
+          },
+          {
+            match_id: matchId,
+            market_id: "st_btts",
+            selection: "yes",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bSTYes,
+          },
+          {
+            match_id: matchId,
+            market_id: "st_btts",
+            selection: "no",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bSTNo,
+          }
+        );
+      }
+
+      {
+        const bEven = bookify(pEven, margin);
+        const bOdd = bookify(pOdd, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "odd_even",
+            selection: "even",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bEven,
+          },
+          {
+            match_id: matchId,
+            market_id: "odd_even",
+            selection: "odd",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bOdd,
+          }
+        );
+      }
+
+            {
+        const bHomeWinToNilYes = bookify(pHomeWinToNilYes, margin, 0.0005, 0.95);
+        const bHomeWinToNilNo = bookify(pHomeWinToNilNo, margin);
+
+        const bAwayWinToNilYes = bookify(pAwayWinToNilYes, margin, 0.0005, 0.95);
+        const bAwayWinToNilNo = bookify(pAwayWinToNilNo, margin);
+
+        const bCleanSheetHomeYes = bookify(pCleanSheetHomeYes, margin, 0.0005, 0.95);
+        const bCleanSheetHomeNo = bookify(pCleanSheetHomeNo, margin);
+
+        const bCleanSheetAwayYes = bookify(pCleanSheetAwayYes, margin, 0.0005, 0.95);
+        const bCleanSheetAwayNo = bookify(pCleanSheetAwayNo, margin);
+
+        rows.push(
+          {
+            match_id: matchId,
+            market_id: "home_win_to_nil",
+            selection: "yes",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHomeWinToNilYes,
+          },
+          {
+            match_id: matchId,
+            market_id: "home_win_to_nil",
+            selection: "no",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bHomeWinToNilNo,
+          },
+          {
+            match_id: matchId,
+            market_id: "away_win_to_nil",
+            selection: "yes",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bAwayWinToNilYes,
+          },
+          {
+            match_id: matchId,
+            market_id: "away_win_to_nil",
+            selection: "no",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bAwayWinToNilNo,
+          },
+          {
+            match_id: matchId,
+            market_id: "clean_sheet_home",
+            selection: "yes",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bCleanSheetHomeYes,
+          },
+          {
+            match_id: matchId,
+            market_id: "clean_sheet_home",
+            selection: "no",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bCleanSheetHomeNo,
+          },
+          {
+            match_id: matchId,
+            market_id: "clean_sheet_away",
+            selection: "yes",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bCleanSheetAwayYes,
+          },
+          {
+            match_id: matchId,
+            market_id: "clean_sheet_away",
+            selection: "no",
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...bCleanSheetAwayNo,
+          }
+        );
+      }
+
+      {
+        for (const key of EXACT_SCORE_SELECTIONS) {
+          const p = exactScoreProbMap.get(key) ?? 0;
+          const book = bookify(p, margin, 0.0005, 0.95);
+
+          rows.push({
+            match_id: matchId,
+            market_id: "exact_score",
+            selection: key,
+            margin,
+            risk_adjustment: 0,
+            updated_at: nowIso,
+            ...baseMeta,
+            ...book,
+          });
+        }
+
+        const bookOther = bookify(pExactOther, margin, 0.0005, 0.95);
+
+        rows.push({
+          match_id: matchId,
+          market_id: "exact_score",
+          selection: "other",
+          margin,
+          risk_adjustment: 0,
+          updated_at: nowIso,
+          ...baseMeta,
+          ...bookOther,
+        });
       }
 
       const { error: oErr } = await sb.from("odds").upsert(rows, {
@@ -1213,7 +2081,6 @@ export async function POST(req: Request) {
       console.error("enabled dates cache clear failed:", e);
     }
 
-
     return NextResponse.json({
       ok: true,
       date: date ?? null,
@@ -1232,7 +2099,7 @@ export async function POST(req: Request) {
       horizon: { maxAheadDays: MAX_AHEAD_DAYS, horizonIso },
       kickoffGraceMinutes: KICKOFF_GRACE_MINUTES,
       note:
-        "Odds computed from DB matches. Domestic leagues keep prior behavior, while CL uses separate tuning with lower standings influence, lower home advantage, stronger rating blend and softer draw/home-away extremes.",
+  "Odds computed from DB matches. Extended markets now include double chance, DNB, multiple goal totals, team goal totals, first-half and second-half totals, first-half and second-half result markets, first-half double chance, first-half/second-half BTTS, odd/even, exact score, win to nil and clean sheet markets.",
     });
   } catch (e: any) {
     return NextResponse.json(

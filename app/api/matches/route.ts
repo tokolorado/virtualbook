@@ -1,3 +1,4 @@
+//app/api/matches/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { ensureMatchesCached } from "@/lib/matchSync";
@@ -16,7 +17,7 @@ export async function GET(req: Request) {
   const end = new Date(date + "T23:59:59.999Z").toISOString();
 
   let q = sb.from("matches").select("*").gte("utc_date", start).lte("utc_date", end);
-  if (competition) q = q.eq("competition_id", Number(competition));
+  if (competition) q = q.eq("competition_id", competition);
 
   const { data, error } = await q.order("utc_date", { ascending: true });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

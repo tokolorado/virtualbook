@@ -307,7 +307,7 @@ export default function RegisterPage() {
         email: cleanEmail,
         password: cleanPassword,
         options: {
-          emailRedirectTo: `${window.location.origin}/login?confirmed=1`,
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             first_name: cleanFirstName,
             last_name: cleanLastName,
