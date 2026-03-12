@@ -1,6 +1,9 @@
-//app/api/odds/sync/route.ts
+// app/api/odds/sync/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { generateOddsV1 } from "@/lib/odds/engine-v1";
+import { generateOddsV2 } from "@/lib/odds/engine-v2";
+import type { MatchInput, EngineContext } from "@/lib/odds/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,27 +30,9 @@ const BATCH_LIMIT_DEFAULT = 30;
 const ODDS_LOCK_KEY = "lock:odds_sync";
 const ODDS_LOCK_TTL_MS = 60 * 1000;
 
-// model udziału goli w połowach
+// snapshot config
 const FIRST_HALF_SHARE = 0.45;
-
-// selekcje dla exact_score — muszą być zgodne z katalogiem market_selection_catalog
-const EXACT_SCORE_SELECTIONS = [
-  "0:0",
-  "1:0",
-  "2:0",
-  "2:1",
-  "1:1",
-  "0:1",
-  "0:2",
-  "1:2",
-  "3:0",
-  "3:1",
-  "2:2",
-  "1:3",
-  "0:3",
-  "3:2",
-  "2:3",
-] as const;
+const SNAPSHOT_SAMPLE_LIMIT = 20;
 
 type SyncBody = {
   date?: string; // YYYY-MM-DD
@@ -63,6 +48,27 @@ type SyncBody = {
 
   oddsTtlHours?: number;
   batchLimit?: number;
+
+  engine?: "v1" | "v2";
+};
+
+type TeamRow = {
+  teamId: number;
+  playedGames: number;
+  goalsFor: number;
+  goalsAgainst: number;
+};
+
+type StandingsCtx = {
+  byTeamId: Map<number, TeamRow>;
+  leagueAvgGoalsFor: number;
+  leagueAvgGoalsAgainst: number;
+};
+
+type GeneratedOddsResult = {
+  engineVersion?: string;
+  rows: any[];
+  debug?: any;
 };
 
 function jsonError(message: string, status = 400, extra?: any) {
@@ -73,16 +79,18 @@ function isYYYYMMDD(s: unknown): s is string {
   return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
-function clamp(n: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, n));
-}
-
 function sleep(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
 }
 
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function parseRetryAfterMs(h: string | null): number | null {
   if (!h) return null;
+
   const secs = Number(h);
   if (Number.isFinite(secs) && secs >= 0) return Math.round(secs * 1000);
 
@@ -91,19 +99,23 @@ function parseRetryAfterMs(h: string | null): number | null {
     const ms = dt - Date.now();
     return ms > 0 ? ms : 0;
   }
+
   return null;
 }
 
 function extractWaitSecondsFromMessage(msg: string): number | null {
   const m = msg.match(/wait\s+(\d+)\s*seconds?/i);
   if (!m) return null;
+
   const s = Number(m[1]);
   if (!Number.isFinite(s) || s < 0) return null;
+
   return s;
 }
 
 function isRateLimitMessage(msg: unknown): msg is string {
   if (typeof msg !== "string") return false;
+
   const s = msg.toLowerCase();
   return (
     s.includes("request limit") ||
@@ -115,13 +127,17 @@ function isRateLimitMessage(msg: unknown): msg is string {
 
 // globalny pacing między requestami
 let lastFdCallAt = 0;
+
 async function globalThrottle(throttleMs: number) {
   if (throttleMs <= 0) return;
+
   const now = Date.now();
   const delta = now - lastFdCallAt;
+
   if (delta < throttleMs) {
     await sleep(throttleMs - delta);
   }
+
   lastFdCallAt = Date.now();
 }
 
@@ -139,6 +155,7 @@ async function fdFetch(
   const url = `${FOOTBALL_DATA_BASE}${path}`;
 
   let attempt = 0;
+
   while (true) {
     attempt++;
 
@@ -151,6 +168,7 @@ async function fdFetch(
 
     const text = await r.text();
     let j: any = null;
+
     try {
       j = JSON.parse(text);
     } catch {
@@ -189,34 +207,6 @@ async function fdFetch(
     throw new Error(msg);
   }
 }
-
-type TeamRow = {
-  teamId: number;
-  playedGames: number;
-  goalsFor: number;
-  goalsAgainst: number;
-};
-
-type StandingsCtx = {
-  byTeamId: Map<number, TeamRow>;
-  leagueAvgGoalsFor: number;
-  leagueAvgGoalsAgainst: number;
-};
-
-type TeamRatingRow = {
-  teamId: number;
-  competitionId: string;
-  overallRating: number;
-  attackRating: number;
-  defenseRating: number;
-  formRating: number;
-  matchesCount: number;
-  ratingDate: string | null;
-};
-
-type TeamRatingsCtx = {
-  byCompetitionTeam: Map<string, TeamRatingRow>;
-};
 
 function buildStandingsCtx(standingsJson: any): StandingsCtx | null {
   const table =
@@ -258,386 +248,6 @@ function buildStandingsCtx(standingsJson: any): StandingsCtx | null {
     byTeamId,
     leagueAvgGoalsFor: Math.max(0.9, sumGF / sumPG),
     leagueAvgGoalsAgainst: Math.max(0.9, sumGA / sumPG),
-  };
-}
-
-function teamRatingKey(competitionId: string, teamId: number) {
-  return `${competitionId}:${teamId}`;
-}
-
-function buildTeamRatingsCtx(rows: any[]): TeamRatingsCtx {
-  const byCompetitionTeam = new Map<string, TeamRatingRow>();
-
-  for (const raw of rows ?? []) {
-    const teamId = Number(raw?.team_id);
-    const competitionId = String(raw?.competition_id ?? "");
-    if (!Number.isFinite(teamId) || !competitionId) continue;
-
-    const candidate: TeamRatingRow = {
-      teamId,
-      competitionId,
-      overallRating: Number(raw?.overall_rating ?? 0),
-      attackRating: Number(raw?.attack_rating ?? 0),
-      defenseRating: Number(raw?.defense_rating ?? 0),
-      formRating: Number(raw?.form_rating ?? 0),
-      matchesCount: Number(raw?.matches_count ?? 0),
-      ratingDate:
-        typeof raw?.rating_date === "string" ? String(raw.rating_date) : null,
-    };
-
-    const key = teamRatingKey(competitionId, teamId);
-    const prev = byCompetitionTeam.get(key);
-
-    if (!prev) {
-      byCompetitionTeam.set(key, candidate);
-      continue;
-    }
-
-    const prevTs = prev.ratingDate ? Date.parse(prev.ratingDate) : -Infinity;
-    const nextTs = candidate.ratingDate
-      ? Date.parse(candidate.ratingDate)
-      : -Infinity;
-
-    if (nextTs >= prevTs) {
-      byCompetitionTeam.set(key, candidate);
-    }
-  }
-
-  return { byCompetitionTeam };
-}
-
-function getTeamRating(
-  ctx: TeamRatingsCtx | null,
-  competitionId: string | null,
-  teamId: number | null
-) {
-  if (!ctx || !competitionId || teamId == null) return null;
-  return ctx.byCompetitionTeam.get(teamRatingKey(competitionId, teamId)) ?? null;
-}
-
-function poissonPmf(lambda: number, k: number) {
-  let p = Math.exp(-lambda);
-  for (let i = 1; i <= k; i++) p *= lambda / i;
-  return p;
-}
-
-function poissonCdf(lambda: number, k: number) {
-  let s = 0;
-  for (let i = 0; i <= k; i++) s += poissonPmf(lambda, i);
-  return clamp(s, 0, 1);
-}
-
-function exactScoreProb(lambdaH: number, lambdaA: number, hg: number, ag: number) {
-  return poissonPmf(lambdaH, hg) * poissonPmf(lambdaA, ag);
-}
-
-function totalEvenProb(lambdaTotal: number) {
-  return clamp((1 + Math.exp(-2 * lambdaTotal)) / 2, 0.0001, 0.9999);
-}
-
-function getCompetitionModel(competitionId: string | null) {
-  const isCL = competitionId === "CL";
-
-  if (isCL) {
-    return {
-      // Liga Mistrzów: mniejszy wpływ “ligowych” standings, większy ratingów
-      homeAdv: 1.025,
-      standingsWeight: 0.38,
-      neutralWeight: 0.62,
-      neutralHome: 1.34,
-      neutralAway: 1.18,
-
-      overallImpact: 0.42,
-      attackHomeImpact: 0.24,
-      attackAwayImpact: 0.16,
-      defenseImpact: 0.22,
-      formImpact: 0.08,
-
-      maxOverallGap: 0.22,
-      maxAttackGap: 0.22,
-      maxDefenseGap: 0.22,
-      maxFormGap: 0.18,
-
-      minLambdaH: 0.55,
-      maxLambdaH: 2.35,
-      minLambdaA: 0.45,
-      maxLambdaA: 2.10,
-
-      drawBoost: 1.08,
-      smoothMix: 0.84,
-      base1: 0.39,
-      baseX: 0.27,
-      base2: 0.34,
-      minP1: 0.08,
-      maxP1: 0.82,
-      minPX: 0.14,
-      maxPX: 0.38,
-      minP2: 0.08,
-      maxP2: 0.82,
-    };
-  }
-
-  return {
-    // ligi krajowe: zostają blisko obecnego zachowania
-    homeAdv: 1.05,
-    standingsWeight: 0.65,
-    neutralWeight: 0.35,
-    neutralHome: 1.06,
-    neutralAway: 0.94,
-
-    overallImpact: 0.28,
-    attackHomeImpact: 0.16,
-    attackAwayImpact: 0.10,
-    defenseImpact: 0.14,
-    formImpact: 0.10,
-
-    maxOverallGap: 0.25,
-    maxAttackGap: 0.25,
-    maxDefenseGap: 0.25,
-    maxFormGap: 0.25,
-
-    minLambdaH: 0.45,
-    maxLambdaH: 2.85,
-    minLambdaA: 0.35,
-    maxLambdaA: 2.45,
-
-    drawBoost: 1.18,
-    smoothMix: 0.75,
-    base1: 0.42,
-    baseX: 0.28,
-    base2: 0.30,
-    minP1: 0.03,
-    maxP1: 0.90,
-    minPX: 0.06,
-    maxPX: 0.50,
-    minP2: 0.03,
-    maxP2: 0.90,
-  };
-}
-
-function computeLambdas(args: {
-  competitionId: string | null;
-  homeId: number | null;
-  awayId: number | null;
-  ctx: StandingsCtx | null;
-  homeAdv: number;
-  homeRating: number | null;
-  awayRating: number | null;
-  homeAttackRating: number | null;
-  awayAttackRating: number | null;
-  homeDefenseRating: number | null;
-  awayDefenseRating: number | null;
-  homeFormRating: number | null;
-  awayFormRating: number | null;
-}) {
-  const model = getCompetitionModel(args.competitionId);
-
-  // fallback bez standings
-  if (!args.ctx || args.homeId == null || args.awayId == null) {
-    let fallbackH = args.competitionId === "CL" ? 1.34 : 1.32;
-    let fallbackA = args.competitionId === "CL" ? 1.18 : 1.08;
-
-    const homeOverall =
-      Number.isFinite(args.homeRating) ? Number(args.homeRating) : null;
-    const awayOverall =
-      Number.isFinite(args.awayRating) ? Number(args.awayRating) : null;
-
-    if (homeOverall != null && awayOverall != null) {
-      const gap = clamp(
-        (homeOverall - awayOverall) / 100,
-        -model.maxOverallGap,
-        model.maxOverallGap
-      );
-      fallbackH *= 1 + gap * model.overallImpact;
-      fallbackA *= 1 - gap * model.overallImpact;
-    }
-
-    return {
-      lambdaH: clamp(fallbackH, model.minLambdaH, model.maxLambdaH),
-      lambdaA: clamp(fallbackA, model.minLambdaA, model.maxLambdaA),
-    };
-  }
-
-  const h = args.ctx.byTeamId.get(args.homeId) ?? null;
-  const a = args.ctx.byTeamId.get(args.awayId) ?? null;
-  if (!h || !a) {
-    return {
-      lambdaH: clamp(1.32, model.minLambdaH, model.maxLambdaH),
-      lambdaA: clamp(1.08, model.minLambdaA, model.maxLambdaA),
-    };
-  }
-
-  const hAtt = h.goalsFor / h.playedGames;
-  const hDef = h.goalsAgainst / h.playedGames;
-  const aAtt = a.goalsFor / a.playedGames;
-  const aDef = a.goalsAgainst / a.playedGames;
-
-  const lgGF = args.ctx.leagueAvgGoalsFor;
-  const lgGA = args.ctx.leagueAvgGoalsAgainst;
-
-  const base = lgGF;
-
-  // standings-driven raw
-  const lambdaH_raw = base * (hAtt / lgGF) * (aDef / lgGA) * model.homeAdv;
-  const lambdaA_raw = base * (aAtt / lgGF) * (hDef / lgGA);
-
-  // shrinkage
-  let lambdaH =
-    lambdaH_raw * model.standingsWeight +
-    model.neutralHome * model.neutralWeight;
-
-  let lambdaA =
-    lambdaA_raw * model.standingsWeight +
-    model.neutralAway * model.neutralWeight;
-
-  const homeOverall =
-    Number.isFinite(args.homeRating) ? Number(args.homeRating) : null;
-  const awayOverall =
-    Number.isFinite(args.awayRating) ? Number(args.awayRating) : null;
-
-  if (homeOverall != null && awayOverall != null) {
-    const overallGap = clamp(
-      (homeOverall - awayOverall) / 100,
-      -model.maxOverallGap,
-      model.maxOverallGap
-    );
-    lambdaH *= 1 + overallGap * model.overallImpact;
-    lambdaA *= 1 - overallGap * model.overallImpact;
-  }
-
-  const homeAttack =
-    Number.isFinite(args.homeAttackRating) ? Number(args.homeAttackRating) : null;
-  const awayAttack =
-    Number.isFinite(args.awayAttackRating) ? Number(args.awayAttackRating) : null;
-
-  if (homeAttack != null && awayAttack != null) {
-    const attackGap = clamp(
-      (homeAttack - awayAttack) / 100,
-      -model.maxAttackGap,
-      model.maxAttackGap
-    );
-    lambdaH *= 1 + attackGap * model.attackHomeImpact;
-    lambdaA *= 1 - attackGap * model.attackAwayImpact;
-  }
-
-  const homeDefense =
-    Number.isFinite(args.homeDefenseRating) ? Number(args.homeDefenseRating) : null;
-  const awayDefense =
-    Number.isFinite(args.awayDefenseRating) ? Number(args.awayDefenseRating) : null;
-
-  if (homeDefense != null && awayDefense != null) {
-    const defenseGap = clamp(
-      (homeDefense - awayDefense) / 100,
-      -model.maxDefenseGap,
-      model.maxDefenseGap
-    );
-    lambdaH *= 1 - defenseGap * model.defenseImpact;
-    lambdaA *= 1 + defenseGap * model.defenseImpact;
-  }
-
-  const homeForm =
-    Number.isFinite(args.homeFormRating) ? Number(args.homeFormRating) : null;
-  const awayForm =
-    Number.isFinite(args.awayFormRating) ? Number(args.awayFormRating) : null;
-
-  if (homeForm != null && awayForm != null) {
-    const formGap = clamp(
-      (homeForm - awayForm) / 100,
-      -model.maxFormGap,
-      model.maxFormGap
-    );
-    lambdaH *= 1 + formGap * model.formImpact;
-    lambdaA *= 1 - formGap * model.formImpact;
-  }
-
-  lambdaH = clamp(lambdaH, model.minLambdaH, model.maxLambdaH);
-  lambdaA = clamp(lambdaA, model.minLambdaA, model.maxLambdaA);
-
-  return { lambdaH, lambdaA };
-}
-
-function compute1X2FromLambdas(args: {
-  competitionId: string | null;
-  lambdaH: number;
-  lambdaA: number;
-  drawBoost: number;
-  maxGoals: number;
-}) {
-  const model = getCompetitionModel(args.competitionId);
-  const effectiveDrawBoost =
-    args.competitionId === "CL" ? model.drawBoost : args.drawBoost;
-
-  const maxGoals = Math.max(3, Math.min(10, Math.floor(args.maxGoals)));
-
-  const ph: number[] = [];
-  const pa: number[] = [];
-  let sumH = 0;
-  let sumA = 0;
-
-  for (let k = 0; k <= maxGoals; k++) {
-    const pH = poissonPmf(args.lambdaH, k);
-    const pA = poissonPmf(args.lambdaA, k);
-    ph.push(pH);
-    pa.push(pA);
-    sumH += pH;
-    sumA += pA;
-  }
-
-  if (sumH > 0) for (let i = 0; i < ph.length; i++) ph[i] /= sumH;
-  if (sumA > 0) for (let i = 0; i < pa.length; i++) pa[i] /= sumA;
-
-  let p1 = 0;
-  let pX = 0;
-  let p2 = 0;
-
-  for (let i = 0; i < ph.length; i++) {
-    for (let j = 0; j < pa.length; j++) {
-      const p = ph[i] * pa[j];
-      if (i > j) p1 += p;
-      else if (i === j) pX += p;
-      else p2 += p;
-    }
-  }
-
-  pX *= effectiveDrawBoost;
-
-  let s = p1 + pX + p2;
-  if (s > 0) {
-    p1 /= s;
-    pX /= s;
-    p2 /= s;
-  }
-
-  // smoothing
-  p1 = p1 * model.smoothMix + model.base1 * (1 - model.smoothMix);
-  pX = pX * model.smoothMix + model.baseX * (1 - model.smoothMix);
-  p2 = p2 * model.smoothMix + model.base2 * (1 - model.smoothMix);
-
-  p1 = clamp(p1, model.minP1, model.maxP1);
-  pX = clamp(pX, model.minPX, model.maxPX);
-  p2 = clamp(p2, model.minP2, model.maxP2);
-
-  const s2 = p1 + pX + p2;
-  return { p1: p1 / s2, pX: pX / s2, p2: p2 / s2 };
-}
-
-function bookify(
-  prob: number,
-  margin: number,
-  minProb = 0.01,
-  maxProb = 0.98
-) {
-  const fairProb = clamp(prob, minProb, maxProb);
-  const fairOdds = 1 / fairProb;
-
-  const bookProb = clamp(fairProb * margin, minProb, maxProb);
-  const bookOdds = 1 / bookProb;
-
-  return {
-    fair_prob: fairProb,
-    fair_odds: fairOdds,
-    book_prob: bookProb,
-    book_odds: bookOdds,
   };
 }
 
@@ -754,15 +364,462 @@ function isoStartOfNextUtcDay(dateYYYYMMDD: string) {
   return dt.toISOString().slice(0, 10) + "T00:00:00.000Z";
 }
 
+function getMapValue<T>(map: Map<string, T>, marketId: string, selection: string) {
+  return map.get(`${marketId}__${selection}`) ?? null;
+}
+
+function buildProbabilitySnapshot(rows: any[], firstHalfShare: number) {
+  const fairMap = new Map<string, number>();
+  const exactScoreMap: Record<string, number | null> = {};
+
+  for (const row of rows) {
+    const marketId = String(row?.market_id ?? "");
+    const selection = String(row?.selection ?? "");
+    const fairProb = numOrNull(row?.fair_prob);
+
+    if (marketId && selection && fairProb != null) {
+      fairMap.set(`${marketId}__${selection}`, fairProb);
+    }
+
+    if (marketId === "exact_score") {
+      exactScoreMap[selection] = fairProb;
+    }
+  }
+
+  const p1 = getMapValue(fairMap, "1x2", "1");
+  const pX = getMapValue(fairMap, "1x2", "X");
+  const p2 = getMapValue(fairMap, "1x2", "2");
+
+  const p1X = getMapValue(fairMap, "dc", "1X");
+  const p12 = getMapValue(fairMap, "dc", "12");
+  const pX2 = getMapValue(fairMap, "dc", "X2");
+
+  const pHomeDnb = getMapValue(fairMap, "dnb", "1");
+  const pAwayDnb = getMapValue(fairMap, "dnb", "2");
+
+  const pOver15 = getMapValue(fairMap, "ou_1_5", "over");
+  const pUnder15 = getMapValue(fairMap, "ou_1_5", "under");
+  const pOver25 = getMapValue(fairMap, "ou_2_5", "over");
+  const pUnder25 = getMapValue(fairMap, "ou_2_5", "under");
+  const pOver35 = getMapValue(fairMap, "ou_3_5", "over");
+  const pUnder35 = getMapValue(fairMap, "ou_3_5", "under");
+
+  const pBttsYes = getMapValue(fairMap, "btts", "yes");
+  const pBttsNo = getMapValue(fairMap, "btts", "no");
+
+  const pHomeOver05 = getMapValue(fairMap, "home_ou_0_5", "over");
+  const pHomeUnder05 = getMapValue(fairMap, "home_ou_0_5", "under");
+  const pHomeOver15 = getMapValue(fairMap, "home_ou_1_5", "over");
+  const pHomeUnder15 = getMapValue(fairMap, "home_ou_1_5", "under");
+  const pHomeOver25 = getMapValue(fairMap, "home_ou_2_5", "over");
+  const pHomeUnder25 = getMapValue(fairMap, "home_ou_2_5", "under");
+
+  const pAwayOver05 = getMapValue(fairMap, "away_ou_0_5", "over");
+  const pAwayUnder05 = getMapValue(fairMap, "away_ou_0_5", "under");
+  const pAwayOver15 = getMapValue(fairMap, "away_ou_1_5", "over");
+  const pAwayUnder15 = getMapValue(fairMap, "away_ou_1_5", "under");
+  const pAwayOver25 = getMapValue(fairMap, "away_ou_2_5", "over");
+  const pAwayUnder25 = getMapValue(fairMap, "away_ou_2_5", "under");
+
+  const p1HT = getMapValue(fairMap, "ht_1x2", "1");
+  const pXHT = getMapValue(fairMap, "ht_1x2", "X");
+  const p2HT = getMapValue(fairMap, "ht_1x2", "2");
+  const p1XHT = getMapValue(fairMap, "ht_dc", "1X");
+  const p12HT = getMapValue(fairMap, "ht_dc", "12");
+  const pX2HT = getMapValue(fairMap, "ht_dc", "X2");
+  const pHTOver05 = getMapValue(fairMap, "ht_ou_0_5", "over");
+  const pHTUnder05 = getMapValue(fairMap, "ht_ou_0_5", "under");
+  const pHTOver15 = getMapValue(fairMap, "ht_ou_1_5", "over");
+  const pHTUnder15 = getMapValue(fairMap, "ht_ou_1_5", "under");
+  const pHTBttsYes = getMapValue(fairMap, "ht_btts", "yes");
+  const pHTBttsNo = getMapValue(fairMap, "ht_btts", "no");
+  const pHTHomeOver05 = getMapValue(fairMap, "ht_home_ou_0_5", "over");
+  const pHTHomeUnder05 = getMapValue(fairMap, "ht_home_ou_0_5", "under");
+  const pHTHomeOver15 = getMapValue(fairMap, "ht_home_ou_1_5", "over");
+  const pHTHomeUnder15 = getMapValue(fairMap, "ht_home_ou_1_5", "under");
+  const pHTAwayOver05 = getMapValue(fairMap, "ht_away_ou_0_5", "over");
+  const pHTAwayUnder05 = getMapValue(fairMap, "ht_away_ou_0_5", "under");
+  const pHTAwayOver15 = getMapValue(fairMap, "ht_away_ou_1_5", "over");
+  const pHTAwayUnder15 = getMapValue(fairMap, "ht_away_ou_1_5", "under");
+
+  const p1ST = getMapValue(fairMap, "st_1x2", "1");
+  const pXST = getMapValue(fairMap, "st_1x2", "X");
+  const p2ST = getMapValue(fairMap, "st_1x2", "2");
+  const pSTOver05 = getMapValue(fairMap, "st_ou_0_5", "over");
+  const pSTUnder05 = getMapValue(fairMap, "st_ou_0_5", "under");
+  const pSTOver15 = getMapValue(fairMap, "st_ou_1_5", "over");
+  const pSTUnder15 = getMapValue(fairMap, "st_ou_1_5", "under");
+  const pSTBttsYes = getMapValue(fairMap, "st_btts", "yes");
+  const pSTBttsNo = getMapValue(fairMap, "st_btts", "no");
+
+  const pEven = getMapValue(fairMap, "odd_even", "even");
+  const pOdd = getMapValue(fairMap, "odd_even", "odd");
+
+  const pHomeWinToNilYes = getMapValue(fairMap, "home_win_to_nil", "yes");
+  const pHomeWinToNilNo = getMapValue(fairMap, "home_win_to_nil", "no");
+  const pAwayWinToNilYes = getMapValue(fairMap, "away_win_to_nil", "yes");
+  const pAwayWinToNilNo = getMapValue(fairMap, "away_win_to_nil", "no");
+  const pCleanSheetHomeYes = getMapValue(fairMap, "clean_sheet_home", "yes");
+  const pCleanSheetHomeNo = getMapValue(fairMap, "clean_sheet_home", "no");
+  const pCleanSheetAwayYes = getMapValue(fairMap, "clean_sheet_away", "yes");
+  const pCleanSheetAwayNo = getMapValue(fairMap, "clean_sheet_away", "no");
+
+  const pExactOther = getMapValue(fairMap, "exact_score", "other");
+
+  const lambdaH = null;
+  const lambdaA = null;
+  const lambdaT = null;
+
+  const lambdaHHT = lambdaH != null ? lambdaH * firstHalfShare : null;
+  const lambdaAHT = lambdaA != null ? lambdaA * firstHalfShare : null;
+  const lambdaTHT =
+    lambdaHHT != null && lambdaAHT != null ? lambdaHHT + lambdaAHT : null;
+
+  const lambdaHST = lambdaH != null && lambdaHHT != null ? lambdaH - lambdaHHT : null;
+  const lambdaAST = lambdaA != null && lambdaAHT != null ? lambdaA - lambdaAHT : null;
+  const lambdaTST =
+    lambdaHST != null && lambdaAST != null ? lambdaHST + lambdaAST : null;
+
+  return {
+    main: {
+      p1,
+      pX,
+      p2,
+      p1X,
+      p12,
+      pX2,
+      pHomeDnb,
+      pAwayDnb,
+    },
+    totals: {
+      lambdaT,
+      pOver15,
+      pUnder15,
+      pOver25,
+      pUnder25,
+      pOver35,
+      pUnder35,
+    },
+    btts: {
+      pBttsYes,
+      pBttsNo,
+    },
+    teamGoals: {
+      home: {
+        lambda: lambdaH,
+        pOver05: pHomeOver05,
+        pUnder05: pHomeUnder05,
+        pOver15: pHomeOver15,
+        pUnder15: pHomeUnder15,
+        pOver25: pHomeOver25,
+        pUnder25: pHomeUnder25,
+      },
+      away: {
+        lambda: lambdaA,
+        pOver05: pAwayOver05,
+        pUnder05: pAwayUnder05,
+        pOver15: pAwayOver15,
+        pUnder15: pAwayUnder15,
+        pOver25: pAwayOver25,
+        pUnder25: pAwayUnder25,
+      },
+    },
+    firstHalf: {
+      lambdaH: lambdaHHT,
+      lambdaA: lambdaAHT,
+      lambdaT: lambdaTHT,
+      p1: p1HT,
+      pX: pXHT,
+      p2: p2HT,
+      p1X: p1XHT,
+      p12: p12HT,
+      pX2: pX2HT,
+      pOver05: pHTOver05,
+      pUnder05: pHTUnder05,
+      pOver15: pHTOver15,
+      pUnder15: pHTUnder15,
+      pBttsYes: pHTBttsYes,
+      pBttsNo: pHTBttsNo,
+      pHomeOver05: pHTHomeOver05,
+      pHomeUnder05: pHTHomeUnder05,
+      pHomeOver15: pHTHomeOver15,
+      pHomeUnder15: pHTHomeUnder15,
+      pAwayOver05: pHTAwayOver05,
+      pAwayUnder05: pHTAwayUnder05,
+      pAwayOver15: pHTAwayOver15,
+      pAwayUnder15: pHTAwayUnder15,
+    },
+    secondHalf: {
+      lambdaH: lambdaHST,
+      lambdaA: lambdaAST,
+      lambdaT: lambdaTST,
+      p1: p1ST,
+      pX: pXST,
+      p2: p2ST,
+      pOver05: pSTOver05,
+      pUnder05: pSTUnder05,
+      pOver15: pSTOver15,
+      pUnder15: pSTUnder15,
+      pBttsYes: pSTBttsYes,
+      pBttsNo: pSTBttsNo,
+    },
+    extras: {
+      pEven,
+      pOdd,
+      pHomeWinToNilYes,
+      pHomeWinToNilNo,
+      pAwayWinToNilYes,
+      pAwayWinToNilNo,
+      pCleanSheetHomeYes,
+      pCleanSheetHomeNo,
+      pCleanSheetAwayYes,
+      pCleanSheetAwayNo,
+    },
+    exactScore: {
+      bySelection: exactScoreMap,
+      pExactOther,
+    },
+  };
+}
+
+function buildRowsSummary(rows: any[]) {
+  const marketsCount = new Set(
+    rows.map((row) => String(row?.market_id ?? "")).filter(Boolean)
+  ).size;
+
+  const sample = rows.slice(0, SNAPSHOT_SAMPLE_LIMIT).map((row) => ({
+    market_id: row?.market_id ?? null,
+    selection: row?.selection ?? null,
+    fair_prob: numOrNull(row?.fair_prob),
+    fair_odds: numOrNull(row?.fair_odds),
+    book_prob: numOrNull(row?.book_prob),
+    book_odds: numOrNull(row?.book_odds),
+  }));
+
+  return {
+    rowsCount: rows.length,
+    marketsCount,
+    sample,
+  };
+}
+
+function getDebugNumber(debug: any, ...paths: string[][]) {
+  for (const path of paths) {
+    let cur = debug;
+    for (const key of path) {
+      cur = cur?.[key];
+    }
+    const n = numOrNull(cur);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+function mergeV2DebugIntoProbabilities(probabilities: any, debug: any) {
+  if (!debug || typeof debug !== "object") return probabilities;
+
+  const lambdaH = getDebugNumber(debug, ["lambdaH"], ["model", "lambdas", "lambdaH"]);
+  const lambdaA = getDebugNumber(debug, ["lambdaA"], ["model", "lambdas", "lambdaA"]);
+  const lambdaT = getDebugNumber(
+    debug,
+    ["totalGoals"],
+    ["lambdaT"],
+    ["model", "lambdas", "lambdaT"]
+  );
+
+  const firstHalfShare =
+    getDebugNumber(debug, ["config", "firstHalfShare"]) ?? FIRST_HALF_SHARE;
+
+  const lambdaHHT = lambdaH != null ? lambdaH * firstHalfShare : null;
+  const lambdaAHT = lambdaA != null ? lambdaA * firstHalfShare : null;
+  const lambdaTHT =
+    lambdaHHT != null && lambdaAHT != null ? lambdaHHT + lambdaAHT : null;
+
+  const lambdaHST = lambdaH != null && lambdaHHT != null ? lambdaH - lambdaHHT : null;
+  const lambdaAST = lambdaA != null && lambdaAHT != null ? lambdaA - lambdaAHT : null;
+  const lambdaTST =
+    lambdaHST != null && lambdaAST != null ? lambdaHST + lambdaAST : null;
+
+  return {
+    ...probabilities,
+    totals: {
+      ...probabilities.totals,
+      lambdaT,
+    },
+    teamGoals: {
+      home: {
+        ...probabilities.teamGoals.home,
+        lambda: lambdaH,
+      },
+      away: {
+        ...probabilities.teamGoals.away,
+        lambda: lambdaA,
+      },
+    },
+    firstHalf: {
+      ...probabilities.firstHalf,
+      lambdaH: lambdaHHT,
+      lambdaA: lambdaAHT,
+      lambdaT: lambdaTHT,
+    },
+    secondHalf: {
+      ...probabilities.secondHalf,
+      lambdaH: lambdaHST,
+      lambdaA: lambdaAST,
+      lambdaT: lambdaTST,
+    },
+  };
+}
+
+function buildInputSnapshot(args: {
+  engine: "v1" | "v2";
+  nowIso: string;
+  margin: number;
+  homeAdv: number;
+  drawBoost: number;
+  maxGoals: number;
+  firstHalfShare: number;
+  matchId: number;
+  competitionId: string | null;
+  homeId: number | null;
+  awayId: number | null;
+  homeTeamName: string | null;
+  awayTeamName: string | null;
+  standingsCtx: StandingsCtx | null;
+  homeStanding: TeamRow | null;
+  awayStanding: TeamRow | null;
+  homeRatingRow: any;
+  awayRatingRow: any;
+}) {
+  return {
+    config: {
+      engine: args.engine,
+      nowIso: args.nowIso,
+      margin: args.margin,
+      homeAdv: args.homeAdv,
+      drawBoost: args.drawBoost,
+      maxGoals: args.maxGoals,
+      firstHalfShare: args.firstHalfShare,
+    },
+    matchId: args.matchId,
+    competitionId: args.competitionId,
+    homeTeamId: args.homeId,
+    awayTeamId: args.awayId,
+    homeTeam: args.homeTeamName,
+    awayTeam: args.awayTeamName,
+    standings: {
+      available: !!args.standingsCtx,
+      leagueAvgGoalsFor: args.standingsCtx?.leagueAvgGoalsFor ?? null,
+      leagueAvgGoalsAgainst: args.standingsCtx?.leagueAvgGoalsAgainst ?? null,
+      home: args.homeStanding
+        ? {
+            teamId: args.homeStanding.teamId,
+            playedGames: args.homeStanding.playedGames,
+            goalsFor: args.homeStanding.goalsFor,
+            goalsAgainst: args.homeStanding.goalsAgainst,
+          }
+        : null,
+      away: args.awayStanding
+        ? {
+            teamId: args.awayStanding.teamId,
+            playedGames: args.awayStanding.playedGames,
+            goalsFor: args.awayStanding.goalsFor,
+            goalsAgainst: args.awayStanding.goalsAgainst,
+          }
+        : null,
+    },
+    ratings: {
+      home: args.homeRatingRow
+        ? {
+            overall_rating: numOrNull(args.homeRatingRow?.overall_rating),
+            attack_rating: numOrNull(args.homeRatingRow?.attack_rating),
+            defense_rating: numOrNull(args.homeRatingRow?.defense_rating),
+            form_rating: numOrNull(args.homeRatingRow?.form_rating),
+            matches_count: numOrNull(args.homeRatingRow?.matches_count),
+            rating_date: args.homeRatingRow?.rating_date ?? null,
+          }
+        : null,
+      away: args.awayRatingRow
+        ? {
+            overall_rating: numOrNull(args.awayRatingRow?.overall_rating),
+            attack_rating: numOrNull(args.awayRatingRow?.attack_rating),
+            defense_rating: numOrNull(args.awayRatingRow?.defense_rating),
+            form_rating: numOrNull(args.awayRatingRow?.form_rating),
+            matches_count: numOrNull(args.awayRatingRow?.matches_count),
+            rating_date: args.awayRatingRow?.rating_date ?? null,
+          }
+        : null,
+    },
+  };
+}
+
+function buildOutputSnapshot(args: {
+  engine: "v1" | "v2";
+  generated: GeneratedOddsResult;
+  rows: any[];
+  nowIso: string;
+  margin: number;
+  homeAdv: number;
+  drawBoost: number;
+  maxGoals: number;
+  firstHalfShare: number;
+  matchId: number;
+  competitionId: string | null;
+  homeId: number | null;
+  awayId: number | null;
+  homeTeamName: string | null;
+  awayTeamName: string | null;
+}) {
+  const baseProbabilities = buildProbabilitySnapshot(args.rows, args.firstHalfShare);
+  const probabilities =
+    args.engine === "v2"
+      ? mergeV2DebugIntoProbabilities(baseProbabilities, args.generated?.debug)
+      : baseProbabilities;
+
+  const snapshot: any = {
+    engineVersion: args.engine,
+    match: {
+      matchId: args.matchId,
+      competitionId: args.competitionId,
+      homeId: args.homeId,
+      awayId: args.awayId,
+      homeTeam: args.homeTeamName,
+      awayTeam: args.awayTeamName,
+    },
+    config: {
+      engine: args.engine,
+      nowIso: args.nowIso,
+      margin: args.margin,
+      homeAdv: args.homeAdv,
+      drawBoost: args.drawBoost,
+      maxGoals: args.maxGoals,
+      firstHalfShare: args.firstHalfShare,
+    },
+    probabilities,
+    rowsSummary: buildRowsSummary(args.rows),
+  };
+
+  if (args.generated?.debug && typeof args.generated.debug === "object") {
+    snapshot.debug = args.generated.debug;
+  } else {
+    snapshot.note = "Engine did not expose debug payload";
+  }
+
+  return snapshot;
+}
+
 export async function POST(req: Request) {
   try {
     const bodyText = await req.text();
     let body: SyncBody = {};
+
     try {
       body = bodyText ? (JSON.parse(bodyText) as SyncBody) : {};
     } catch {
       return jsonError("Invalid JSON body", 400);
     }
+
+    const engine: "v1" | "v2" = body.engine === "v2" ? "v2" : "v1";
 
     const date = body.date;
     if (date != null && !isYYYYMMDD(date)) {
@@ -772,6 +829,7 @@ export async function POST(req: Request) {
     if (date) {
       const today = utcTodayYYYYMMDD();
       const lastAllowed = plusDaysISODate(today, MAX_AHEAD_DAYS);
+
       if (date > lastAllowed) {
         return jsonError(
           `date is beyond allowed future horizon (${MAX_AHEAD_DAYS} days)`,
@@ -789,12 +847,15 @@ export async function POST(req: Request) {
     const maxGoals = Number.isFinite(Number(body.maxGoals))
       ? Number(body.maxGoals)
       : 7;
+
     const homeAdv = Number.isFinite(Number(body.homeAdv))
       ? Number(body.homeAdv)
       : 1.05;
+
     const drawBoost = Number.isFinite(Number(body.drawBoost))
       ? Number(body.drawBoost)
       : 1.18;
+
     const margin = Number.isFinite(Number(body.margin))
       ? Number(body.margin)
       : 1.06;
@@ -802,6 +863,7 @@ export async function POST(req: Request) {
     const throttleMs = Number.isFinite(Number(body.throttleMs))
       ? Math.max(0, Number(body.throttleMs))
       : 0;
+
     const maxRetries = Number.isFinite(Number(body.maxRetries))
       ? Math.max(0, Math.floor(Number(body.maxRetries)))
       : 2;
@@ -823,6 +885,7 @@ export async function POST(req: Request) {
     if (!lock.ok) {
       return NextResponse.json({
         ok: true,
+        engine,
         skipped: "locked",
         lockAgeMs: lock.ageMs,
         updatedAt: nowIso,
@@ -864,14 +927,17 @@ export async function POST(req: Request) {
     const eligible = candidates.filter((m) => {
       const utc = typeof m?.utc_date === "string" ? m.utc_date : null;
       if (!utc) return false;
+
       const kickoffMs = Date.parse(utc);
       if (!Number.isFinite(kickoffMs)) return false;
+
       return kickoffMs > nowMs - kickoffGraceMs;
     });
 
     if (!eligible.length) {
       return NextResponse.json({
         ok: true,
+        engine,
         leagues,
         date: date ?? null,
         processedMatches: 0,
@@ -884,9 +950,11 @@ export async function POST(req: Request) {
     }
 
     const matchIds = eligible.map((m) => Number(m.id)).filter(Number.isFinite);
+
     if (!matchIds.length) {
       return NextResponse.json({
         ok: true,
+        engine,
         leagues,
         date: date ?? null,
         processedMatches: 0,
@@ -906,11 +974,14 @@ export async function POST(req: Request) {
     }
 
     const lastByMatch = new Map<number, number>();
+
     for (const r of (oddsRows ?? []) as any[]) {
       const mid = Number(r?.match_id);
       if (!Number.isFinite(mid)) continue;
+
       const ms = Date.parse(String(r?.updated_at ?? ""));
       if (!Number.isFinite(ms)) continue;
+
       const prev = lastByMatch.get(mid);
       if (prev == null || ms > prev) lastByMatch.set(mid, ms);
     }
@@ -936,6 +1007,7 @@ export async function POST(req: Request) {
     if (!queue.length) {
       return NextResponse.json({
         ok: true,
+        engine,
         leagues,
         date: date ?? null,
         processedMatches: 0,
@@ -981,7 +1053,7 @@ export async function POST(req: Request) {
       const { data: ratingRows } = await sb
         .from("team_ratings")
         .select(
-          "team_id, competition_id, overall_rating, attack_rating, defense_rating, form_rating, rating_date"
+          "team_id, competition_id, overall_rating, attack_rating, defense_rating, form_rating, matches_count, rating_date"
         )
         .eq("competition_id", code)
         .order("rating_date", { ascending: false });
@@ -1010,15 +1082,22 @@ export async function POST(req: Request) {
 
       const homeId =
         typeof m?.home_team_id === "number" ? m.home_team_id : null;
+
       const awayId =
         typeof m?.away_team_id === "number" ? m.away_team_id : null;
 
       const homeTeamName =
         typeof m?.home_team === "string" ? m.home_team : null;
+
       const awayTeamName =
         typeof m?.away_team === "string" ? m.away_team : null;
 
-      const ctx = compCode ? standingsByLeague.get(compCode) ?? null : null;
+      const standingsCtx = compCode
+        ? standingsByLeague.get(compCode) ?? null
+        : null;
+
+      const homeStanding = homeId != null ? standingsCtx?.byTeamId.get(homeId) ?? null : null;
+      const awayStanding = awayId != null ? standingsCtx?.byTeamId.get(awayId) ?? null : null;
 
       const latestRatings = compCode
         ? latestRatingsByLeague.get(compCode) ?? new Map<number, any>()
@@ -1026,1041 +1105,51 @@ export async function POST(req: Request) {
 
       const homeRatingRow =
         homeId != null ? latestRatings.get(homeId) ?? null : null;
+
       const awayRatingRow =
         awayId != null ? latestRatings.get(awayId) ?? null : null;
 
-      const { lambdaH, lambdaA } = computeLambdas({
+      const matchInput: MatchInput = {
+        matchId,
         competitionId: compCode,
         homeId,
         awayId,
-        ctx,
-        homeAdv,
-
-        homeRating: homeRatingRow?.overall_rating ?? null,
-        awayRating: awayRatingRow?.overall_rating ?? null,
-
-        homeAttackRating: homeRatingRow?.attack_rating ?? null,
-        awayAttackRating: awayRatingRow?.attack_rating ?? null,
-
-        homeDefenseRating: homeRatingRow?.defense_rating ?? null,
-        awayDefenseRating: awayRatingRow?.defense_rating ?? null,
-
-        homeFormRating: homeRatingRow?.form_rating ?? null,
-        awayFormRating: awayRatingRow?.form_rating ?? null,
-      });
-
-      const { p1, pX, p2 } = compute1X2FromLambdas({
-        competitionId: compCode,
-        lambdaH,
-        lambdaA,
-        drawBoost,
-        maxGoals,
-      });
-
-      const lambdaT = clamp(lambdaH + lambdaA, 0.2, 8.0);
-
-      const pUnder15 = poissonCdf(lambdaT, 1);
-      const pOver15 = 1 - pUnder15;
-
-      const pUnder25 = poissonCdf(lambdaT, 2);
-      const pOver25 = 1 - pUnder25;
-
-      const pUnder35 = poissonCdf(lambdaT, 3);
-      const pOver35 = 1 - pUnder35;
-
-      const pH0 = Math.exp(-lambdaH);
-      const pA0 = Math.exp(-lambdaA);
-      const p00 = Math.exp(-lambdaT);
-      const pBttsYes = clamp(1 - pH0 - pA0 + p00, 0.01, 0.98);
-      const pBttsNo = 1 - pBttsYes;
-
-      const pHomeUnder05 = poissonCdf(lambdaH, 0);
-      const pHomeOver05 = 1 - pHomeUnder05;
-      const pHomeUnder15 = poissonCdf(lambdaH, 1);
-      const pHomeOver15 = 1 - pHomeUnder15;
-      const pHomeUnder25 = poissonCdf(lambdaH, 2);
-      const pHomeOver25 = 1 - pHomeUnder25;
-
-      const pAwayUnder05 = poissonCdf(lambdaA, 0);
-      const pAwayOver05 = 1 - pAwayUnder05;
-      const pAwayUnder15 = poissonCdf(lambdaA, 1);
-      const pAwayOver15 = 1 - pAwayUnder15;
-      const pAwayUnder25 = poissonCdf(lambdaA, 2);
-      const pAwayOver25 = 1 - pAwayUnder25;
-
-      const p1X = clamp(p1 + pX, 0.01, 0.99);
-      const p12 = clamp(p1 + p2, 0.01, 0.99);
-      const pX2 = clamp(pX + p2, 0.01, 0.99);
-
-      const lambdaH_HT = clamp(lambdaH * FIRST_HALF_SHARE, 0.05, 4.5);
-      const lambdaA_HT = clamp(lambdaA * FIRST_HALF_SHARE, 0.05, 4.5);
-      const lambdaT_HT = clamp(lambdaH_HT + lambdaA_HT, 0.1, 6.0);
-
-      const { p1: p1HT, pX: pXHT, p2: p2HT } = compute1X2FromLambdas({
-        competitionId: compCode,
-        lambdaH: lambdaH_HT,
-        lambdaA: lambdaA_HT,
-        drawBoost: drawBoost * 1.1,
-        maxGoals: Math.max(4, maxGoals - 1),
-      });
-
-      const pHTUnder05 = poissonCdf(lambdaT_HT, 0);
-      const pHTOver05 = 1 - pHTUnder05;
-      const pHTUnder15 = poissonCdf(lambdaT_HT, 1);
-      const pHTOver15 = 1 - pHTUnder15;
-
-      const pH0HT = Math.exp(-lambdaH_HT);
-      const pA0HT = Math.exp(-lambdaA_HT);
-      const p00HT = Math.exp(-lambdaT_HT);
-      const pHTBttsYes = clamp(1 - pH0HT - pA0HT + p00HT, 0.01, 0.98);
-      const pHTBttsNo = 1 - pHTBttsYes;
-
-      const lambdaH_ST = clamp(lambdaH - lambdaH_HT, 0.05, 4.5);
-      const lambdaA_ST = clamp(lambdaA - lambdaA_HT, 0.05, 4.5);
-      const lambdaT_ST = clamp(lambdaH_ST + lambdaA_ST, 0.1, 6.0);
-
-      const pSTUnder05 = poissonCdf(lambdaT_ST, 0);
-      const pSTOver05 = 1 - pSTUnder05;
-      const pSTUnder15 = poissonCdf(lambdaT_ST, 1);
-      const pSTOver15 = 1 - pSTUnder15;
-
-      const pEven = totalEvenProb(lambdaT);
-      const pOdd = 1 - pEven;
-
-            const p1XHT = clamp(p1HT + pXHT, 0.01, 0.99);
-      const p12HT = clamp(p1HT + p2HT, 0.01, 0.99);
-      const pX2HT = clamp(pXHT + p2HT, 0.01, 0.99);
-
-      const pHTHomeUnder05 = poissonCdf(lambdaH_HT, 0);
-      const pHTHomeOver05 = 1 - pHTHomeUnder05;
-      const pHTHomeUnder15 = poissonCdf(lambdaH_HT, 1);
-      const pHTHomeOver15 = 1 - pHTHomeUnder15;
-
-      const pHTAwayUnder05 = poissonCdf(lambdaA_HT, 0);
-      const pHTAwayOver05 = 1 - pHTAwayUnder05;
-      const pHTAwayUnder15 = poissonCdf(lambdaA_HT, 1);
-      const pHTAwayOver15 = 1 - pHTAwayUnder15;
-
-      const { p1: p1ST, pX: pXST, p2: p2ST } = compute1X2FromLambdas({
-        competitionId: compCode,
-        lambdaH: lambdaH_ST,
-        lambdaA: lambdaA_ST,
-        drawBoost: drawBoost * 1.05,
-        maxGoals: Math.max(4, maxGoals - 1),
-      });
-
-      const pH0ST = Math.exp(-lambdaH_ST);
-      const pA0ST = Math.exp(-lambdaA_ST);
-      const p00ST = Math.exp(-lambdaT_ST);
-      const pSTBttsYes = clamp(1 - pH0ST - pA0ST + p00ST, 0.01, 0.98);
-      const pSTBttsNo = 1 - pSTBttsYes;
-
-      const dnbDenom = Math.max(p1 + p2, 0.0001);
-      const pHomeDnb = clamp(p1 / dnbDenom, 0.01, 0.99);
-      const pAwayDnb = clamp(p2 / dnbDenom, 0.01, 0.99);
-
-      const pHomeWinToNilYes = clamp((1 - pH0) * pA0, 0.0005, 0.999);
-      const pHomeWinToNilNo = 1 - pHomeWinToNilYes;
-
-      const pAwayWinToNilYes = clamp((1 - pA0) * pH0, 0.0005, 0.999);
-      const pAwayWinToNilNo = 1 - pAwayWinToNilYes;
-
-      const pCleanSheetHomeYes = clamp(pA0, 0.0005, 0.999);
-      const pCleanSheetHomeNo = 1 - pCleanSheetHomeYes;
-
-      const pCleanSheetAwayYes = clamp(pH0, 0.0005, 0.999);
-      const pCleanSheetAwayNo = 1 - pCleanSheetAwayYes;
-
-
-      const exactScoreProbMap = new Map<string, number>();
-      let knownExactScoreSum = 0;
-
-      for (const key of EXACT_SCORE_SELECTIONS) {
-        const [hgRaw, agRaw] = key.split(":");
-        const hg = Number(hgRaw);
-        const ag = Number(agRaw);
-        const p = exactScoreProb(lambdaH, lambdaA, hg, ag);
-        exactScoreProbMap.set(key, p);
-        knownExactScoreSum += p;
-      }
-
-      const pExactOther = clamp(1 - knownExactScoreSum, 0.0005, 0.999);
-
-      const rows: any[] = [];
-
-      const baseMeta = {
-        home_team: homeTeamName,
-        away_team: awayTeamName,
+        homeTeamName,
+        awayTeamName,
       };
 
-      {
-        const b1 = bookify(p1, margin);
-        const bX = bookify(pX, margin);
-        const b2 = bookify(p2, margin);
+      const engineCtx: EngineContext = {
+        standingsCtx,
+        homeRatingRow,
+        awayRatingRow,
+      };
 
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "1x2",
-            selection: "1",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b1,
-          },
-          {
-            match_id: matchId,
-            market_id: "1x2",
-            selection: "X",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bX,
-          },
-          {
-            match_id: matchId,
-            market_id: "1x2",
-            selection: "2",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b2,
-          }
-        );
-      }
+      const engineConfig = {
+        nowIso,
+        margin,
+        maxGoals,
+        homeAdv,
+        drawBoost,
+        firstHalfShare: FIRST_HALF_SHARE,
+      };
 
-      {
-        const b1X = bookify(p1X, margin);
-        const b12 = bookify(p12, margin);
-        const bX2 = bookify(pX2, margin);
+      const generated: GeneratedOddsResult =
+        engine === "v2"
+          ? (generateOddsV2(matchInput, engineCtx, engineConfig) as GeneratedOddsResult)
+          : (generateOddsV1(matchInput, engineCtx, engineConfig) as GeneratedOddsResult);
 
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "dc",
-            selection: "1X",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b1X,
-          },
-          {
-            match_id: matchId,
-            market_id: "dc",
-            selection: "12",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b12,
-          },
-          {
-            match_id: matchId,
-            market_id: "dc",
-            selection: "X2",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bX2,
-          }
-        );
-      }
+      const generatedRows = Array.isArray(generated?.rows) ? generated.rows : [];
 
-            {
-        const bHomeDnb = bookify(pHomeDnb, margin);
-        const bAwayDnb = bookify(pAwayDnb, margin);
+      const upsertRows = generatedRows.map((row: any) => ({
+        ...row,
+        match_id: matchId,
+        home_team: row?.home_team ?? homeTeamName,
+        away_team: row?.away_team ?? awayTeamName,
+        updated_at: row?.updated_at ?? nowIso,
+        engine_version: row?.engine_version ?? engine,
+      }));
 
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "dnb",
-            selection: "1",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeDnb,
-          },
-          {
-            match_id: matchId,
-            market_id: "dnb",
-            selection: "2",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayDnb,
-          }
-        );
-      }
-
-
-
-
-
-      {
-        const bOver15 = bookify(pOver15, margin);
-        const bUnder15 = bookify(pUnder15, margin);
-        const bOver25 = bookify(pOver25, margin);
-        const bUnder25 = bookify(pUnder25, margin);
-        const bOver35 = bookify(pOver35, margin);
-        const bUnder35 = bookify(pUnder35, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "ou_1_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bOver15,
-          },
-          {
-            match_id: matchId,
-            market_id: "ou_1_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bUnder15,
-          },
-          {
-            match_id: matchId,
-            market_id: "ou_2_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bOver25,
-          },
-          {
-            match_id: matchId,
-            market_id: "ou_2_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bUnder25,
-          },
-          {
-            match_id: matchId,
-            market_id: "ou_3_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bOver35,
-          },
-          {
-            match_id: matchId,
-            market_id: "ou_3_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bUnder35,
-          }
-        );
-      }
-
-      {
-        const bYes = bookify(pBttsYes, margin);
-        const bNo = bookify(pBttsNo, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "btts",
-            selection: "yes",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bYes,
-          },
-          {
-            match_id: matchId,
-            market_id: "btts",
-            selection: "no",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bNo,
-          }
-        );
-      }
-
-      {
-        const bHomeOver05 = bookify(pHomeOver05, margin);
-        const bHomeUnder05 = bookify(pHomeUnder05, margin);
-        const bHomeOver15 = bookify(pHomeOver15, margin);
-        const bHomeUnder15 = bookify(pHomeUnder15, margin);
-        const bHomeOver25 = bookify(pHomeOver25, margin);
-        const bHomeUnder25 = bookify(pHomeUnder25, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "home_ou_0_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeOver05,
-          },
-          {
-            match_id: matchId,
-            market_id: "home_ou_0_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeUnder05,
-          },
-          {
-            match_id: matchId,
-            market_id: "home_ou_1_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeOver15,
-          },
-          {
-            match_id: matchId,
-            market_id: "home_ou_1_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeUnder15,
-          },
-          {
-            match_id: matchId,
-            market_id: "home_ou_2_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeOver25,
-          },
-          {
-            match_id: matchId,
-            market_id: "home_ou_2_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeUnder25,
-          }
-        );
-      }
-
-      {
-        const bAwayOver05 = bookify(pAwayOver05, margin);
-        const bAwayUnder05 = bookify(pAwayUnder05, margin);
-        const bAwayOver15 = bookify(pAwayOver15, margin);
-        const bAwayUnder15 = bookify(pAwayUnder15, margin);
-        const bAwayOver25 = bookify(pAwayOver25, margin);
-        const bAwayUnder25 = bookify(pAwayUnder25, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "away_ou_0_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayOver05,
-          },
-          {
-            match_id: matchId,
-            market_id: "away_ou_0_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayUnder05,
-          },
-          {
-            match_id: matchId,
-            market_id: "away_ou_1_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayOver15,
-          },
-          {
-            match_id: matchId,
-            market_id: "away_ou_1_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayUnder15,
-          },
-          {
-            match_id: matchId,
-            market_id: "away_ou_2_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayOver25,
-          },
-          {
-            match_id: matchId,
-            market_id: "away_ou_2_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayUnder25,
-          }
-        );
-      }
-
-      {
-        const b1HT = bookify(p1HT, margin);
-        const bXHT = bookify(pXHT, margin);
-        const b2HT = bookify(p2HT, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "ht_1x2",
-            selection: "1",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b1HT,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_1x2",
-            selection: "X",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bXHT,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_1x2",
-            selection: "2",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b2HT,
-          }
-        );
-      }
-
-            {
-        const b1XHT = bookify(p1XHT, margin);
-        const b12HT = bookify(p12HT, margin);
-        const bX2HT = bookify(pX2HT, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "ht_dc",
-            selection: "1X",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b1XHT,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_dc",
-            selection: "12",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b12HT,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_dc",
-            selection: "X2",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bX2HT,
-          }
-        );
-      }
-
-      {
-        const bHTOver05 = bookify(pHTOver05, margin);
-        const bHTUnder05 = bookify(pHTUnder05, margin);
-        const bHTOver15 = bookify(pHTOver15, margin);
-        const bHTUnder15 = bookify(pHTUnder15, margin);
-        const bHTYes = bookify(pHTBttsYes, margin);
-        const bHTNo = bookify(pHTBttsNo, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "ht_ou_0_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTOver05,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_ou_0_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTUnder05,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_ou_1_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTOver15,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_ou_1_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTUnder15,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_btts",
-            selection: "yes",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTYes,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_btts",
-            selection: "no",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTNo,
-          }
-        );
-      }
-
-            {
-        const bHTHomeOver05 = bookify(pHTHomeOver05, margin);
-        const bHTHomeUnder05 = bookify(pHTHomeUnder05, margin);
-        const bHTHomeOver15 = bookify(pHTHomeOver15, margin);
-        const bHTHomeUnder15 = bookify(pHTHomeUnder15, margin);
-
-        const bHTAwayOver05 = bookify(pHTAwayOver05, margin);
-        const bHTAwayUnder05 = bookify(pHTAwayUnder05, margin);
-        const bHTAwayOver15 = bookify(pHTAwayOver15, margin);
-        const bHTAwayUnder15 = bookify(pHTAwayUnder15, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "ht_home_ou_0_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTHomeOver05,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_home_ou_0_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTHomeUnder05,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_home_ou_1_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTHomeOver15,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_home_ou_1_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTHomeUnder15,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_away_ou_0_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTAwayOver05,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_away_ou_0_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTAwayUnder05,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_away_ou_1_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTAwayOver15,
-          },
-          {
-            match_id: matchId,
-            market_id: "ht_away_ou_1_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHTAwayUnder15,
-          }
-        );
-      }
-
-      {
-        const bSTOver05 = bookify(pSTOver05, margin);
-        const bSTUnder05 = bookify(pSTUnder05, margin);
-        const bSTOver15 = bookify(pSTOver15, margin);
-        const bSTUnder15 = bookify(pSTUnder15, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "st_ou_0_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bSTOver05,
-          },
-          {
-            match_id: matchId,
-            market_id: "st_ou_0_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bSTUnder05,
-          },
-          {
-            match_id: matchId,
-            market_id: "st_ou_1_5",
-            selection: "over",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bSTOver15,
-          },
-          {
-            match_id: matchId,
-            market_id: "st_ou_1_5",
-            selection: "under",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bSTUnder15,
-          }
-        );
-      }
-
-            {
-        const b1ST = bookify(p1ST, margin);
-        const bXST = bookify(pXST, margin);
-        const b2ST = bookify(p2ST, margin);
-
-        const bSTYes = bookify(pSTBttsYes, margin);
-        const bSTNo = bookify(pSTBttsNo, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "st_1x2",
-            selection: "1",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b1ST,
-          },
-          {
-            match_id: matchId,
-            market_id: "st_1x2",
-            selection: "X",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bXST,
-          },
-          {
-            match_id: matchId,
-            market_id: "st_1x2",
-            selection: "2",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...b2ST,
-          },
-          {
-            match_id: matchId,
-            market_id: "st_btts",
-            selection: "yes",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bSTYes,
-          },
-          {
-            match_id: matchId,
-            market_id: "st_btts",
-            selection: "no",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bSTNo,
-          }
-        );
-      }
-
-      {
-        const bEven = bookify(pEven, margin);
-        const bOdd = bookify(pOdd, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "odd_even",
-            selection: "even",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bEven,
-          },
-          {
-            match_id: matchId,
-            market_id: "odd_even",
-            selection: "odd",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bOdd,
-          }
-        );
-      }
-
-            {
-        const bHomeWinToNilYes = bookify(pHomeWinToNilYes, margin, 0.0005, 0.95);
-        const bHomeWinToNilNo = bookify(pHomeWinToNilNo, margin);
-
-        const bAwayWinToNilYes = bookify(pAwayWinToNilYes, margin, 0.0005, 0.95);
-        const bAwayWinToNilNo = bookify(pAwayWinToNilNo, margin);
-
-        const bCleanSheetHomeYes = bookify(pCleanSheetHomeYes, margin, 0.0005, 0.95);
-        const bCleanSheetHomeNo = bookify(pCleanSheetHomeNo, margin);
-
-        const bCleanSheetAwayYes = bookify(pCleanSheetAwayYes, margin, 0.0005, 0.95);
-        const bCleanSheetAwayNo = bookify(pCleanSheetAwayNo, margin);
-
-        rows.push(
-          {
-            match_id: matchId,
-            market_id: "home_win_to_nil",
-            selection: "yes",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeWinToNilYes,
-          },
-          {
-            match_id: matchId,
-            market_id: "home_win_to_nil",
-            selection: "no",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bHomeWinToNilNo,
-          },
-          {
-            match_id: matchId,
-            market_id: "away_win_to_nil",
-            selection: "yes",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayWinToNilYes,
-          },
-          {
-            match_id: matchId,
-            market_id: "away_win_to_nil",
-            selection: "no",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bAwayWinToNilNo,
-          },
-          {
-            match_id: matchId,
-            market_id: "clean_sheet_home",
-            selection: "yes",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bCleanSheetHomeYes,
-          },
-          {
-            match_id: matchId,
-            market_id: "clean_sheet_home",
-            selection: "no",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bCleanSheetHomeNo,
-          },
-          {
-            match_id: matchId,
-            market_id: "clean_sheet_away",
-            selection: "yes",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bCleanSheetAwayYes,
-          },
-          {
-            match_id: matchId,
-            market_id: "clean_sheet_away",
-            selection: "no",
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...bCleanSheetAwayNo,
-          }
-        );
-      }
-
-      {
-        for (const key of EXACT_SCORE_SELECTIONS) {
-          const p = exactScoreProbMap.get(key) ?? 0;
-          const book = bookify(p, margin, 0.0005, 0.95);
-
-          rows.push({
-            match_id: matchId,
-            market_id: "exact_score",
-            selection: key,
-            margin,
-            risk_adjustment: 0,
-            updated_at: nowIso,
-            ...baseMeta,
-            ...book,
-          });
-        }
-
-        const bookOther = bookify(pExactOther, margin, 0.0005, 0.95);
-
-        rows.push({
-          match_id: matchId,
-          market_id: "exact_score",
-          selection: "other",
-          margin,
-          risk_adjustment: 0,
-          updated_at: nowIso,
-          ...baseMeta,
-          ...bookOther,
-        });
-      }
-
-      const { error: oErr } = await sb.from("odds").upsert(rows, {
+      const { error: oErr } = await sb.from("odds").upsert(upsertRows, {
         onConflict: "match_id,market_id,selection",
       });
 
@@ -2068,10 +1157,71 @@ export async function POST(req: Request) {
         return jsonError(oErr.message, 500, {
           stage: "odds_upsert",
           match_id: matchId,
+          engine,
         });
       }
 
-      oddsUpserted += rows.length;
+      const inputSnapshot = buildInputSnapshot({
+        engine,
+        nowIso,
+        margin,
+        homeAdv,
+        drawBoost,
+        maxGoals,
+        firstHalfShare: FIRST_HALF_SHARE,
+        matchId,
+        competitionId: compCode,
+        homeId,
+        awayId,
+        homeTeamName,
+        awayTeamName,
+        standingsCtx,
+        homeStanding,
+        awayStanding,
+        homeRatingRow,
+        awayRatingRow,
+      });
+
+      const outputSnapshot = buildOutputSnapshot({
+        engine,
+        generated,
+        rows: upsertRows,
+        nowIso,
+        margin,
+        homeAdv,
+        drawBoost,
+        maxGoals,
+        firstHalfShare: FIRST_HALF_SHARE,
+        matchId,
+        competitionId: compCode,
+        homeId,
+        awayId,
+        homeTeamName,
+        awayTeamName,
+      });
+
+      try {
+        const { error: runErr } = await sb.from("odds_engine_runs").insert({
+          match_id: matchId,
+          engine_version: engine,
+          competition_id: compCode,
+          home_team_id: homeId,
+          away_team_id: awayId,
+          home_team: homeTeamName,
+          away_team: awayTeamName,
+          input_snapshot: inputSnapshot,
+          output_snapshot: outputSnapshot,
+          odds_rows_count: upsertRows.length,
+        });
+
+        if (runErr) {
+          console.error("odds_engine_runs insert error:", runErr.message);
+        }
+      } catch (e) {
+        console.error("odds_engine_runs insert failed:", e);
+      }
+
+      oddsUpserted += upsertRows.length;
       processedMatches += 1;
     }
 
@@ -2083,6 +1233,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      engine,
       date: date ?? null,
       leagues,
       throttleMs,
@@ -2099,7 +1250,9 @@ export async function POST(req: Request) {
       horizon: { maxAheadDays: MAX_AHEAD_DAYS, horizonIso },
       kickoffGraceMinutes: KICKOFF_GRACE_MINUTES,
       note:
-  "Odds computed from DB matches. Extended markets now include double chance, DNB, multiple goal totals, team goal totals, first-half and second-half totals, first-half and second-half result markets, first-half double chance, first-half/second-half BTTS, odd/even, exact score, win to nil and clean sheet markets.",
+        engine === "v2"
+          ? "Odds computed by v2 engine."
+          : "Odds computed by v1 engine.",
     });
   } catch (e: any) {
     return NextResponse.json(
