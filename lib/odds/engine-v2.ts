@@ -353,64 +353,65 @@ function buildLambdasV2(params: {
   const aGApg =
     safeNum(pickFirst(awayStanding ?? {}, ["goalsAgainst", "goals_against"]), lgGA) / aPlayed;
 
-  const hAttackFromTable = clamp(hGFpg / lgGF, 0.60, 1.55);
-  const hDefenseFromTable = clamp(hGApg / lgGA, 0.60, 1.55);
-  const aAttackFromTable = clamp(aGFpg / lgGF, 0.60, 1.55);
-  const aDefenseFromTable = clamp(aGApg / lgGA, 0.60, 1.55);
+  const hAttackFromTable = clamp(hGFpg / lgGF, 0.72, 1.35);
+const hDefenseFromTable = clamp(hGApg / lgGA, 0.72, 1.35);
+const aAttackFromTable = clamp(aGFpg / lgGF, 0.72, 1.35);
+const aDefenseFromTable = clamp(aGApg / lgGA, 0.72, 1.35);
 
-  const overallGap =
+    const overallGap =
     homeOverall != null && awayOverall != null
-      ? clamp((homeOverall - awayOverall) / 100, -0.35, 0.35)
-      : 0;
+        ? clamp((homeOverall - awayOverall) / 100, -0.22, 0.22)
+        : 0;
 
-  const attackGap =
+    const attackGap =
     homeAttack != null && awayAttack != null
-      ? clamp((homeAttack - awayAttack) / 100, -0.30, 0.30)
-      : 0;
+        ? clamp((homeAttack - awayAttack) / 100, -0.18, 0.18)
+        : 0;
 
-  const defenseGap =
+    const defenseGap =
     homeDefense != null && awayDefense != null
-      ? clamp((homeDefense - awayDefense) / 100, -0.30, 0.30)
-      : 0;
+        ? clamp((homeDefense - awayDefense) / 100, -0.18, 0.18)
+        : 0;
 
-  const formGap =
+    const formGap =
     homeForm != null && awayForm != null
-      ? clamp((homeForm - awayForm) / 100, -0.25, 0.25)
-      : 0;
+        ? clamp((homeForm - awayForm) / 100, -0.15, 0.15)
+        : 0;
 
   const ratingAttackHome =
-    homeAttack != null ? clamp(1 + ((homeAttack - 50) / 100) * 0.55, 0.72, 1.32) : 1;
+  homeAttack != null ? clamp(1 + ((homeAttack - 50) / 100) * 0.32, 0.80, 1.22) : 1;
 
-  const ratingAttackAway =
-    awayAttack != null ? clamp(1 + ((awayAttack - 50) / 100) * 0.55, 0.72, 1.32) : 1;
+const ratingAttackAway =
+  awayAttack != null ? clamp(1 + ((awayAttack - 50) / 100) * 0.32, 0.80, 1.22) : 1;
 
-  const ratingDefenseHome =
-    homeDefense != null ? clamp(1 - ((homeDefense - 50) / 100) * 0.42, 0.72, 1.28) : 1;
+const ratingDefenseHome =
+  homeDefense != null ? clamp(1 - ((homeDefense - 50) / 100) * 0.24, 0.80, 1.20) : 1;
 
-  const ratingDefenseAway =
-    awayDefense != null ? clamp(1 - ((awayDefense - 50) / 100) * 0.42, 0.72, 1.28) : 1;
+const ratingDefenseAway =
+  awayDefense != null ? clamp(1 - ((awayDefense - 50) / 100) * 0.24, 0.80, 1.20) : 1;
 
   const standingsHomeAttack = mix(hAttackFromTable, 1, profile.standingsWeight);
   const standingsAwayAttack = mix(aAttackFromTable, 1, profile.standingsWeight);
   const standingsHomeDefense = mix(hDefenseFromTable, 1, profile.standingsWeight);
   const standingsAwayDefense = mix(aDefenseFromTable, 1, profile.standingsWeight);
 
-  let expectedTotal =
-    profile.baseTotalGoals *
-    (1 + attackGap * 0.10) *
-    (1 - defenseGap * 0.06) *
-    (1 + Math.abs(formGap) * 0.03);
+    let expectedTotal =
+    (profile.baseTotalGoals - 0.12) *
+    (1 + attackGap * 0.04) *
+    (1 - defenseGap * 0.025) *
+    (1 + Math.abs(formGap) * 0.01);
 
-  expectedTotal = clamp(expectedTotal, 2.05, 3.65);
+    expectedTotal = clamp(expectedTotal, 2.00, 3.20);
 
-  let homeShare =
+
+    let homeShare =
     profile.baseHomeShare +
-    overallGap * 0.16 +
-    attackGap * 0.10 -
-    defenseGap * 0.06 +
-    formGap * profile.formWeight;
+    overallGap * 0.09 +
+    attackGap * 0.05 -
+    defenseGap * 0.03 +
+    formGap * 0.06;
 
-  homeShare = clamp(homeShare, 0.38, 0.68);
+    homeShare = clamp(homeShare, 0.42, 0.62);
 
   let lambdaH =
     expectedTotal *
@@ -429,8 +430,8 @@ function buildLambdasV2(params: {
     ratingAttackAway *
     ratingDefenseHome;
 
-  lambdaH *= 1 + overallGap * 0.18 + formGap * 0.08;
-  lambdaA *= 1 - overallGap * 0.16 - formGap * 0.08;
+    lambdaH *= 1 + overallGap * 0.10 + formGap * 0.04;
+    lambdaA *= 1 - overallGap * 0.10 - formGap * 0.04;
 
   lambdaH = clamp(lambdaH, profile.minLambdaH, profile.maxLambdaH);
   lambdaA = clamp(lambdaA, profile.minLambdaA, profile.maxLambdaA);
@@ -694,8 +695,9 @@ export function generateOddsV2(...rawArgs: any[]) {
   const pA0 = Math.exp(-lambdaA);
   const p00 = Math.exp(-lambdaT);
 
-  const pBttsYes = clamp(1 - pH0 - pA0 + p00, 0.01, 0.98);
-  const pBttsNo = 1 - pBttsYes;
+    const rawBttsYes = 1 - pH0 - pA0 + p00;
+    const pBttsYes = clamp(rawBttsYes * 0.97, 0.01, 0.98);
+    const pBttsNo = 1 - pBttsYes;
 
   const pHomeUnder05 = poissonCdf(lambdaH, 0);
   const pHomeOver05 = 1 - pHomeUnder05;

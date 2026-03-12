@@ -819,7 +819,8 @@ export async function POST(req: Request) {
       return jsonError("Invalid JSON body", 400);
     }
 
-    const engine: "v1" | "v2" = body.engine === "v2" ? "v2" : "v1";
+    // domyślnie: v2
+    const engine: "v1" | "v2" = body.engine === "v1" ? "v1" : "v2";
 
     const date = body.date;
     if (date != null && !isYYYYMMDD(date)) {
