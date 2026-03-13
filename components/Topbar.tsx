@@ -1,4 +1,4 @@
-// components/Topbar.tsx
+//components/Topbar.tsx
 "use client";
 
 import Link from "next/link";
@@ -6,6 +6,19 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useSession } from "./useSession";
 import { formatVB } from "@/lib/format";
+
+type ProfileBalanceRow = {
+  balance_vb: number | string | null;
+};
+
+type AdminRow = {
+  user_id: string;
+};
+
+type RefreshBalanceDetail = {
+  balance_vb?: number | string | null;
+  balanceAfter?: number | string | null;
+};
 
 const NavLink = ({ href, label }: { href: string; label: string }) => (
   <Link
@@ -16,6 +29,11 @@ const NavLink = ({ href, label }: { href: string; label: string }) => (
   </Link>
 );
 
+function toBalance(value: number | string | null | undefined) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export default function Topbar() {
   const { session, loading } = useSession();
   const [balanceVb, setBalanceVb] = useState<number | null>(null);
@@ -25,9 +43,11 @@ export default function Topbar() {
   useEffect(() => {
     let cancelled = false;
 
-    const load = async () => {
+    const loadBalance = async () => {
       if (!session?.user?.id) {
-        setBalanceVb(null);
+        if (!cancelled) {
+          setBalanceVb(null);
+        }
         return;
       }
 
@@ -35,32 +55,38 @@ export default function Topbar() {
         .from("profiles")
         .select("balance_vb")
         .eq("id", session.user.id)
-        .single();
+        .maybeSingle();
 
       if (cancelled) return;
-      if (!error) setBalanceVb(Number((data as any)?.balance_vb ?? 0));
+      if (error) return;
+
+      const row = (data ?? null) as ProfileBalanceRow | null;
+      setBalanceVb(toBalance(row?.balance_vb));
     };
 
-    load();
+    void loadBalance();
 
-    const onRefresh = (e?: Event) => {
-      const ce = e as CustomEvent | undefined;
-      const maybe = ce?.detail?.balance_vb ?? ce?.detail?.balanceAfter;
-      if (maybe != null) {
-        const n = Number(maybe);
-        if (Number.isFinite(n)) {
-          setBalanceVb(n);
+    const onRefresh: EventListener = (event) => {
+      const customEvent = event as CustomEvent<RefreshBalanceDetail>;
+      const maybeBalance =
+        customEvent.detail?.balance_vb ?? customEvent.detail?.balanceAfter;
+
+      if (maybeBalance != null) {
+        const parsed = Number(maybeBalance);
+        if (Number.isFinite(parsed)) {
+          setBalanceVb(parsed);
           return;
         }
       }
-      load();
+
+      void loadBalance();
     };
 
-    window.addEventListener("vb:refresh-balance", onRefresh as any);
+    window.addEventListener("vb:refresh-balance", onRefresh);
 
     return () => {
       cancelled = true;
-      window.removeEventListener("vb:refresh-balance", onRefresh as any);
+      window.removeEventListener("vb:refresh-balance", onRefresh);
     };
   }, [session?.user?.id]);
 
@@ -87,7 +113,8 @@ export default function Topbar() {
 
         if (cancelled) return;
 
-        setIsAdmin(!error && !!data);
+        const adminRow = (data ?? null) as AdminRow | null;
+        setIsAdmin(!error && !!adminRow);
       } catch {
         if (!cancelled) {
           setIsAdmin(false);
@@ -99,7 +126,7 @@ export default function Topbar() {
       }
     };
 
-    checkAdmin();
+    void checkAdmin();
 
     return () => {
       cancelled = true;
@@ -124,7 +151,6 @@ export default function Topbar() {
           <nav className="hidden md:flex items-center gap-1">
             <NavLink href="/events" label="Mecze" />
             <NavLink href="/leaderboard" label="Ranking" />
-
             {isLoggedIn ? <NavLink href="/bets" label="Kupony" /> : null}
             {isLoggedIn ? <NavLink href="/groups" label="Grupy" /> : null}
             {!checkingAdmin && isAdmin ? <NavLink href="/admin" label="Admin" /> : null}

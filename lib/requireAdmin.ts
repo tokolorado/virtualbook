@@ -42,11 +42,11 @@ export async function requireAdmin(req: Request): Promise<RequireAdminResult> {
     }
 
     return { ok: true, userId: user.id };
-  } catch (e: any) {
+  } catch (e: unknown) {
     return {
       ok: false,
       status: 500,
-      error: e?.message ?? "Admin auth failed",
+      error: e instanceof Error ? e.message : "Admin auth failed",
     };
   }
 }

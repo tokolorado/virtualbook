@@ -3,7 +3,9 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/requireAdmin";
 import { createClient } from "@supabase/supabase-js";
 
-function jsonError(message: string, status = 500, extra?: any) {
+type JsonObject = Record<string, unknown>;
+
+function jsonError(message: string, status = 500, extra?: JsonObject) {
   return NextResponse.json({ error: message, ...extra }, { status });
 }
 

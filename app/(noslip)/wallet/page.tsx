@@ -1,10 +1,10 @@
-// app/(noslip)/wallet/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import {
   ResponsiveContainer,
   LineChart,
@@ -27,6 +27,28 @@ type LedgerRow = {
   balance_after: number | null;
   ref_type: string | null;
   ref_id: string | null;
+};
+
+type ProfileWalletRow = {
+  balance_vb: number | null;
+  is_banned: boolean | null;
+};
+
+type ChartPoint = {
+  x: number;
+  time: string;
+  rawTime: string;
+  balance: number;
+  change: number;
+  cumulativePnl: number;
+  kind: string;
+  ref_id: string | null;
+  ref_type: string | null;
+  isWeekly: boolean;
+};
+
+type TooltipPayloadEntry = {
+  payload: ChartPoint;
 };
 
 const fmt2 = (n: number | null | undefined) => Number(n ?? 0).toFixed(2);
@@ -68,11 +90,102 @@ function startOfLocalDay(d: Date) {
   return x;
 }
 
-function sameLocalDay(a: Date, b: Date) {
+function getDotColor(kind: string) {
+  if (kind === "BET_PLACED") return "#ef4444";
+  if (kind === "BET_PAYOUT") return "#22c55e";
+  if (kind === "WEEKLY_GRANT") return "#facc15";
+  if (kind === "MANUAL_RECONCILIATION") return "#a78bfa";
+  return "#38bdf8";
+}
+
+function TooltipBox({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: TooltipPayloadEntry[];
+}) {
+  if (!active || !payload?.length) return null;
+
+  const point = payload[0]?.payload;
+  if (!point) return null;
+
+  const color =
+    point.change > 0
+      ? "text-green-400"
+      : point.change < 0
+        ? "text-red-400"
+        : "text-white";
+
   return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
+    <div className="bg-black border border-neutral-700 rounded-xl p-3 shadow-lg text-sm">
+      <div className="text-white font-semibold">{point.time}</div>
+
+      <div className="mt-1 text-neutral-300">
+        Saldo: <span className="text-white">{fmt2(point.balance)} VB</span>
+      </div>
+
+      <div className={`font-semibold ${color}`}>
+        Zmiana: {point.change > 0 ? "+" : ""}
+        {fmt2(point.change)} VB
+      </div>
+
+      <div className="text-neutral-400 text-xs mt-1">
+        Typ: {kindLabel(point.kind)}
+      </div>
+
+      {point.ref_type === "bet" && point.ref_id ? (
+        <div className="text-neutral-400 text-xs mt-1">
+          Bet ID: <span className="text-white">{point.ref_id}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function renderBalanceDot(props: unknown) {
+  const { cx, cy, payload } = (props ?? {}) as {
+    cx?: number;
+    cy?: number;
+    payload?: ChartPoint;
+  };
+
+  if (typeof cx !== "number" || typeof cy !== "number" || !payload) {
+    return null;
+  }
+
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={3.5}
+      fill={getDotColor(payload.kind)}
+      stroke="#0a0a0a"
+      strokeWidth={1.5}
+    />
+  );
+}
+
+function renderActiveBalanceDot(props: unknown) {
+  const { cx, cy, payload } = (props ?? {}) as {
+    cx?: number;
+    cy?: number;
+    payload?: ChartPoint;
+  };
+
+  if (typeof cx !== "number" || typeof cy !== "number" || !payload) {
+    return null;
+  }
+
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={6}
+      fill={getDotColor(payload.kind)}
+      stroke="#ffffff"
+      strokeWidth={2}
+    />
   );
 }
 
@@ -83,7 +196,7 @@ export default function WalletPage() {
   const [balance, setBalance] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const { data: sessionData } = await supabase.auth.getSession();
     const userId = sessionData.session?.user?.id;
 
@@ -98,12 +211,14 @@ export default function WalletPage() {
       .eq("id", userId)
       .single();
 
-    if (prof?.is_banned) {
+    const profile = (prof ?? null) as ProfileWalletRow | null;
+
+    if (profile?.is_banned) {
       router.replace("/");
       return;
     }
 
-    setBalance(prof?.balance_vb ?? 0);
+    setBalance(profile?.balance_vb ?? 0);
 
     const { data } = await supabase
       .from("vb_ledger")
@@ -128,33 +243,41 @@ export default function WalletPage() {
 
     setRows(normalized);
     setLoading(false);
-  };
+  }, [router]);
 
   useEffect(() => {
-    load();
-  }, []);
+    const timer = window.setTimeout(() => {
+      void load();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [load]);
 
   const chartData = useMemo(() => {
-    let cumulativePnl = 0;
-
     return rows
       .filter((r) => r.balance_after !== null)
-      .map((r, index) => {
-        if (isBetKind(r.kind)) cumulativePnl += Number(r.amount ?? 0);
+      .reduce<ChartPoint[]>((acc, r, index) => {
+        const prevPnl = acc.length > 0 ? acc[acc.length - 1].cumulativePnl : 0;
+        const nextPnl =
+          prevPnl + (isBetKind(r.kind) ? Number(r.amount ?? 0) : 0);
 
-        return {
+        acc.push({
           x: index,
           time: new Date(r.created_at).toLocaleString(),
           rawTime: r.created_at,
           balance: Number(r.balance_after ?? 0),
           change: Number(r.amount ?? 0),
-          cumulativePnl,
+          cumulativePnl: nextPnl,
           kind: r.kind,
           ref_id: r.ref_id ?? null,
           ref_type: r.ref_type ?? null,
           isWeekly: isWeeklyKind(r.kind),
-        };
-      });
+        });
+
+        return acc;
+      }, []);
   }, [rows]);
 
   const weeklyGrantPoints = useMemo(() => {
@@ -187,32 +310,51 @@ export default function WalletPage() {
     );
     const payoutSum = betPayout.reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
 
-    const winrate = betPlaced.length > 0 ? (betPayout.length / betPlaced.length) * 100 : 0;
+    const winrate =
+      betPlaced.length > 0 ? (betPayout.length / betPlaced.length) * 100 : 0;
     const roi = stakeAbs > 0 ? ((payoutSum - stakeAbs) / stakeAbs) * 100 : 0;
 
     const now = new Date();
     const startToday = startOfLocalDay(now);
-    const startWeek = startOfLocalDay(new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000));
+    const startWeek = startOfLocalDay(
+      new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+    );
 
-    const betPlacedToday = betPlaced.filter((r) => new Date(r.created_at) >= startToday);
-    const betPayoutToday = betPayout.filter((r) => new Date(r.created_at) >= startToday);
+    const betPlacedToday = betPlaced.filter(
+      (r) => new Date(r.created_at) >= startToday
+    );
+    const betPayoutToday = betPayout.filter(
+      (r) => new Date(r.created_at) >= startToday
+    );
 
     const stakeToday = betPlacedToday.reduce(
       (sum, r) => sum + Math.abs(Number(r.amount ?? 0)),
       0
     );
-    const payoutToday = betPayoutToday.reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
-    const roiDay = stakeToday > 0 ? ((payoutToday - stakeToday) / stakeToday) * 100 : 0;
+    const payoutToday = betPayoutToday.reduce(
+      (sum, r) => sum + Number(r.amount ?? 0),
+      0
+    );
+    const roiDay =
+      stakeToday > 0 ? ((payoutToday - stakeToday) / stakeToday) * 100 : 0;
 
-    const betPlacedWeek = betPlaced.filter((r) => new Date(r.created_at) >= startWeek);
-    const betPayoutWeek = betPayout.filter((r) => new Date(r.created_at) >= startWeek);
+    const betPlacedWeek = betPlaced.filter(
+      (r) => new Date(r.created_at) >= startWeek
+    );
+    const betPayoutWeek = betPayout.filter(
+      (r) => new Date(r.created_at) >= startWeek
+    );
 
     const stakeWeek = betPlacedWeek.reduce(
       (sum, r) => sum + Math.abs(Number(r.amount ?? 0)),
       0
     );
-    const payoutWeek = betPayoutWeek.reduce((sum, r) => sum + Number(r.amount ?? 0), 0);
-    const roiWeek = stakeWeek > 0 ? ((payoutWeek - stakeWeek) / stakeWeek) * 100 : 0;
+    const payoutWeek = betPayoutWeek.reduce(
+      (sum, r) => sum + Number(r.amount ?? 0),
+      0
+    );
+    const roiWeek =
+      stakeWeek > 0 ? ((payoutWeek - stakeWeek) / stakeWeek) * 100 : 0;
 
     return {
       stakesTotal: stakeAbs,
@@ -262,43 +404,6 @@ export default function WalletPage() {
     };
   }, [chartData]);
 
-  const TooltipBox = ({ active, payload }: any) => {
-    if (!active || !payload?.length) return null;
-
-    const p = payload[0].payload;
-    const color =
-      p.change > 0
-        ? "text-green-400"
-        : p.change < 0
-          ? "text-red-400"
-          : "text-white";
-
-    return (
-      <div className="bg-black border border-neutral-700 rounded-xl p-3 shadow-lg text-sm">
-        <div className="text-white font-semibold">{p.time}</div>
-
-        <div className="mt-1 text-neutral-300">
-          Saldo: <span className="text-white">{fmt2(p.balance)} VB</span>
-        </div>
-
-        <div className={`font-semibold ${color}`}>
-          Zmiana: {p.change > 0 ? "+" : ""}
-          {fmt2(p.change)} VB
-        </div>
-
-        <div className="text-neutral-400 text-xs mt-1">
-          Typ: {kindLabel(p.kind)}
-        </div>
-
-        {p.ref_type === "bet" && p.ref_id ? (
-          <div className="text-neutral-400 text-xs mt-1">
-            Bet ID: <span className="text-white">{p.ref_id}</span>
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
   if (loading) return <div className="text-neutral-400">Ładowanie...</div>;
 
   return (
@@ -331,14 +436,13 @@ export default function WalletPage() {
                 stroke="#888"
                 minTickGap={30}
                 tickFormatter={(value) => {
-                  const row = chartData[value];
+                  const row = chartData[Number(value)];
                   if (!row) return "";
                   return new Date(row.rawTime).toLocaleDateString();
                 }}
               />
 
               <YAxis stroke="#888" />
-
               <Tooltip content={<TooltipBox />} />
 
               {weeklyGrantPoints.map((p) => (
@@ -365,46 +469,8 @@ export default function WalletPage() {
                 dataKey="balance"
                 stroke="#38bdf8"
                 strokeWidth={3}
-                dot={(props: any) => {
-                  const { cx, cy, payload } = props;
-
-                  let color = "#38bdf8";
-                  if (payload.kind === "BET_PLACED") color = "#ef4444";
-                  if (payload.kind === "BET_PAYOUT") color = "#22c55e";
-                  if (payload.kind === "WEEKLY_GRANT") color = "#facc15";
-                  if (payload.kind === "MANUAL_RECONCILIATION") color = "#a78bfa";
-
-                  return (
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={3.5}
-                      fill={color}
-                      stroke="#0a0a0a"
-                      strokeWidth={1.5}
-                    />
-                  );
-                }}
-                activeDot={(props: any) => {
-                  const { cx, cy, payload } = props;
-
-                  let color = "#38bdf8";
-                  if (payload.kind === "BET_PLACED") color = "#ef4444";
-                  if (payload.kind === "BET_PAYOUT") color = "#22c55e";
-                  if (payload.kind === "WEEKLY_GRANT") color = "#facc15";
-                  if (payload.kind === "MANUAL_RECONCILIATION") color = "#a78bfa";
-
-                  return (
-                    <circle
-                      cx={cx}
-                      cy={cy}
-                      r={6}
-                      fill={color}
-                      stroke="#ffffff"
-                      strokeWidth={2}
-                    />
-                  );
-                }}
+                dot={renderBalanceDot}
+                activeDot={renderActiveBalanceDot}
               />
 
               <Brush
@@ -412,7 +478,7 @@ export default function WalletPage() {
                 height={30}
                 stroke="#38bdf8"
                 tickFormatter={(value) => {
-                  const row = chartData[value];
+                  const row = chartData[Number(value)];
                   if (!row) return "";
                   return new Date(row.rawTime).toLocaleDateString();
                 }}
@@ -435,7 +501,7 @@ export default function WalletPage() {
                 stroke="#888"
                 minTickGap={30}
                 tickFormatter={(value) => {
-                  const row = chartData[value];
+                  const row = chartData[Number(value)];
                   if (!row) return "";
                   return new Date(row.rawTime).toLocaleDateString();
                 }}
@@ -459,7 +525,7 @@ export default function WalletPage() {
                 height={30}
                 stroke="#38bdf8"
                 tickFormatter={(value) => {
-                  const row = chartData[value];
+                  const row = chartData[Number(value)];
                   if (!row) return "";
                   return new Date(row.rawTime).toLocaleDateString();
                 }}
@@ -580,7 +646,7 @@ function Stat({
   color,
 }: {
   title: string;
-  value: any;
+  value: ReactNode;
   color?: string;
 }) {
   return (

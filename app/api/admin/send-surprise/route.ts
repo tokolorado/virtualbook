@@ -6,7 +6,7 @@ import { requireAdmin } from "@/lib/requireAdmin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function json(status: number, body: any) {
+function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
@@ -62,9 +62,15 @@ export async function POST(req: Request) {
       email: profile.email,
       message,
     });
-  } catch (e: any) {
-    return json(500, { ok: false, error: e?.message ?? "Server error" });
-  }
+    } catch (e: unknown) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: e instanceof Error ? e.message : String(e),
+    },
+    { status: 500 }
+  );
+}
 }
 
 export async function GET(req: Request) {

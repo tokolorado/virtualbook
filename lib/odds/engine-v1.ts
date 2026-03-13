@@ -298,7 +298,7 @@ function compute1X2FromLambdas(args: {
 
   pX *= effectiveDrawBoost;
 
-  let s = p1 + pX + p2;
+  const s = p1 + pX + p2;
   if (s > 0) {
     p1 /= s;
     pX /= s;

@@ -1,7 +1,35 @@
 // /lib/odds/engine-v2.ts
 import type { MatchInput, EngineContext } from "./types";
 
-type AnyObj = Record<string, any>;
+type AnyObj = Record<string, unknown>;
+type MapLike = Map<unknown, unknown> | Record<string, unknown>;
+
+type BaseMeta = {
+  match_id: number;
+  updated_at: string;
+  home_team: string;
+  away_team: string;
+};
+
+type OddsRow = {
+  match_id: number;
+  market_id: string;
+  selection: string;
+  margin: number;
+  risk_adjustment: number;
+  updated_at: string;
+  engine_version: "v2";
+  home_team: string;
+  away_team: string;
+  fair_prob: number;
+  fair_odds: number;
+  book_prob: number;
+  book_odds: number;
+};
+
+function asObj(value: unknown): AnyObj | null {
+  return typeof value === "object" && value !== null ? (value as AnyObj) : null;
+}
 
 const DEFAULT_EXACT_SCORE_SELECTIONS = [
   "0:0",
@@ -25,10 +53,6 @@ const DEFAULT_FIRST_HALF_SHARE = 0.45;
 
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
-}
-
-function mix(a: number, b: number, weightA: number) {
-  return a * weightA + b * (1 - weightA);
 }
 
 function blend(value: number, target: number, t: number) {
@@ -69,12 +93,7 @@ function totalEvenProb(lambdaTotal: number) {
   return clamp((1 + Math.exp(-2 * lambdaTotal)) / 2, 0.0001, 0.9999);
 }
 
-function bookify(
-  prob: number,
-  margin: number,
-  minProb = 0.01,
-  maxProb = 0.98
-) {
+function bookify(prob: number, margin: number, minProb = 0.01, maxProb = 0.98) {
   const fairProb = clamp(prob, minProb, maxProb);
   const fairOdds = 1 / fairProb;
 
@@ -136,39 +155,41 @@ function getCompetitionProfile(code: string | null) {
   };
 }
 
-function getPath(obj: AnyObj | null | undefined, path: string[]) {
-  let cur: any = obj;
+function getPath(obj: unknown, path: string[]) {
+  let cur: unknown = obj;
+
   for (const key of path) {
-    if (cur == null) return undefined;
-    cur = cur[key];
+    const rec = asObj(cur);
+    if (!rec) return undefined;
+    cur = rec[key];
   }
+
   return cur;
 }
 
-function pickFirst(obj: AnyObj | null | undefined, keys: string[]) {
-  if (!obj) return undefined;
+function pickFirst(obj: unknown, keys: string[]) {
+  const rec = asObj(obj);
+  if (!rec) return undefined;
+
   for (const key of keys) {
-    if (key in obj && obj[key] != null) return obj[key];
+    if (key in rec && rec[key] != null) return rec[key];
   }
+
   return undefined;
 }
 
-function normalizeInvocation(args: any[]) {
-  const first = (args[0] ?? {}) as AnyObj;
-  const second = (args[1] ?? {}) as AnyObj;
-  const third = (args[2] ?? {}) as AnyObj;
+function normalizeInvocation(args: unknown[]) {
+  const first = asObj(args[0]) ?? {};
+  const second = asObj(args[1]) ?? {};
+  const third = asObj(args[2]) ?? {};
 
   let match: AnyObj = {};
   let ctx: AnyObj = {};
   let opts: AnyObj = {};
 
-  if (
-    first &&
-    typeof first === "object" &&
-    ("match" in first || "ctx" in first || "context" in first)
-  ) {
-    match = (first.match ?? {}) as AnyObj;
-    ctx = (first.ctx ?? first.context ?? {}) as AnyObj;
+  if ("match" in first || "ctx" in first || "context" in first) {
+    match = asObj(first["match"]) ?? {};
+    ctx = asObj(first["ctx"] ?? first["context"]) ?? {};
     opts = first;
   } else {
     match = first;
@@ -216,7 +237,7 @@ function extractRatingsMap(ctx: AnyObj) {
     pickFirst(ctx, ["ratingsByTeam", "teamRatings", "latestRatings", "ratingsMap"]) ??
     getPath(ctx, ["data", "ratingsByTeam"]) ??
     null
-  ) as Map<any, any> | Record<string, any> | null;
+  ) as MapLike | null;
 }
 
 function extractHomeRatingRow(ctx: AnyObj) {
@@ -235,10 +256,14 @@ function extractAwayRatingRow(ctx: AnyObj) {
   ) as AnyObj | null;
 }
 
-function getFromMapLike(mapLike: any, key: string | number) {
+function getFromMapLike(mapLike: MapLike | null, key: string | number) {
   if (!mapLike) return null;
-  if (typeof mapLike.get === "function") return mapLike.get(key) ?? null;
-  return mapLike[key] ?? null;
+
+  if (mapLike instanceof Map) {
+    return mapLike.get(key) ?? null;
+  }
+
+  return mapLike[String(key)] ?? null;
 }
 
 function resolveRatingRow(
@@ -246,7 +271,7 @@ function resolveRatingRow(
   competitionId: string | null,
   teamId: number | null,
   side: "home" | "away"
-) {
+): AnyObj | null {
   const direct = side === "home" ? extractHomeRatingRow(ctx) : extractAwayRatingRow(ctx);
   if (direct) return direct;
 
@@ -256,10 +281,14 @@ function resolveRatingRow(
   const key1 = `${competitionId ?? ""}:${teamId}`;
   const key2 = String(teamId);
 
-  return getFromMapLike(mapLike, key1) ?? getFromMapLike(mapLike, key2) ?? null;
+  return (
+    asObj(getFromMapLike(mapLike, key1)) ??
+    asObj(getFromMapLike(mapLike, key2)) ??
+    null
+  );
 }
 
-function resolveStandingRow(standingsCtx: AnyObj | null, teamId: number | null) {
+function resolveStandingRow(standingsCtx: AnyObj | null, teamId: number | null): AnyObj | null {
   if (!standingsCtx || teamId == null) return null;
 
   const byTeamId =
@@ -269,11 +298,14 @@ function resolveStandingRow(standingsCtx: AnyObj | null, teamId: number | null) 
 
   if (!byTeamId) return null;
 
-  if (typeof byTeamId.get === "function") {
-    return byTeamId.get(teamId) ?? null;
+  if (byTeamId instanceof Map) {
+    return asObj(byTeamId.get(teamId)) ?? null;
   }
 
-  return byTeamId[teamId] ?? byTeamId[String(teamId)] ?? null;
+  const rec = asObj(byTeamId);
+  if (!rec) return null;
+
+  return asObj(rec[String(teamId)]) ?? null;
 }
 
 function extractRecentMetrics(row: AnyObj | null) {
@@ -394,7 +426,8 @@ function rebalanceMain1X2(args: {
   lambdaA: number;
   homeShare: number;
 }) {
-  let { p1, pX, p2, lambdaH, lambdaA, homeShare } = args;
+  let { p1, pX, p2 } = args;
+  const { lambdaH, lambdaA, homeShare } = args;
 
   const lambdaGap = Math.abs(lambdaH - lambdaA);
   const totalGoals = lambdaH + lambdaA;
@@ -407,8 +440,8 @@ function rebalanceMain1X2(args: {
     const avgSide = (p1 + p2) / 2;
     const homeBias = clamp((homeShare - 0.5) * 0.24, -0.02, 0.03);
 
-    const targetP1 = clamp(avgSide + homeBias, 0.05, 0.80);
-    const targetP2 = clamp(avgSide - homeBias, 0.05, 0.80);
+    const targetP1 = clamp(avgSide + homeBias, 0.05, 0.8);
+    const targetP2 = clamp(avgSide - homeBias, 0.05, 0.8);
     const targetPX = clamp(pX + drawish * 0.035 + closeness * 0.02, 0.08, 0.42);
 
     p1 = blend(p1, targetP1, balanceWeight);
@@ -418,14 +451,13 @@ function rebalanceMain1X2(args: {
 
   const favoriteSide = p1 >= p2 ? "home" : "away";
   const favoriteProb = favoriteSide === "home" ? p1 : p2;
-  const underdogProb = favoriteSide === "home" ? p2 : p1;
 
   const controlledDominance = clamp((lambdaGap - 0.85) / 1.35, 0, 1);
-  const lowTotalControl = clamp((3.10 - totalGoals) / 0.95, 0, 1);
-  const drawSupport = clamp((pX - 0.20) / 0.18, 0, 1);
+  const lowTotalControl = clamp((3.1 - totalGoals) / 0.95, 0, 1);
+  const drawSupport = clamp((pX - 0.2) / 0.18, 0, 1);
 
   const blowoutSignal =
-    clamp((Math.max(lambdaH, lambdaA) - 2.70) / 0.90, 0, 1) *
+    clamp((Math.max(lambdaH, lambdaA) - 2.7) / 0.9, 0, 1) *
     clamp((0.65 - Math.min(lambdaH, lambdaA)) / 0.35, 0, 1);
 
   const maxAllowedFavorite = clamp(
@@ -442,7 +474,7 @@ function rebalanceMain1X2(args: {
     const excess = favoriteProb - maxAllowedFavorite;
     const drawShare = clamp(
       0.52 + lowTotalControl * 0.18 - blowoutSignal * 0.12,
-      0.40,
+      0.4,
       0.72
     );
 
@@ -457,14 +489,10 @@ function rebalanceMain1X2(args: {
     }
   }
 
-  const maxPx = clamp(0.39 - blowoutSignal * 0.10, 0.22, 0.39);
+  const maxPx = clamp(0.39 - blowoutSignal * 0.1, 0.22, 0.39);
   pX = clamp(pX, 0.07, maxPx);
 
-  return renormalize1X2(
-    clamp(p1, 0.03, 0.90),
-    pX,
-    clamp(p2, 0.03, 0.90)
-  );
+  return renormalize1X2(clamp(p1, 0.03, 0.9), pX, clamp(p2, 0.03, 0.9));
 }
 
 function rebalanceDnbFromMain(args: {
@@ -488,7 +516,7 @@ function rebalanceDnbFromMain(args: {
 
   const blowoutSignal =
     clamp((Math.max(args.lambdaH, args.lambdaA) - 2.75) / 0.95, 0, 1) *
-    clamp((0.60 - Math.min(args.lambdaH, args.lambdaA)) / 0.32, 0, 1);
+    clamp((0.6 - Math.min(args.lambdaH, args.lambdaA)) / 0.32, 0, 1);
 
   const favoriteCap = clamp(
     0.76 +
@@ -497,7 +525,7 @@ function rebalanceDnbFromMain(args: {
       lowTotalControl * 0.03 +
       blowoutSignal * 0.08,
     0.76,
-    0.90
+    0.9
   );
 
   if (favoriteProb > favoriteCap) {
@@ -518,7 +546,6 @@ function rebalanceDnbFromMain(args: {
     pAwayDnb: clamp(pAwayDnb, 0.01, 0.99),
   };
 }
-
 
 function buildLambdasV2(params: {
   competitionId: string | null;
@@ -555,37 +582,37 @@ function buildLambdasV2(params: {
   const homeRatingRow = resolveRatingRow(ctx, competitionId, homeId, "home");
   const awayRatingRow = resolveRatingRow(ctx, competitionId, awayId, "away");
 
-  const homeOverall = maybeNum(pickFirst(homeRatingRow ?? {}, ["overall_rating", "overallRating"]));
-  const awayOverall = maybeNum(pickFirst(awayRatingRow ?? {}, ["overall_rating", "overallRating"]));
+  const homeOverall = maybeNum(pickFirst(homeRatingRow, ["overall_rating", "overallRating"]));
+  const awayOverall = maybeNum(pickFirst(awayRatingRow, ["overall_rating", "overallRating"]));
 
-  const homeAttack = maybeNum(pickFirst(homeRatingRow ?? {}, ["attack_rating", "attackRating"]));
-  const awayAttack = maybeNum(pickFirst(awayRatingRow ?? {}, ["attack_rating", "attackRating"]));
+  const homeAttack = maybeNum(pickFirst(homeRatingRow, ["attack_rating", "attackRating"]));
+  const awayAttack = maybeNum(pickFirst(awayRatingRow, ["attack_rating", "attackRating"]));
 
-  const homeDefense = maybeNum(pickFirst(homeRatingRow ?? {}, ["defense_rating", "defenseRating"]));
-  const awayDefense = maybeNum(pickFirst(awayRatingRow ?? {}, ["defense_rating", "defenseRating"]));
+  const homeDefense = maybeNum(pickFirst(homeRatingRow, ["defense_rating", "defenseRating"]));
+  const awayDefense = maybeNum(pickFirst(awayRatingRow, ["defense_rating", "defenseRating"]));
 
-  const homeForm = maybeNum(pickFirst(homeRatingRow ?? {}, ["form_rating", "formRating"]));
-  const awayForm = maybeNum(pickFirst(awayRatingRow ?? {}, ["form_rating", "formRating"]));
+  const homeForm = maybeNum(pickFirst(homeRatingRow, ["form_rating", "formRating"]));
+  const awayForm = maybeNum(pickFirst(awayRatingRow, ["form_rating", "formRating"]));
 
   const recentHome = extractRecentMetrics(homeRatingRow);
   const recentAway = extractRecentMetrics(awayRatingRow);
 
   const hPlayed = Math.max(
     1,
-    safeNum(pickFirst(homeStanding ?? {}, ["playedGames", "played_games"]), 0)
+    safeNum(pickFirst(homeStanding, ["playedGames", "played_games"]), 0)
   );
   const aPlayed = Math.max(
     1,
-    safeNum(pickFirst(awayStanding ?? {}, ["playedGames", "played_games"]), 0)
+    safeNum(pickFirst(awayStanding, ["playedGames", "played_games"]), 0)
   );
 
-  const hGFpg = safeNum(pickFirst(homeStanding ?? {}, ["goalsFor", "goals_for"]), lgGF) / hPlayed;
+  const hGFpg = safeNum(pickFirst(homeStanding, ["goalsFor", "goals_for"]), lgGF) / hPlayed;
   const hGApg =
-    safeNum(pickFirst(homeStanding ?? {}, ["goalsAgainst", "goals_against"]), lgGA) / hPlayed;
+    safeNum(pickFirst(homeStanding, ["goalsAgainst", "goals_against"]), lgGA) / hPlayed;
 
-  const aGFpg = safeNum(pickFirst(awayStanding ?? {}, ["goalsFor", "goals_for"]), lgGF) / aPlayed;
+  const aGFpg = safeNum(pickFirst(awayStanding, ["goalsFor", "goals_for"]), lgGF) / aPlayed;
   const aGApg =
-    safeNum(pickFirst(awayStanding ?? {}, ["goalsAgainst", "goals_against"]), lgGA) / aPlayed;
+    safeNum(pickFirst(awayStanding, ["goalsAgainst", "goals_against"]), lgGA) / aPlayed;
 
   const seasonHomeAttack = clamp(hGFpg / lgGF, 0.65, 1.55);
   const seasonHomeDefenseLeak = clamp(hGApg / lgGA, 0.65, 1.55);
@@ -780,10 +807,10 @@ function buildLambdasV2(params: {
         available: !!standingsCtx,
         home: homeStanding
           ? {
-              teamId: homeStanding.teamId,
-              playedGames: homeStanding.playedGames,
-              goalsFor: homeStanding.goalsFor,
-              goalsAgainst: homeStanding.goalsAgainst,
+              teamId: pickFirst(homeStanding, ["teamId"]),
+              playedGames: pickFirst(homeStanding, ["playedGames"]),
+              goalsFor: pickFirst(homeStanding, ["goalsFor"]),
+              goalsAgainst: pickFirst(homeStanding, ["goalsAgainst"]),
               gfPerGame: hGFpg,
               gaPerGame: hGApg,
               attackFromTable: seasonHomeAttack,
@@ -792,10 +819,10 @@ function buildLambdasV2(params: {
           : null,
         away: awayStanding
           ? {
-              teamId: awayStanding.teamId,
-              playedGames: awayStanding.playedGames,
-              goalsFor: awayStanding.goalsFor,
-              goalsAgainst: awayStanding.goalsAgainst,
+              teamId: pickFirst(awayStanding, ["teamId"]),
+              playedGames: pickFirst(awayStanding, ["playedGames"]),
+              goalsFor: pickFirst(awayStanding, ["goalsFor"]),
+              goalsAgainst: pickFirst(awayStanding, ["goalsAgainst"]),
               gfPerGame: aGFpg,
               gaPerGame: aGApg,
               attackFromTable: seasonAwayAttack,
@@ -813,16 +840,16 @@ function buildLambdasV2(params: {
           attack: homeAttack,
           defense: homeDefense,
           form: homeForm,
-          ratingDate: homeRatingRow?.rating_date ?? null,
-          matchesCount: maybeNum(homeRatingRow?.matches_count),
+          ratingDate: pickFirst(homeRatingRow, ["rating_date"]) ?? null,
+          matchesCount: maybeNum(pickFirst(homeRatingRow, ["matches_count"])),
         },
         away: {
           overall: awayOverall,
           attack: awayAttack,
           defense: awayDefense,
           form: awayForm,
-          ratingDate: awayRatingRow?.rating_date ?? null,
-          matchesCount: maybeNum(awayRatingRow?.matches_count),
+          ratingDate: pickFirst(awayRatingRow, ["rating_date"]) ?? null,
+          matchesCount: maybeNum(pickFirst(awayRatingRow, ["matches_count"])),
         },
       },
       factors: {
@@ -920,8 +947,8 @@ function compute1X2FromLambdas(args: {
 }
 
 function pushMarketRow(
-  rows: any[],
-  baseMeta: AnyObj,
+  rows: OddsRow[],
+  baseMeta: BaseMeta,
   params: {
     marketId: string;
     selection: string;
@@ -950,7 +977,7 @@ function pushMarketRow(
   });
 }
 
-export function generateOddsV2(...rawArgs: any[]) {
+export function generateOddsV2(...rawArgs: unknown[]) {
   const {
     match,
     ctx,
@@ -971,7 +998,7 @@ export function generateOddsV2(...rawArgs: any[]) {
   const competitionId =
     safeStr(
       pickFirst(m, ["competitionId", "competition_id", "competitionCode"]),
-      null as any
+      ""
     ) || null;
 
   const homeId = maybeNum(
@@ -1148,9 +1175,9 @@ export function generateOddsV2(...rawArgs: any[]) {
 
   const pExactOther = clamp(1 - knownExactScoreSum, 0.0005, 0.999);
 
-  const rows: any[] = [];
+  const rows: OddsRow[] = [];
 
-  const baseMeta = {
+  const baseMeta: BaseMeta = {
     match_id: matchId,
     updated_at: nowIso,
     home_team: homeTeam,

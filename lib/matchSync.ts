@@ -1,12 +1,51 @@
+// lib/matchSync.ts
 import { supabaseAdmin } from "./supabaseServer";
 import { fetchMatchesByDate } from "./footballData";
+
+type CachedMatchRow = {
+  id: number;
+  last_sync_at: string | null;
+};
+
+type FootballDataMatch = {
+  id: number;
+  utcDate: string;
+  status: string;
+  matchday?: number | null;
+  competition?: {
+    id?: number | null;
+    name?: string | null;
+  } | null;
+  season?: {
+    id?: number | string | null;
+  } | null;
+  homeTeam?: {
+    name?: string | null;
+  } | null;
+  awayTeam?: {
+    name?: string | null;
+  } | null;
+  score?: {
+    fullTime?: {
+      home?: number | null;
+      away?: number | null;
+    } | null;
+    halfTime?: {
+      home?: number | null;
+      away?: number | null;
+    } | null;
+  } | null;
+};
+
+type FootballDataMatchesPayload = {
+  matches?: FootballDataMatch[];
+};
 
 export async function ensureMatchesCached(dateISO: string, maxAgeMinutes = 10) {
   const sb = supabaseAdmin();
 
-  // sprawdź czy mamy coś świeżego w cache na ten dzień
-  const start = new Date(dateISO + "T00:00:00.000Z");
-  const end = new Date(dateISO + "T23:59:59.999Z");
+  const start = new Date(`${dateISO}T00:00:00.000Z`);
+  const end = new Date(`${dateISO}T23:59:59.999Z`);
 
   const { data: existing } = await sb
     .from("matches")
@@ -14,30 +53,34 @@ export async function ensureMatchesCached(dateISO: string, maxAgeMinutes = 10) {
     .gte("utc_date", start.toISOString())
     .lte("utc_date", end.toISOString());
 
+  const cachedRows = (existing ?? []) as CachedMatchRow[];
+
   const now = Date.now();
   const isFresh =
-    existing &&
-    existing.length > 0 &&
-    existing.every((m) => (now - new Date(m.last_sync_at).getTime()) / 60000 <= maxAgeMinutes);
+    cachedRows.length > 0 &&
+    cachedRows.every((match) => {
+      if (!match.last_sync_at) return false;
+      const lastSyncMs = new Date(match.last_sync_at).getTime();
+      return (now - lastSyncMs) / 60000 <= maxAgeMinutes;
+    });
 
   if (isFresh) return;
 
-  // pobierz z football-data
-  const payload = await fetchMatchesByDate(dateISO);
+  const payload = (await fetchMatchesByDate(dateISO)) as FootballDataMatchesPayload;
   const matches = payload.matches ?? [];
 
-  const rows = matches.map((m: any) => ({
-    id: m.id,
-    competition_id: m.competition?.id ?? null,
-    competition_name: m.competition?.name ?? null,
-    utc_date: m.utcDate,
-    status: m.status,
-    matchday: m.matchday ?? null,
-    season: m.season?.id ? String(m.season.id) : null,
-    home_team: m.homeTeam?.name ?? "Home",
-    away_team: m.awayTeam?.name ?? "Away",
-    home_score: m.score?.fullTime?.home ?? m.score?.halfTime?.home ?? null,
-    away_score: m.score?.fullTime?.away ?? m.score?.halfTime?.away ?? null,
+  const rows = matches.map((match) => ({
+    id: match.id,
+    competition_id: match.competition?.id ?? null,
+    competition_name: match.competition?.name ?? null,
+    utc_date: match.utcDate,
+    status: match.status,
+    matchday: match.matchday ?? null,
+    season: match.season?.id != null ? String(match.season.id) : null,
+    home_team: match.homeTeam?.name ?? "Home",
+    away_team: match.awayTeam?.name ?? "Away",
+    home_score: match.score?.fullTime?.home ?? match.score?.halfTime?.home ?? null,
+    away_score: match.score?.fullTime?.away ?? match.score?.halfTime?.away ?? null,
     last_sync_at: new Date().toISOString(),
   }));
 

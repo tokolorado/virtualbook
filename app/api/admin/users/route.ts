@@ -81,8 +81,8 @@ export async function GET(req: Request) {
 
     const profileIds = (profiles ?? []).map((p: any) => p.id).filter(Boolean);
 
-    let betsCountByUser = new Map<string, number>();
-    let leaderboardByUser = new Map<
+    const betsCountByUser = new Map<string, number>();
+    const leaderboardByUser = new Map<
       string,
       {
         profit: number;

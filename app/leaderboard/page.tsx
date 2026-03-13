@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type LeaderboardRow = {
@@ -95,11 +95,7 @@ function Sparkline({
   `;
 
   return (
-    <svg
-      viewBox="0 0 100 36"
-      className="h-8 w-20 shrink-0"
-      aria-hidden="true"
-    >
+    <svg viewBox="0 0 100 36" className="h-8 w-20 shrink-0" aria-hidden="true">
       <path
         d={d}
         fill="none"
@@ -262,20 +258,28 @@ export default function LeaderboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>("profit");
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     if (silent) setRefreshing(true);
     else setLoading(true);
 
-    const { data } = await supabase.from("leaderboard_global").select("*");
-    setRows((data ?? []) as LeaderboardRow[]);
-
-    if (silent) setRefreshing(false);
-    else setLoading(false);
-  };
+    try {
+      const { data } = await supabase.from("leaderboard_global").select("*");
+      setRows((data ?? []) as LeaderboardRow[]);
+    } finally {
+      if (silent) setRefreshing(false);
+      else setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    load(false);
-  }, []);
+    const timer = window.setTimeout(() => {
+      void load(false);
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [load]);
 
   const sortedRows = useMemo(() => {
     const copy = [...rows];
@@ -354,7 +358,9 @@ export default function LeaderboardPage() {
         </div>
 
         <button
-          onClick={() => load(true)}
+          onClick={() => {
+            void load(true);
+          }}
           disabled={refreshing}
           className={[
             "px-4 py-2 rounded-xl border text-sm transition",

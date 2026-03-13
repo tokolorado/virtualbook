@@ -112,13 +112,13 @@ export async function POST(req: Request) {
       ok: true,
       upstream: data,
     });
-  } catch (e: any) {
+    } catch (e: unknown) {
     return NextResponse.json(
-      {
+        {
         ok: false,
-        error: e?.message ?? "manual_odds_sync_failed",
-      },
-      { status: 500 }
-    );
-  }
+        error: e instanceof Error ? e.message : "manual_odds_sync_failed",
+        },
+            { status: 500 }
+        );
+    }
 }

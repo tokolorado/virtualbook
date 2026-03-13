@@ -2,7 +2,9 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/requireAdmin";
 
-function jsonError(message: string, status = 500, extra?: any) {
+type JsonObject = Record<string, unknown>;
+
+function jsonError(message: string, status = 500, extra?: JsonObject) {
   return NextResponse.json(
     { ok: false, error: message, ...(extra ?? {}) },
     { status }
@@ -44,11 +46,11 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ ok: true, pipelineResponse: data });
-  } catch (e: any) {
-    return jsonError("Admin run-settle failed", 500, {
-      detail: e?.message ?? String(e),
-    });
-  }
+   } catch (e: unknown) {
+  return jsonError("Admin run-settle failed", 500, {
+    detail: e instanceof Error ? e.message : String(e),
+      });
+    }
 }
 
 export async function GET() {

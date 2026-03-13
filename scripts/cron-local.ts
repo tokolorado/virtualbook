@@ -2,7 +2,6 @@
 // Uruchamiasz: npm run cron:local
 // Wymaga: CRON_SECRET w .env.local (i Next dev na localhost:3000)
 
-type Json = any;
 
 const BASE = process.env.CRON_BASE_URL || "http://localhost:3000";
 const SECRET = process.env.CRON_SECRET || "";
@@ -33,29 +32,46 @@ function addDaysUTC(d: Date, days: number) {
   return x;
 }
 
-async function post(path: string): Promise<Json> {
-  const url = `${BASE}${path}`;
-  const r = await fetch(url, {
+const PROTECTED_POSTS = new Set([
+  "/api/odds/sync",
+  "/api/results/sync",
+  "/api/ratings/update",
+  "/api/import/standings",
+  "/api/cron/enqueue-day",
+  "/api/cron/pipeline",
+]);
+
+async function post(path: string, body?: unknown) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  const needsCronSecret =
+    path.startsWith("/api/cron/") || PROTECTED_POSTS.has(path);
+
+  if (needsCronSecret) {
+    if (!SECRET) {
+      throw new Error(`Missing CRON_SECRET for protected route: ${path}`);
+    }
+    headers["x-cron-secret"] = SECRET;
+  }
+
+  const r = await fetch(`${BASE}${path}`, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...(SECRET ? { "x-cron-secret": SECRET } : {}),
-    },
-    body: JSON.stringify({}),
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
   });
 
-  const text = await r.text();
-  let j: any = null;
-  try {
-    j = JSON.parse(text);
-  } catch {
-    j = { raw: text?.slice(0, 500) };
-  }
+  const data = await r.json().catch(() => ({}));
 
   if (!r.ok) {
-    throw new Error(`[${r.status}] ${path} -> ${JSON.stringify(j)}`);
+    throw new Error(
+      `${path} failed: ${data?.error ?? data?.message ?? r.statusText}`
+    );
   }
-  return j;
+
+  return data;
 }
 
 async function tick(tickNo: number) {
@@ -100,24 +116,27 @@ async function main() {
   // pierwsze odpalenie od razu
   try {
     await tick(tickNo);
-  } catch (e: any) {
-    console.error("[CRON] tick error:", e?.message || e);
-  }
+  } catch (e: unknown) {
+  const message = e instanceof Error ? e.message : String(e);
+  console.error("[CRON] tick error:", message);
+}
 
   tickNo++;
 
   setInterval(async () => {
     try {
       await tick(tickNo);
-    } catch (e: any) {
-      console.error("[CRON] tick error:", e?.message || e);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("[CRON] tick error:", message);
     } finally {
       tickNo++;
     }
   }, INTERVAL_MS);
 }
 
-main().catch((e) => {
-  console.error("[CRON] fatal:", e?.message || e);
+main().catch((e: unknown) => {
+  const message = e instanceof Error ? e.message : String(e);
+  console.error("[CRON] fatal:", message);
   process.exit(1);
 });

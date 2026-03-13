@@ -1,7 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 export type SlipItem = {
   matchId: string;
@@ -20,7 +27,6 @@ type BetSlipContextType = {
   stake: string;
   setStake: (v: string) => void;
 
-  // ✅ Mobile drawer open/close (używane przez BetSlip)
   open: boolean;
   setOpen: (v: boolean) => void;
   toggleOpen: () => void;
@@ -29,7 +35,6 @@ type BetSlipContextType = {
   removeFromSlip: (matchId: string, market: string) => void;
   clearSlip: () => void;
 
-  // helpers for UI highlighting
   getItem: (matchId: string, market: string) => SlipItem | undefined;
   isActivePick: (matchId: string, market: string, pick: string) => boolean;
 };
@@ -40,105 +45,124 @@ const LS_SLIP = "vb_slip_v2";
 const LS_STAKE = "vb_stake_v2";
 const LS_OPEN = "vb_slip_open_v1";
 
+function readSlipFromStorage(): SlipItem[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const rawSlip = window.localStorage.getItem(LS_SLIP);
+    if (!rawSlip) return [];
+
+    const parsed: unknown = JSON.parse(rawSlip);
+    return Array.isArray(parsed) ? (parsed as SlipItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function readStakeFromStorage(): string {
+  if (typeof window === "undefined") return "";
+
+  try {
+    return window.localStorage.getItem(LS_STAKE) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function readOpenFromStorage(): boolean {
+  if (typeof window === "undefined") return false;
+
+  try {
+    return window.localStorage.getItem(LS_OPEN) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function BetSlipProvider({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? "";
 
-  const [slip, setSlip] = useState<SlipItem[]>([]);
-  const [stake, setStake] = useState<string>("");
+  const [slip, setSlip] = useState<SlipItem[]>(readSlipFromStorage);
+  const [stake, setStake] = useState<string>(readStakeFromStorage);
+  const [open, setOpen] = useState<boolean>(readOpenFromStorage);
 
-  // ✅ drawer open state (ważne na mobile)
-  const [open, setOpen] = useState<boolean>(false);
+  const shouldHideSlip =
+    pathname.startsWith("/account") ||
+    pathname.startsWith("/admin") ||
+    pathname.startsWith("/wallet");
 
-  // load from localStorage once
+  const effectiveOpen = open && !shouldHideSlip;
+
   useEffect(() => {
     try {
-      const rawSlip = localStorage.getItem(LS_SLIP);
-      const rawStake = localStorage.getItem(LS_STAKE);
-      const rawOpen = localStorage.getItem(LS_OPEN);
-
-      if (rawSlip) {
-        const parsed = JSON.parse(rawSlip);
-        if (Array.isArray(parsed)) setSlip(parsed);
-      }
-      if (rawStake != null) setStake(rawStake);
-
-      if (rawOpen != null) setOpen(rawOpen === "1");
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // persist slip
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_SLIP, JSON.stringify(slip));
+      window.localStorage.setItem(LS_SLIP, JSON.stringify(slip));
     } catch {}
   }, [slip]);
 
-  // persist stake
   useEffect(() => {
     try {
-      localStorage.setItem(LS_STAKE, stake);
+      window.localStorage.setItem(LS_STAKE, stake);
     } catch {}
   }, [stake]);
 
-  // persist open
   useEffect(() => {
     try {
-      localStorage.setItem(LS_OPEN, open ? "1" : "0");
+      window.localStorage.setItem(LS_OPEN, open ? "1" : "0");
     } catch {}
   }, [open]);
 
-  // ✅ auto-close slip na stronach bez kuponu
-  useEffect(() => {
-    if (!pathname) return;
-
-    if (
-      pathname.startsWith("/account") ||
-      pathname.startsWith("/admin") ||
-      pathname.startsWith("/wallet")
-    ) {
-      setOpen(false);
-    }
-  }, [pathname]);
-
-  const addToSlip = (item: SlipItem) => {
+  const addToSlip = useCallback((item: SlipItem) => {
     setSlip((prev) => {
-      const idx = prev.findIndex((x) => x.matchId === item.matchId && x.market === item.market);
+      const idx = prev.findIndex(
+        (x) => x.matchId === item.matchId && x.market === item.market
+      );
+
       if (idx >= 0) {
         const copy = prev.slice();
-        copy[idx] = item; // replace same match+market
+        copy[idx] = item;
         return copy;
       }
+
       return [...prev, item];
     });
 
-    // ✅ UX: jak user doda typ, otwórz slip na mobile
     setOpen(true);
-  };
+  }, []);
 
-  const removeFromSlip = (matchId: string, market: string) => {
-    setSlip((prev) => prev.filter((x) => !(x.matchId === matchId && x.market === market)));
-  };
+  const removeFromSlip = useCallback((matchId: string, market: string) => {
+    setSlip((prev) =>
+      prev.filter((x) => !(x.matchId === matchId && x.market === market))
+    );
+  }, []);
 
-  const clearSlip = () => setSlip([]);
+  const clearSlip = useCallback(() => {
+    setSlip([]);
+  }, []);
 
-  const getItem = (matchId: string, market: string) =>
-    slip.find((x) => x.matchId === matchId && x.market === market);
+  const getItem = useCallback(
+    (matchId: string, market: string) =>
+      slip.find((x) => x.matchId === matchId && x.market === market),
+    [slip]
+  );
 
-  const isActivePick = (matchId: string, market: string, pick: string) => {
-    const it = getItem(matchId, market);
-    return !!it && it.pick === pick;
-  };
+  const isActivePick = useCallback(
+    (matchId: string, market: string, pick: string) => {
+      const it = getItem(matchId, market);
+      return !!it && it.pick === pick;
+    },
+    [getItem]
+  );
 
-  const toggleOpen = () => setOpen((v) => !v);
+  const toggleOpen = useCallback(() => {
+    setOpen((v) => !v);
+  }, []);
 
   const value = useMemo(
     () => ({
       slip,
       stake,
       setStake,
-      open,
+      open: effectiveOpen,
       setOpen,
       toggleOpen,
       addToSlip,
@@ -147,10 +171,22 @@ export function BetSlipProvider({ children }: { children: React.ReactNode }) {
       getItem,
       isActivePick,
     }),
-    [slip, stake, open]
+    [
+      slip,
+      stake,
+      effectiveOpen,
+      toggleOpen,
+      addToSlip,
+      removeFromSlip,
+      clearSlip,
+      getItem,
+      isActivePick,
+    ]
   );
 
-  return <BetSlipContext.Provider value={value}>{children}</BetSlipContext.Provider>;
+  return (
+    <BetSlipContext.Provider value={value}>{children}</BetSlipContext.Provider>
+  );
 }
 
 export function useBetSlip() {

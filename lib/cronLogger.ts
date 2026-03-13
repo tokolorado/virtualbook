@@ -1,6 +1,11 @@
+// lib/cronLogger.ts
 import { supabaseAdmin } from "@/lib/supabaseServer";
 
-export async function cronLogStart(job: string, source = "system") {
+type CronLogInsertRow = {
+  id: number;
+};
+
+export async function cronLogStart(job: string, source = "system"): Promise<number | null> {
   const sb = supabaseAdmin();
 
   const { data, error } = await sb
@@ -11,7 +16,7 @@ export async function cronLogStart(job: string, source = "system") {
       source,
       started_at: new Date().toISOString(),
     })
-    .select()
+    .select("id")
     .single();
 
   if (error) {
@@ -19,10 +24,11 @@ export async function cronLogStart(job: string, source = "system") {
     return null;
   }
 
-  return data.id as number;
+  const row = data as CronLogInsertRow | null;
+  return row?.id ?? null;
 }
 
-export async function cronLogSuccess(id: number | null, details?: any) {
+export async function cronLogSuccess(id: number | null, details?: unknown) {
   if (!id) return;
 
   const sb = supabaseAdmin();
@@ -37,7 +43,7 @@ export async function cronLogSuccess(id: number | null, details?: any) {
     .eq("id", id);
 }
 
-export async function cronLogError(id: number | null, error: any) {
+export async function cronLogError(id: number | null, error: unknown) {
   if (!id) return;
 
   const sb = supabaseAdmin();
@@ -47,7 +53,9 @@ export async function cronLogError(id: number | null, error: any) {
     .update({
       status: "error",
       finished_at: new Date().toISOString(),
-      details: { message: String(error) },
+      details: {
+        message: error instanceof Error ? error.message : String(error),
+      },
     })
     .eq("id", id);
 }

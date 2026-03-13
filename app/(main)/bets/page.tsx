@@ -1,7 +1,7 @@
-//app/(main)/bets/page.tsx
 "use client";
+
+import { useCallback, useEffect, useState } from "react";
 import { formatOdd, formatVB } from "@/lib/format";
-import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type Bet = {
@@ -29,7 +29,6 @@ type BetItem = {
   created_at: string;
 };
 
-
 function pickLabel(pick: string, home: string, away: string) {
   const p = String(pick || "").toUpperCase();
 
@@ -40,7 +39,6 @@ function pickLabel(pick: string, home: string, away: string) {
   return pick;
 }
 
-
 export default function BetsPage() {
   const [loading, setLoading] = useState(true);
   const [bets, setBets] = useState<Bet[]>([]);
@@ -49,73 +47,80 @@ export default function BetsPage() {
   );
   const [openBetId, setOpenBetId] = useState<string | null>(null);
 
-  const loadBets = async () => {
+  const loadBets = useCallback(async () => {
     setLoading(true);
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData.session?.user?.id;
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData.session?.user?.id;
 
-    if (!userId) {
-      setBets([]);
-      setItemsByBetId({});
+      if (!userId) {
+        setBets([]);
+        setItemsByBetId({});
+        return;
+      }
+
+      const { data: betsData, error: betsErr } = await supabase
+        .from("bets")
+        .select("id,user_id,stake,total_odds,potential_win,status,created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false });
+
+      if (betsErr) {
+        console.error("BETS LOAD ERROR:", betsErr);
+        setBets([]);
+        setItemsByBetId({});
+        return;
+      }
+
+      const safeBets = ((betsData ?? []) as Bet[]).slice();
+      setBets(safeBets);
+
+      const betIds = safeBets.map((b) => b.id);
+
+      if (betIds.length === 0) {
+        setItemsByBetId({});
+        return;
+      }
+
+      const { data: itemsData, error: itemsErr } = await supabase
+        .from("bet_items")
+        .select(
+          "id,bet_id,user_id,match_id_bigint,league,home,away,market,pick,odds,kickoff_at,created_at"
+        )
+        .in("bet_id", betIds)
+        .order("created_at", { ascending: true });
+
+      if (itemsErr) {
+        console.error("BET_ITEMS LOAD ERROR:", itemsErr);
+        setItemsByBetId({});
+        return;
+      }
+
+      const grouped: Record<string, BetItem[]> = {};
+
+      for (const item of (itemsData ?? []) as BetItem[]) {
+        if (!grouped[item.bet_id]) {
+          grouped[item.bet_id] = [];
+        }
+        grouped[item.bet_id].push(item);
+      }
+
+      setItemsByBetId(grouped);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    // 🔹 Pobierz tylko swoje kupony
-    const { data: betsData, error: betsErr } = await supabase
-      .from("bets")
-      .select("id,user_id,stake,total_odds,potential_win,status,created_at")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (betsErr) {
-      console.error("BETS LOAD ERROR:", betsErr);
-      setBets([]);
-      setLoading(false);
-      return;
-    }
-
-    const safeBets = (betsData ?? []) as Bet[];
-    setBets(safeBets);
-
-    const betIds = safeBets.map((b) => b.id);
-
-    if (betIds.length === 0) {
-      setItemsByBetId({});
-      setLoading(false);
-      return;
-    }
-
-    // 🔹 Pobierz bet_items (poprawiona kolumna!)
-    const { data: itemsData, error: itemsErr } = await supabase
-      .from("bet_items")
-      .select(
-        "id,bet_id,user_id,match_id_bigint,league,home,away,market,pick,odds,kickoff_at,created_at"
-      )
-      .in("bet_id", betIds)
-      .order("created_at", { ascending: true });
-
-    if (itemsErr) {
-      console.error("BET_ITEMS LOAD ERROR:", itemsErr);
-      setItemsByBetId({});
-      setLoading(false);
-      return;
-    }
-
-    const grouped: Record<string, BetItem[]> = {};
-    (itemsData ?? []).forEach((it: any) => {
-      if (!grouped[it.bet_id]) grouped[it.bet_id] = [];
-      grouped[it.bet_id].push(it as BetItem);
-    });
-
-    setItemsByBetId(grouped);
-    setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
-    loadBets();
-  }, []);
+    const timer = window.setTimeout(() => {
+      void loadBets();
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loadBets]);
 
   const badgeClass = (status: string) => {
     const s = (status || "").toLowerCase();
@@ -166,21 +171,25 @@ export default function BetsPage() {
                     <div className="text-xs text-neutral-400">
                       {new Date(b.created_at).toLocaleString()}
                     </div>
+
                     <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
                       <div>
                         <div className="text-xs text-neutral-400">Stawka</div>
                         <div className="font-semibold">{formatVB(b.stake)} VB</div>
                       </div>
+
                       <div>
                         <div className="text-xs text-neutral-400">Kurs</div>
                         <div className="font-semibold">{formatOdd(b.total_odds)}</div>
                       </div>
+
                       <div>
                         <div className="text-xs text-neutral-400">Wygrana</div>
                         <div className="font-semibold">
                           {formatVB(b.potential_win)} VB
                         </div>
                       </div>
+
                       <div>
                         <div className="text-xs text-neutral-400">Zdarzenia</div>
                         <div className="font-semibold">{items.length}</div>
@@ -222,20 +231,23 @@ export default function BetsPage() {
                           <div className="text-xs text-neutral-400">
                             {it.league} • {it.market}
                           </div>
+
                           <div className="mt-1 text-sm font-semibold">
                             {it.home}{" "}
-                            <span className="text-neutral-400 font-normal">
-                              vs
-                            </span>{" "}
+                            <span className="text-neutral-400 font-normal">vs</span>{" "}
                             {it.away}
                           </div>
+
                           <div className="mt-2 flex items-center justify-between text-xs text-neutral-300">
                             <span>
-                              Typ: <b className="text-white">{pickLabel(it.pick, it.home, it.away)}</b>
+                              Typ:{" "}
+                              <b className="text-white">
+                                {pickLabel(it.pick, it.home, it.away)}
+                              </b>
                             </span>
+
                             <span>
-                              Kurs:{" "}
-                              <b className="text-white">{formatOdd(it.odds)}</b>
+                              Kurs: <b className="text-white">{formatOdd(it.odds)}</b>
                             </span>
                           </div>
                         </div>
@@ -250,7 +262,9 @@ export default function BetsPage() {
       )}
 
       <button
-        onClick={loadBets}
+        onClick={() => {
+          void loadBets();
+        }}
         className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm"
       >
         Odśwież

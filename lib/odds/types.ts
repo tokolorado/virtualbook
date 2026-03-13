@@ -21,12 +21,22 @@ export type TeamRow = {
   playedGames: number;
   goalsFor: number;
   goalsAgainst: number;
+
+  // snake_case compatibility
+  team_id?: number;
+  played_games?: number;
+  goals_for?: number;
+  goals_against?: number;
 };
 
 export type StandingsCtx = {
   byTeamId: Map<number, TeamRow>;
   leagueAvgGoalsFor: number;
   leagueAvgGoalsAgainst: number;
+
+  // snake_case compatibility
+  league_avg_goals_for?: number;
+  league_avg_goals_against?: number;
 };
 
 export type TeamRatingRow = {
@@ -38,6 +48,16 @@ export type TeamRatingRow = {
   formRating: number;
   matchesCount: number;
   ratingDate: string | null;
+
+  // snake_case compatibility for older engine-v1 code
+  team_id?: number;
+  competition_id?: string;
+  overall_rating?: number;
+  attack_rating?: number;
+  defense_rating?: number;
+  form_rating?: number;
+  matches_count?: number;
+  rating_date?: string | null;
 };
 
 export type TeamRatingsCtx = {
@@ -51,12 +71,20 @@ export type MatchInput = {
   awayId: number | null;
   homeTeamName: string | null;
   awayTeamName: string | null;
+
+  // snake_case compatibility
+  match_id?: number;
+  competition_id?: string | null;
+  home_id?: number | null;
+  away_id?: number | null;
+  home_team?: string | null;
+  away_team?: string | null;
 };
 
 export type EngineContext = {
   standingsCtx: StandingsCtx | null;
-  homeRatingRow: any | null;
-  awayRatingRow: any | null;
+  homeRatingRow: TeamRatingRow | null;
+  awayRatingRow: TeamRatingRow | null;
 };
 
 export type EngineConfig = {
