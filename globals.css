@@ -1,3 +1,4 @@
+@import "tailwindcss";
 @keyframes heartfall {
   0% {
     transform: translateY(-10vh);
