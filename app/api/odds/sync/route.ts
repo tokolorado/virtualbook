@@ -770,13 +770,59 @@ function buildOutputSnapshot(args: {
   homeTeamName: string | null;
   awayTeamName: string | null;
 }) {
-  const baseProbabilities = buildProbabilitySnapshot(args.rows, args.firstHalfShare);
-  const probabilities =
-    args.engine === "v2"
-      ? mergeV2DebugIntoProbabilities(baseProbabilities, args.generated?.debug)
-      : baseProbabilities;
+  const baseProbabilities = buildProbabilitySnapshot(
+    args.rows,
+    args.firstHalfShare
+  );
 
-  const snapshot: any = {
+  const v2Debug =
+    args.engine === "v2" &&
+    args.generated?.debug &&
+    typeof args.generated.debug === "object"
+      ? args.generated.debug
+      : null;
+
+  if (v2Debug) {
+    const snapshot: any = {
+      ...v2Debug,
+    };
+
+    snapshot.engineVersion = snapshot.engineVersion ?? args.engine;
+
+    snapshot.match = snapshot.match ?? {
+      matchId: args.matchId,
+      competitionId: args.competitionId,
+      homeId: args.homeId,
+      awayId: args.awayId,
+      homeTeam: args.homeTeamName,
+      awayTeam: args.awayTeamName,
+    };
+
+    snapshot.config = {
+      ...(snapshot.config ?? {}),
+      engine: args.engine,
+      nowIso: snapshot.config?.nowIso ?? args.nowIso,
+      margin: snapshot.config?.margin ?? args.margin,
+      homeAdv: snapshot.config?.homeAdv ?? args.homeAdv,
+      drawBoostInput:
+        snapshot.config?.drawBoostInput ?? args.drawBoost,
+      maxGoals: snapshot.config?.maxGoals ?? args.maxGoals,
+      firstHalfShare:
+        snapshot.config?.firstHalfShare ?? args.firstHalfShare,
+    };
+
+    snapshot.probabilities = mergeV2DebugIntoProbabilities(
+      snapshot.probabilities ?? baseProbabilities,
+      v2Debug
+    );
+
+    snapshot.rowsSummary =
+      snapshot.rowsSummary ?? buildRowsSummary(args.rows);
+
+    return snapshot;
+  }
+
+  return {
     engineVersion: args.engine,
     match: {
       matchId: args.matchId,
@@ -795,17 +841,10 @@ function buildOutputSnapshot(args: {
       maxGoals: args.maxGoals,
       firstHalfShare: args.firstHalfShare,
     },
-    probabilities,
+    probabilities: baseProbabilities,
     rowsSummary: buildRowsSummary(args.rows),
+    note: "Engine did not expose debug payload",
   };
-
-  if (args.generated?.debug && typeof args.generated.debug === "object") {
-    snapshot.debug = args.generated.debug;
-  } else {
-    snapshot.note = "Engine did not expose debug payload";
-  }
-
-  return snapshot;
 }
 
 export async function POST(req: Request) {
@@ -1053,9 +1092,7 @@ export async function POST(req: Request) {
     for (const code of leagues) {
       const { data: ratingRows } = await sb
         .from("team_ratings")
-        .select(
-          "team_id, competition_id, overall_rating, attack_rating, defense_rating, form_rating, matches_count, rating_date"
-        )
+        .select("*")
         .eq("competition_id", code)
         .order("rating_date", { ascending: false });
 

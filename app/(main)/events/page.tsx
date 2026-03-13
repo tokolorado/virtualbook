@@ -26,6 +26,14 @@ type Match = {
   odds: { "1": number | null; X: number | null; "2": number | null };
 };
 
+type Odds1x2DbRow = {
+  match_id: number;
+  selection: string;
+  book_odds: number | string | null;
+  updated_at: string | null;
+  engine_version: string | null;
+};
+
 type League = {
   code: string;
   name: string;
@@ -65,6 +73,11 @@ const FREE_TIER_LEAGUES: League[] = [
 
 const MARKET_ID_1X2 = "1x2";
 const BETTING_CLOSE_BUFFER_MS = 60_000;
+
+function safeNum(v: unknown): number | null {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
 function formatForm(form?: string | null) {
   if (!form) return null;
@@ -188,6 +201,79 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
   return all.filter((m) => localDateKeyFromISO(m.kickoffUtc) === selectedDate);
 }
 
+async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
+  if (!baseMatches.length) {
+    return {
+      matches: baseMatches,
+      latestOddsUpdatedAt: null as string | null,
+    };
+  }
+
+  const matchIds = baseMatches
+    .map((m) => Number(m.id))
+    .filter((id) => Number.isFinite(id));
+
+  if (!matchIds.length) {
+    return {
+      matches: baseMatches,
+      latestOddsUpdatedAt: null as string | null,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("odds")
+    .select("match_id, selection, book_odds, updated_at, engine_version")
+    .in("match_id", matchIds)
+    .eq("market_id", MARKET_ID_1X2)
+    .eq("engine_version", "v2");
+
+  if (error) {
+    throw new Error(`Nie udało się pobrać kursów 1X2 z bazy: ${error.message}`);
+  }
+
+  const byMatch = new Map<string, Match["odds"]>();
+  let latestOddsUpdatedAt: string | null = null;
+
+  for (const row of (data ?? []) as Odds1x2DbRow[]) {
+    const matchId = String(row.match_id);
+    const selection = String(row.selection) as Pick;
+
+    if (selection !== "1" && selection !== "X" && selection !== "2") continue;
+
+    const odd = safeNum(row.book_odds);
+    const current = byMatch.get(matchId) ?? { "1": null, X: null, "2": null };
+
+    current[selection] = odd;
+    byMatch.set(matchId, current);
+
+    if (typeof row.updated_at === "string" && row.updated_at) {
+      if (
+        !latestOddsUpdatedAt ||
+        Date.parse(row.updated_at) > Date.parse(latestOddsUpdatedAt)
+      ) {
+        latestOddsUpdatedAt = row.updated_at;
+      }
+    }
+  }
+
+  return {
+    matches: baseMatches.map((m) => {
+      const dbOdds = byMatch.get(m.id);
+
+      return {
+        ...m,
+        odds: {
+          "1": dbOdds?.["1"] ?? m.odds["1"],
+          X: dbOdds?.X ?? m.odds.X,
+          "2": dbOdds?.["2"] ?? m.odds["2"],
+        },
+      };
+    }),
+    latestOddsUpdatedAt,
+  };
+}
+
+
 function SectionHeader({
   title,
   count,
@@ -284,6 +370,7 @@ export default function EventsPage() {
   const oddsSyncInFlightRef = useRef(false);
 
   const matchesCacheRef = useRef<Record<string, Match[]>>({});
+  const matchesLoadedAtCacheRef = useRef<Record<string, string | null>>({});
   const horizonCacheRef = useRef<Record<string, string | null>>({});
   const beyondCacheRef = useRef<Record<string, boolean>>({});
 
@@ -335,6 +422,7 @@ export default function EventsPage() {
 
   const refreshCurrentDay = () => {
     delete matchesCacheRef.current[selectedDate];
+    delete matchesLoadedAtCacheRef.current[selectedDate];
     delete horizonCacheRef.current[selectedDate];
     delete beyondCacheRef.current[selectedDate];
     setReloadKey((v) => v + 1);
@@ -497,18 +585,28 @@ export default function EventsPage() {
         return;
       }
 
-      const onlySelectedDay = sortMatches(
+      const baseMatches = sortMatches(
         buildMatchesFromPayload(payload, selectedDate),
         Date.now()
       );
 
-      matchesCacheRef.current[selectedDate] = onlySelectedDay;
+      const { matches: hydratedMatches, latestOddsUpdatedAt } =
+        await hydrateMatchesWithDbOdds(baseMatches);
+
+      const loadedAt =
+        latestOddsUpdatedAt ??
+        (typeof payload?.updatedAt === "string"
+          ? payload.updatedAt
+          : new Date().toISOString());
+
+      matchesCacheRef.current[selectedDate] = hydratedMatches;
+      matchesLoadedAtCacheRef.current[selectedDate] = loadedAt;
       horizonCacheRef.current[selectedDate] = apiHorizonTo;
       beyondCacheRef.current[selectedDate] = false;
 
       setBeyondHorizon(false);
-      setMatches(onlySelectedDay);
-      setMatchesLoadedAt(new Date().toISOString());
+      setMatches(hydratedMatches);
+      setMatchesLoadedAt(loadedAt);
       await loadEnabledDates(selectedDate);
     } finally {
       setSyncingOdds(false);
@@ -526,11 +624,13 @@ export default function EventsPage() {
       setHorizonYmd(null);
 
       const cachedMatches = matchesCacheRef.current[selectedDate];
+      const cachedLoadedAt = matchesLoadedAtCacheRef.current[selectedDate];
       const cachedHorizon = horizonCacheRef.current[selectedDate];
       const cachedBeyond = beyondCacheRef.current[selectedDate];
 
       if (cachedMatches) {
         setMatches(cachedMatches);
+        setMatchesLoadedAt(cachedLoadedAt ?? null);
         setHorizonYmd(cachedHorizon ?? null);
         setBeyondHorizon(Boolean(cachedBeyond));
         setLoadingMatches(false);
@@ -582,19 +682,29 @@ export default function EventsPage() {
           return;
         }
 
-        const onlySelectedDay = sortMatches(
+        const baseMatches = sortMatches(
           buildMatchesFromPayload(payload, selectedDate),
           Date.now()
         );
 
+        const { matches: hydratedMatches, latestOddsUpdatedAt } =
+          await hydrateMatchesWithDbOdds(baseMatches);
+
+        const loadedAt =
+          latestOddsUpdatedAt ??
+          (typeof payload?.updatedAt === "string"
+            ? payload.updatedAt
+            : new Date().toISOString());
+
         if (!cancelled) {
-          matchesCacheRef.current[selectedDate] = onlySelectedDay;
+          matchesCacheRef.current[selectedDate] = hydratedMatches;
+          matchesLoadedAtCacheRef.current[selectedDate] = loadedAt;
           horizonCacheRef.current[selectedDate] = apiHorizonTo;
           beyondCacheRef.current[selectedDate] = false;
 
           setBeyondHorizon(false);
-          setMatches(onlySelectedDay);
-          setMatchesLoadedAt(new Date().toISOString());
+          setMatches(hydratedMatches);
+          setMatchesLoadedAt(loadedAt);
         }
       } catch (e: any) {
         if (!cancelled) {

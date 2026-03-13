@@ -1,4 +1,3 @@
-//app/(main)/events/[matchId]/MatchMarketsClient.tsx
 "use client";
 
 import { useSearchParams } from "next/navigation";
@@ -12,6 +11,7 @@ type OddsRow = {
   selection: string;
   book_odds: number;
   updated_at: string;
+  engine_version?: string | null;
 };
 
 type MatchUI = {
@@ -82,6 +82,13 @@ const FALLBACK_MARKETS: Record<
     groupOrder: 10,
     marketLabel: "Podwójna szansa",
     sortOrder: 20,
+  },
+  dnb: {
+    groupKey: "main",
+    groupLabel: "Główne",
+    groupOrder: 10,
+    marketLabel: "Draw No Bet",
+    sortOrder: 25,
   },
   btts: {
     groupKey: "main",
@@ -160,6 +167,13 @@ const FALLBACK_MARKETS: Record<
     marketLabel: "Wynik 1. połowy",
     sortOrder: 10,
   },
+  ht_dc: {
+    groupKey: "first_half",
+    groupLabel: "1. połowa",
+    groupOrder: 50,
+    marketLabel: "Podwójna szansa 1. połowa",
+    sortOrder: 15,
+  },
   ht_ou_0_5: {
     groupKey: "first_half",
     groupLabel: "1. połowa",
@@ -180,49 +194,6 @@ const FALLBACK_MARKETS: Record<
     groupOrder: 50,
     marketLabel: "Obie strzelą w 1. połowie",
     sortOrder: 40,
-  },
-  st_ou_0_5: {
-    groupKey: "second_half",
-    groupLabel: "2. połowa",
-    groupOrder: 60,
-    marketLabel: "Gole w 2. połowie 0.5",
-    sortOrder: 10,
-  },
-  st_ou_1_5: {
-    groupKey: "second_half",
-    groupLabel: "2. połowa",
-    groupOrder: 60,
-    marketLabel: "Gole w 2. połowie 1.5",
-    sortOrder: 20,
-  },
-  odd_even: {
-    groupKey: "extras",
-    groupLabel: "Dodatkowe",
-    groupOrder: 70,
-    marketLabel: "Parzysta/Nieparzysta liczba goli",
-    sortOrder: 10,
-  },
-  exact_score: {
-    groupKey: "extras",
-    groupLabel: "Dodatkowe",
-    groupOrder: 70,
-    marketLabel: "Dokładny wynik",
-    sortOrder: 20,
-  },
-
-    dnb: {
-    groupKey: "main",
-    groupLabel: "Główne",
-    groupOrder: 10,
-    marketLabel: "Draw No Bet",
-    sortOrder: 25,
-  },
-  ht_dc: {
-    groupKey: "first_half",
-    groupLabel: "1. połowa",
-    groupOrder: 50,
-    marketLabel: "Podwójna szansa 1. połowa",
-    sortOrder: 15,
   },
   ht_home_ou_0_5: {
     groupKey: "first_half",
@@ -259,12 +230,40 @@ const FALLBACK_MARKETS: Record<
     marketLabel: "Wynik 2. połowy",
     sortOrder: 5,
   },
+  st_ou_0_5: {
+    groupKey: "second_half",
+    groupLabel: "2. połowa",
+    groupOrder: 60,
+    marketLabel: "Gole w 2. połowie 0.5",
+    sortOrder: 10,
+  },
+  st_ou_1_5: {
+    groupKey: "second_half",
+    groupLabel: "2. połowa",
+    groupOrder: 60,
+    marketLabel: "Gole w 2. połowie 1.5",
+    sortOrder: 20,
+  },
   st_btts: {
     groupKey: "second_half",
     groupLabel: "2. połowa",
     groupOrder: 60,
     marketLabel: "Obie strzelą w 2. połowie",
     sortOrder: 30,
+  },
+  odd_even: {
+    groupKey: "extras",
+    groupLabel: "Dodatkowe",
+    groupOrder: 70,
+    marketLabel: "Parzysta/Nieparzysta liczba goli",
+    sortOrder: 10,
+  },
+  exact_score: {
+    groupKey: "extras",
+    groupLabel: "Dodatkowe",
+    groupOrder: 70,
+    marketLabel: "Dokładny wynik",
+    sortOrder: 20,
   },
   home_win_to_nil: {
     groupKey: "extras",
@@ -309,6 +308,10 @@ const FALLBACK_SELECTIONS: Record<
     "1X": { labelTemplate: "{HOME} lub remis", sortOrder: 10 },
     "12": { labelTemplate: "{HOME} lub {AWAY}", sortOrder: 20 },
     X2: { labelTemplate: "Remis lub {AWAY}", sortOrder: 30 },
+  },
+  dnb: {
+    "1": { labelTemplate: "{HOME}", sortOrder: 10 },
+    "2": { labelTemplate: "{AWAY}", sortOrder: 20 },
   },
   btts: {
     yes: { labelTemplate: "Tak", sortOrder: 10 },
@@ -355,6 +358,11 @@ const FALLBACK_SELECTIONS: Record<
     X: { labelTemplate: "Remis", sortOrder: 20 },
     "2": { labelTemplate: "{AWAY}", sortOrder: 30 },
   },
+  ht_dc: {
+    "1X": { labelTemplate: "{HOME} lub remis", sortOrder: 10 },
+    "12": { labelTemplate: "{HOME} lub {AWAY}", sortOrder: 20 },
+    X2: { labelTemplate: "Remis lub {AWAY}", sortOrder: 30 },
+  },
   ht_ou_0_5: {
     over: { labelTemplate: "Powyżej", sortOrder: 10 },
     under: { labelTemplate: "Poniżej", sortOrder: 20 },
@@ -366,27 +374,6 @@ const FALLBACK_SELECTIONS: Record<
   ht_btts: {
     yes: { labelTemplate: "Tak", sortOrder: 10 },
     no: { labelTemplate: "Nie", sortOrder: 20 },
-  },
-  st_ou_0_5: {
-    over: { labelTemplate: "Powyżej", sortOrder: 10 },
-    under: { labelTemplate: "Poniżej", sortOrder: 20 },
-  },
-  st_ou_1_5: {
-    over: { labelTemplate: "Powyżej", sortOrder: 10 },
-    under: { labelTemplate: "Poniżej", sortOrder: 20 },
-  },
-  odd_even: {
-    even: { labelTemplate: "Parzysta", sortOrder: 10 },
-    odd: { labelTemplate: "Nieparzysta", sortOrder: 20 },
-  },
-    dnb: {
-    "1": { labelTemplate: "{HOME}", sortOrder: 10 },
-    "2": { labelTemplate: "{AWAY}", sortOrder: 20 },
-  },
-  ht_dc: {
-    "1X": { labelTemplate: "{HOME} lub remis", sortOrder: 10 },
-    "12": { labelTemplate: "{HOME} lub {AWAY}", sortOrder: 20 },
-    X2: { labelTemplate: "Remis lub {AWAY}", sortOrder: 30 },
   },
   ht_home_ou_0_5: {
     over: { labelTemplate: "Powyżej", sortOrder: 10 },
@@ -409,9 +396,21 @@ const FALLBACK_SELECTIONS: Record<
     X: { labelTemplate: "Remis", sortOrder: 20 },
     "2": { labelTemplate: "{AWAY}", sortOrder: 30 },
   },
+  st_ou_0_5: {
+    over: { labelTemplate: "Powyżej", sortOrder: 10 },
+    under: { labelTemplate: "Poniżej", sortOrder: 20 },
+  },
+  st_ou_1_5: {
+    over: { labelTemplate: "Powyżej", sortOrder: 10 },
+    under: { labelTemplate: "Poniżej", sortOrder: 20 },
+  },
   st_btts: {
     yes: { labelTemplate: "Tak", sortOrder: 10 },
     no: { labelTemplate: "Nie", sortOrder: 20 },
+  },
+  odd_even: {
+    even: { labelTemplate: "Parzysta", sortOrder: 10 },
+    odd: { labelTemplate: "Nieparzysta", sortOrder: 20 },
   },
   home_win_to_nil: {
     yes: { labelTemplate: "Tak", sortOrder: 10 },
@@ -430,22 +429,22 @@ const FALLBACK_SELECTIONS: Record<
     no: { labelTemplate: "Nie", sortOrder: 20 },
   },
   exact_score: {
-  "0:0": { labelTemplate: "0:0", sortOrder: 10 },
-  "1:0": { labelTemplate: "1:0", sortOrder: 20 },
-  "2:0": { labelTemplate: "2:0", sortOrder: 30 },
-  "2:1": { labelTemplate: "2:1", sortOrder: 40 },
-  "1:1": { labelTemplate: "1:1", sortOrder: 50 },
-  "0:1": { labelTemplate: "0:1", sortOrder: 60 },
-  "0:2": { labelTemplate: "0:2", sortOrder: 70 },
-  "1:2": { labelTemplate: "1:2", sortOrder: 80 },
-  "3:0": { labelTemplate: "3:0", sortOrder: 90 },
-  "3:1": { labelTemplate: "3:1", sortOrder: 100 },
-  "2:2": { labelTemplate: "2:2", sortOrder: 110 },
-  "1:3": { labelTemplate: "1:3", sortOrder: 120 },
-  "0:3": { labelTemplate: "0:3", sortOrder: 130 },
-  "3:2": { labelTemplate: "3:2", sortOrder: 140 },
-  "2:3": { labelTemplate: "2:3", sortOrder: 150 },
-  other: { labelTemplate: "Inny wynik", sortOrder: 999 },
+    "0:0": { labelTemplate: "0:0", sortOrder: 10 },
+    "1:0": { labelTemplate: "1:0", sortOrder: 20 },
+    "2:0": { labelTemplate: "2:0", sortOrder: 30 },
+    "2:1": { labelTemplate: "2:1", sortOrder: 40 },
+    "1:1": { labelTemplate: "1:1", sortOrder: 50 },
+    "0:1": { labelTemplate: "0:1", sortOrder: 60 },
+    "0:2": { labelTemplate: "0:2", sortOrder: 70 },
+    "1:2": { labelTemplate: "1:2", sortOrder: 80 },
+    "3:0": { labelTemplate: "3:0", sortOrder: 90 },
+    "3:1": { labelTemplate: "3:1", sortOrder: 100 },
+    "2:2": { labelTemplate: "2:2", sortOrder: 110 },
+    "1:3": { labelTemplate: "1:3", sortOrder: 120 },
+    "0:3": { labelTemplate: "0:3", sortOrder: 130 },
+    "3:2": { labelTemplate: "3:2", sortOrder: 140 },
+    "2:3": { labelTemplate: "2:3", sortOrder: 150 },
+    other: { labelTemplate: "Inny wynik", sortOrder: 999 },
   },
 };
 
@@ -578,7 +577,6 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
   const competitionCode = sp.get("c") || "";
   const kickoffUtcQS = sp.get("k") || "";
-
   const homeNameQS = sp.get("hn") || "";
   const awayNameQS = sp.get("an") || "";
 
@@ -598,9 +596,12 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   const [kickoffIso, setKickoffIso] = useState<string>(kickoffUtcQS || "");
   const [oddsRows, setOddsRows] = useState<OddsRow[]>([]);
   const [marketCatalog, setMarketCatalog] = useState<MarketCatalogRow[]>([]);
-  const [selectionCatalog, setSelectionCatalog] = useState<MarketSelectionCatalogRow[]>([]);
+  const [selectionCatalog, setSelectionCatalog] = useState<
+    MarketSelectionCatalogRow[]
+  >([]);
 
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 10_000);
     return () => window.clearInterval(id);
@@ -625,69 +626,65 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
       }
 
       try {
-        const [{ data: mRow, error: mErr }, { data: oRows, error: oErr }] =
-          await Promise.all([
-            supabase
-              .from("matches")
-              .select("home_team, away_team, competition_name, utc_date, status")
-              .eq("id", matchIdNum)
-              .maybeSingle(),
-            supabase
-              .from("odds")
-              .select("match_id, market_id, selection, book_odds, updated_at")
-              .eq("match_id", matchIdNum)
-              .order("market_id", { ascending: true })
-              .order("selection", { ascending: true }),
-          ]);
+        const [
+          { data: mRow },
+          { data: oRows, error: oErr },
+          { data: marketData },
+          { data: selectionData },
+        ] = await Promise.all([
+          supabase
+            .from("matches")
+            .select("home_team, away_team, competition_name, utc_date, status")
+            .eq("id", matchIdNum)
+            .maybeSingle(),
 
-        if (mErr) {
-          // fallback below
-        }
+          supabase
+            .from("odds")
+            .select(
+              "match_id, market_id, selection, book_odds, updated_at, engine_version"
+            )
+            .eq("match_id", matchIdNum)
+            .order("market_id", { ascending: true })
+            .order("selection", { ascending: true }),
+
+          supabase
+            .from("market_catalog")
+            .select(
+              "market_id, group_key, group_label, group_order, market_label, sort_order, enabled"
+            )
+            .eq("enabled", true)
+            .order("group_order", { ascending: true })
+            .order("sort_order", { ascending: true }),
+
+          supabase
+            .from("market_selection_catalog")
+            .select(
+              "market_id, selection_key, label_template, short_label, sort_order"
+            )
+            .order("market_id", { ascending: true })
+            .order("sort_order", { ascending: true }),
+        ]);
 
         if (oErr) {
           throw new Error(`Nie udało się pobrać kursów z bazy: ${oErr.message}`);
         }
 
-        let marketRows: MarketCatalogRow[] = [];
-        let selectionRows: MarketSelectionCatalogRow[] = [];
-
-        // optional metadata tables — if missing, fallback labels still work
-        try {
-          const [{ data: marketData }, { data: selectionData }] = await Promise.all([
-            supabase
-              .from("market_catalog")
-              .select(
-                "market_id, group_key, group_label, group_order, market_label, sort_order, enabled"
-              )
-              .eq("enabled", true)
-              .order("group_order", { ascending: true })
-              .order("sort_order", { ascending: true }),
-            supabase
-              .from("market_selection_catalog")
-              .select("market_id, selection_key, label_template, short_label, sort_order")
-              .order("market_id", { ascending: true })
-              .order("sort_order", { ascending: true }),
-          ]);
-
-          marketRows = (marketData ?? []) as MarketCatalogRow[];
-          selectionRows = (selectionData ?? []) as MarketSelectionCatalogRow[];
-        } catch {
-          marketRows = [];
-          selectionRows = [];
-        }
-
         const home = (mRow as any)?.home_team
           ? String((mRow as any).home_team)
           : homeNameQS || "Home";
+
         const away = (mRow as any)?.away_team
           ? String((mRow as any).away_team)
           : awayNameQS || "Away";
+
         const leagueName = (mRow as any)?.competition_name
           ? String((mRow as any).competition_name)
           : competitionCode || "Liga";
+
         const kickoff = (mRow as any)?.utc_date
           ? String((mRow as any).utc_date)
           : kickoffUtcQS || "";
+
         const status = (mRow as any)?.status
           ? String((mRow as any).status)
           : "SCHEDULED";
@@ -698,8 +695,10 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           setMatchUI({ home, away, leagueName, kickoffLocal, status });
           setKickoffIso(kickoff);
           setOddsRows((oRows ?? []) as OddsRow[]);
-          setMarketCatalog(marketRows);
-          setSelectionCatalog(selectionRows);
+          setMarketCatalog((marketData ?? []) as MarketCatalogRow[]);
+          setSelectionCatalog(
+            (selectionData ?? []) as MarketSelectionCatalogRow[]
+          );
         }
 
         if (!oRows || oRows.length === 0) {
@@ -708,13 +707,18 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           }
         }
       } catch (e: any) {
-        if (!cancelled) setErr(e?.message || "Błąd pobierania kursów.");
+        if (!cancelled) {
+          setErr(e?.message || "Błąd pobierania kursów.");
+        }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     };
 
     run();
+
     return () => {
       cancelled = true;
     };
@@ -761,11 +765,28 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
   const oddsUpdatedAt = useMemo(() => {
     if (!oddsRows.length) return null;
+
     const latest = oddsRows
       .map((r) => Date.parse(r.updated_at))
       .filter(Number.isFinite)
       .sort((a, b) => b - a)[0];
+
     return Number.isFinite(latest) ? new Date(latest).toLocaleString() : null;
+  }, [oddsRows]);
+
+  const engineVersionLabel = useMemo(() => {
+    const versions = Array.from(
+      new Set(
+        oddsRows
+          .map((row) => row.engine_version)
+          .filter(
+            (v): v is string => typeof v === "string" && v.trim().length > 0
+          )
+      )
+    );
+
+    if (!versions.length) return null;
+    return versions.join(", ");
   }, [oddsRows]);
 
   return (
@@ -775,21 +796,21 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           <div className="text-neutral-400">Ładowanie…</div>
         ) : (
           <>
-            <div className="text-xs text-neutral-400 flex items-center justify-between gap-2">
+            <div className="flex items-center justify-between gap-2 text-xs text-neutral-400">
               <span>
                 {matchUI.leagueName} • {matchUI.kickoffLocal}
               </span>
 
               {matchUI.status && String(matchUI.status).toUpperCase() === "FINISHED" ? (
-                <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-300">
+                <span className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1 text-[11px] text-neutral-300">
                   Zakończony
                 </span>
               ) : closed ? (
-                <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-amber-300">
+                <span className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1 text-[11px] text-amber-300">
                   Zakłady zamknięte
                 </span>
               ) : (
-                <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-300">
+                <span className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1 text-[11px] text-neutral-300">
                   Pre-match
                 </span>
               )}
@@ -797,19 +818,29 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
             <div className="mt-1 text-xl font-semibold">
               {matchUI.home}{" "}
-              <span className="text-neutral-400 font-normal">vs</span>{" "}
+              <span className="font-normal text-neutral-400">vs</span>{" "}
               {matchUI.away}
             </div>
 
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
               <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
-                Rynki: <span className="font-semibold text-white">{markets.length}</span>
+                Rynki:{" "}
+                <span className="font-semibold text-white">{markets.length}</span>
               </span>
 
               <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
                 Selekcje:{" "}
                 <span className="font-semibold text-white">{oddsRows.length}</span>
               </span>
+
+              {engineVersionLabel ? (
+                <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+                  Silnik:{" "}
+                  <span className="font-semibold text-white">
+                    {engineVersionLabel}
+                  </span>
+                </span>
+              ) : null}
 
               {oddsUpdatedAt ? (
                 <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-500">
@@ -847,7 +878,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         groupedSections.map((section) => (
           <div key={section.key} className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold text-neutral-100">{section.label}</h3>
+              <h3 className="text-sm font-semibold text-neutral-100">
+                {section.label}
+              </h3>
               <span className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-[11px] font-semibold text-neutral-300">
                 {section.markets.length}
               </span>
@@ -867,7 +900,11 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                       Number.isFinite(item.odd) &&
                       item.odd > 0;
 
-                    const active = isActivePick(matchId, market.marketId, item.selection);
+                    const active = isActivePick(
+                      matchId,
+                      market.marketId,
+                      item.selection
+                    );
 
                     return (
                       <button
@@ -896,7 +933,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                         className={[
                           "rounded-xl border px-3 py-2 text-left transition",
                           !hasOdd || closed
-                            ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
+                            ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
                             : active
                               ? "border-neutral-200 bg-white text-black"
                               : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800",
@@ -911,7 +948,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                                 : `Kurs: ${format2(item.odd!)}`
                         }
                       >
-                        <div className="text-sm font-medium truncate">{item.label}</div>
+                        <div className="truncate text-sm font-medium">
+                          {item.label}
+                        </div>
                         <div className="mt-1 text-sm font-semibold">
                           {hasOdd ? format2(item.odd!) : "—"}
                         </div>
