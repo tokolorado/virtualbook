@@ -1,6 +1,7 @@
 // app/api/import/standings/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireCronSecret } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,6 +72,9 @@ function pickTable(standingsJson: any) {
 }
 
 export async function POST(req: Request) {
+  const unauthorized = requireCronSecret(req);
+  if (unauthorized) return unauthorized;
+
   try {
     const raw = await req.text();
     let body: ImportBody = {};

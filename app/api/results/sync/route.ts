@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireCronSecret } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -200,6 +201,10 @@ type SyncBody = {
 };
 
 export async function POST(req: Request) {
+
+  const unauthorized = requireCronSecret(req);
+  if (unauthorized) return unauthorized;
+
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
 
   if (!apiKey) return jsonError("Missing FOOTBALL_DATA_API_KEY in env", 500);

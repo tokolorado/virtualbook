@@ -106,7 +106,7 @@ export default function AdminPage() {
   const [healthLoading, setHealthLoading] = useState(false);
   const [health, setHealth] = useState<SystemHealth | null>(null);
 
-  const [surpriseUserId, setSurpriseUserId] = useState("");
+  const [surpriseEmail, setSurpriseEmail] = useState("");
   const [surpriseMessage, setSurpriseMessage] = useState("");
   const [sendingSurprise, setSendingSurprise] = useState(false);
   const [surpriseResult, setSurpriseResult] = useState<any>(null);
@@ -115,6 +115,14 @@ export default function AdminPage() {
     () => users.find((u) => u.id === selectedUserId) ?? null,
     [users, selectedUserId]
   );
+
+const getAccessToken = async (): Promise<string> => {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) throw new Error("No session token");
+  return token;
+};
+
 
   const load = async () => {
     setLoading(true);
@@ -222,9 +230,16 @@ export default function AdminPage() {
   const refreshStats = async () => {
     try {
       setStatsLoading(true);
+
+      const token = await getAccessToken();
+
       const r = await fetch("/api/admin/settle-stats?bufferMinutes=10", {
         cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
+
       const data = await r.json();
       setSettleStats(data);
     } catch {
@@ -298,9 +313,14 @@ export default function AdminPage() {
       setAutoLoading(true);
       setAutoResult(null);
 
+      const token = await getAccessToken();
+
       const res = await fetch("/api/admin/run-settle", {
         method: "POST",
         cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       const data = await res.json();
@@ -326,11 +346,11 @@ export default function AdminPage() {
   };
 
   const sendSurprise = async () => {
-    const userId = surpriseUserId.trim();
+    const email = surpriseEmail.trim().toLowerCase();
     const message = surpriseMessage.trim();
 
-    if (!userId) {
-      alert("Podaj user ID.");
+    if (!email) {
+      alert("Podaj email użytkownika.");
       return;
     }
 
@@ -343,13 +363,16 @@ export default function AdminPage() {
       setSendingSurprise(true);
       setSurpriseResult(null);
 
+      const token = await getAccessToken();
+
       const res = await fetch("/api/admin/send-surprise", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          userId,
+          email,
           message,
         }),
       });
@@ -380,9 +403,11 @@ export default function AdminPage() {
     }
 
     if (action === "delete_user") {
-      const ok = confirm("Na pewno usunąć użytkownika całkowicie z bazy i auth?");
-      if (!ok) return;
-    }
+  alert(
+    "Hard delete użytkownika jest tymczasowo wyłączony. Zrobimy później bezpieczne RPC do archiwizacji/usuwania konta."
+  );
+  return;
+}
 
     if (action === "reset_balance") {
       const ok = confirm("Wyzerować saldo użytkownika?");
@@ -543,7 +568,7 @@ export default function AdminPage() {
                       key={u.id}
                       onClick={() => {
                         setSelectedUserId(u.id);
-                        setSurpriseUserId(u.id);
+                        setSurpriseEmail(u.email ?? "");
                       }}
                       className={[
                         "border-b border-neutral-800/70 cursor-pointer hover:bg-neutral-950/40",
@@ -690,11 +715,11 @@ export default function AdminPage() {
                       </button>
 
                       <button
-                        onClick={() => runUserAction("delete_user")}
-                        disabled={actionLoading === "delete_user"}
-                        className="px-4 py-2 rounded-xl border border-red-900/50 bg-red-900/20 hover:bg-red-900/30 text-red-200 transition text-sm disabled:opacity-50"
-                      >
-                        {actionLoading === "delete_user" ? "..." : "Delete user"}
+                          disabled
+                          className="px-4 py-2 rounded-xl border border-red-900/30 bg-red-900/10 text-red-300/70 text-sm opacity-60 cursor-not-allowed"
+                          title="Hard delete tymczasowo wyłączony do czasu wdrożenia bezpiecznego RPC"
+                        >
+                          Delete disabled
                       </button>
                     </div>
                   </div>
@@ -904,9 +929,9 @@ export default function AdminPage() {
 
         <div className="grid grid-cols-1 gap-3">
           <input
-            value={surpriseUserId}
-            onChange={(e) => setSurpriseUserId(e.target.value)}
-            placeholder="User ID"
+            value={surpriseEmail}
+            onChange={(e) => setSurpriseEmail(e.target.value)}
+            placeholder="Email użytkownika"
             className="px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-950 text-sm"
           />
 

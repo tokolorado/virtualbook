@@ -327,56 +327,21 @@ export async function POST(req: Request) {
     }
 
     if (action === "delete_user") {
-      const { error: betItemsError } = await supabase
-        .from("bet_items")
-        .delete()
-        .eq("user_id", targetUserId);
+  await writeAdminAudit({
+    adminUserId: guard.userId,
+    action: "ADMIN_DELETE_USER_BLOCKED",
+    targetUserId,
+    details: {
+      reason: "hard_delete_disabled_non_transactional",
+    },
+  });
 
-      if (betItemsError) {
-        return json(500, { ok: false, error: betItemsError.message });
-      }
-
-      const { error: betsError } = await supabase
-        .from("bets")
-        .delete()
-        .eq("user_id", targetUserId);
-
-      if (betsError) {
-        return json(500, { ok: false, error: betsError.message });
-      }
-
-      const { error: ledgerError } = await supabase
-        .from("vb_ledger")
-        .delete()
-        .eq("user_id", targetUserId);
-
-      if (ledgerError) {
-        return json(500, { ok: false, error: ledgerError.message });
-      }
-
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .delete()
-        .eq("id", targetUserId);
-
-      if (profileError) {
-        return json(500, { ok: false, error: profileError.message });
-      }
-
-      const { error: authDeleteError } = await supabase.auth.admin.deleteUser(targetUserId);
-
-      if (authDeleteError) {
-        return json(500, { ok: false, error: authDeleteError.message });
-      }
-
-      await writeAdminAudit({
-        adminUserId: guard.userId,
-        action: "ADMIN_DELETE_USER",
-        targetUserId,
-      });
-
-      return json(200, { ok: true });
-    }
+  return json(409, {
+    ok: false,
+    error:
+      "Hard delete użytkownika jest tymczasowo wyłączony. Najpierw wdrożymy bezpieczne, transakcyjne RPC do archiwizacji lub usuwania konta.",
+  });
+}
 
     return json(400, { ok: false, error: "Nieobsługiwana akcja." });
   } catch (e: any) {

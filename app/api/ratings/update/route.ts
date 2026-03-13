@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireCronSecret } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +35,10 @@ function round6(n: number) {
   return Math.round(n * 1_000_000) / 1_000_000;
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  const unauthorized = requireCronSecret(req);
+  if (unauthorized) return unauthorized;
+
   try {
     const sb = supabaseAdmin();
 

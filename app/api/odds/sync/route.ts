@@ -4,6 +4,7 @@ import { supabaseAdmin } from "@/lib/supabaseServer";
 import { generateOddsV1 } from "@/lib/odds/engine-v1";
 import { generateOddsV2 } from "@/lib/odds/engine-v2";
 import type { MatchInput, EngineContext } from "@/lib/odds/types";
+import { requireCronSecret } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -848,6 +849,9 @@ function buildOutputSnapshot(args: {
 }
 
 export async function POST(req: Request) {
+  const unauthorized = requireCronSecret(req);
+  if (unauthorized) return unauthorized;
+
   try {
     const bodyText = await req.text();
     let body: SyncBody = {};

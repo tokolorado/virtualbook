@@ -504,115 +504,126 @@ export default function EventsPage() {
     void loadEnabledDates(selectedDate);
   }, [loadEnabledDates, selectedDate]);
 
-  async function manualSyncOddsForDay(args: { date: string; league: string }) {
-    if (oddsSyncInFlightRef.current) return;
+async function manualSyncOddsForDay(args: { date: string; league: string }) {
+  if (oddsSyncInFlightRef.current) return;
 
-    oddsSyncInFlightRef.current = true;
-    setSyncingOdds(true);
-    setMatchesError(null);
+  oddsSyncInFlightRef.current = true;
+  setSyncingOdds(true);
+  setMatchesError(null);
 
-    try {
-      const leagues = args.league === "ALL" ? undefined : [String(args.league)];
+  try {
+    const leagues = args.league === "ALL" ? undefined : [String(args.league)];
 
-      const r = await fetch("/api/odds/sync", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          date: args.date,
-          leagues,
-          oddsTtlHours: 6,
-          batchLimit: 30,
-          throttleMs: 800,
-          maxRetries: 2,
-        }),
-      });
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
 
-      const text = await r.text().catch(() => "");
-      let j: any = {};
-      try {
-        j = text ? JSON.parse(text) : {};
-      } catch {
-        j = { raw: text?.slice(0, 300) || "" };
-      }
-
-      if (!r.ok) {
-        const msg =
-          j?.error ||
-          j?.message ||
-          (typeof j?.raw === "string" && j.raw ? j.raw : "") ||
-          `odds sync failed (HTTP ${r.status})`;
-
-        setMatchesError(`Nie udało się zsynchronizować kursów: ${msg}`);
-        return;
-      }
-
-      const rr = await fetch(
-        `/api/events?date=${encodeURIComponent(selectedDate)}`,
-        { cache: "no-store" }
-      );
-
-      const text2 = await rr.text();
-      let payload: any = null;
-      try {
-        payload = JSON.parse(text2);
-      } catch {
-        payload = { error: text2?.slice(0, 300) || "Non-JSON response" };
-      }
-
-      if (!rr.ok) {
-        const msg = payload?.error || `Błąd /api/events (HTTP ${rr.status})`;
-        setMatchesError(msg);
-        return;
-      }
-
-      const apiHorizonTo =
-        typeof payload?.horizonTo === "string" ? payload.horizonTo : null;
-      setHorizonYmd(apiHorizonTo);
-
-      const apiSaysBeyond = Boolean(payload?.isBeyondHorizon);
-      const uiSaysBeyond = isBeyondHorizonDay(selectedDate, apiHorizonTo);
-
-      if (apiSaysBeyond || uiSaysBeyond) {
-        matchesCacheRef.current[selectedDate] = [];
-        horizonCacheRef.current[selectedDate] = apiHorizonTo;
-        beyondCacheRef.current[selectedDate] = true;
-
-        setBeyondHorizon(true);
-        setMatches([]);
-        setMatchesLoadedAt(new Date().toISOString());
-        setMatchesError(null);
-        await loadEnabledDates(selectedDate);
-        return;
-      }
-
-      const baseMatches = sortMatches(
-        buildMatchesFromPayload(payload, selectedDate),
-        Date.now()
-      );
-
-      const { matches: hydratedMatches, latestOddsUpdatedAt } =
-        await hydrateMatchesWithDbOdds(baseMatches);
-
-      const loadedAt =
-        latestOddsUpdatedAt ??
-        (typeof payload?.updatedAt === "string"
-          ? payload.updatedAt
-          : new Date().toISOString());
-
-      matchesCacheRef.current[selectedDate] = hydratedMatches;
-      matchesLoadedAtCacheRef.current[selectedDate] = loadedAt;
-      horizonCacheRef.current[selectedDate] = apiHorizonTo;
-      beyondCacheRef.current[selectedDate] = false;
-
-      setBeyondHorizon(false);
-      setMatches(hydratedMatches);
-      setMatchesLoadedAt(loadedAt);
-      await loadEnabledDates(selectedDate);
-    } finally {
-      setSyncingOdds(false);
-      oddsSyncInFlightRef.current = false;
+    if (!token) {
+      setMatchesError("Brak sesji admina.");
+      return;
     }
+
+    const r = await fetch("/api/admin/manual-odds-sync", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        date: args.date,
+        leagues,
+        oddsTtlHours: 6,
+        batchLimit: 30,
+        throttleMs: 800,
+        maxRetries: 2,
+      }),
+    });
+
+    const text = await r.text().catch(() => "");
+    let j: any = {};
+    try {
+      j = text ? JSON.parse(text) : {};
+    } catch {
+      j = { raw: text?.slice(0, 300) || "" };
+    }
+
+    if (!r.ok) {
+      const msg =
+        j?.error ||
+        j?.message ||
+        (typeof j?.raw === "string" && j.raw ? j.raw : "") ||
+        `odds sync failed (HTTP ${r.status})`;
+
+      setMatchesError(`Nie udało się zsynchronizować kursów: ${msg}`);
+      return;
+    }
+
+    const rr = await fetch(
+      `/api/events?date=${encodeURIComponent(selectedDate)}`,
+      { cache: "no-store" }
+    );
+
+    const text2 = await rr.text();
+    let payload: any = null;
+    try {
+      payload = JSON.parse(text2);
+    } catch {
+      payload = { error: text2?.slice(0, 300) || "Non-JSON response" };
+    }
+
+    if (!rr.ok) {
+      const msg = payload?.error || `Błąd /api/events (HTTP ${rr.status})`;
+      setMatchesError(msg);
+      return;
+    }
+
+    const apiHorizonTo =
+      typeof payload?.horizonTo === "string" ? payload.horizonTo : null;
+    setHorizonYmd(apiHorizonTo);
+
+    const apiSaysBeyond = Boolean(payload?.isBeyondHorizon);
+    const uiSaysBeyond = isBeyondHorizonDay(selectedDate, apiHorizonTo);
+
+    if (apiSaysBeyond || uiSaysBeyond) {
+      matchesCacheRef.current[selectedDate] = [];
+      horizonCacheRef.current[selectedDate] = apiHorizonTo;
+      beyondCacheRef.current[selectedDate] = true;
+
+      setBeyondHorizon(true);
+      setMatches([]);
+      setMatchesLoadedAt(new Date().toISOString());
+      setMatchesError(null);
+      await loadEnabledDates(selectedDate);
+      return;
+    }
+
+    const baseMatches = sortMatches(
+      buildMatchesFromPayload(payload, selectedDate),
+      Date.now()
+    );
+
+    const { matches: hydratedMatches, latestOddsUpdatedAt } =
+      await hydrateMatchesWithDbOdds(baseMatches);
+
+    const loadedAt =
+      latestOddsUpdatedAt ??
+      (typeof payload?.updatedAt === "string"
+        ? payload.updatedAt
+        : new Date().toISOString());
+
+    matchesCacheRef.current[selectedDate] = hydratedMatches;
+    matchesLoadedAtCacheRef.current[selectedDate] = loadedAt;
+    horizonCacheRef.current[selectedDate] = apiHorizonTo;
+    beyondCacheRef.current[selectedDate] = false;
+
+    setBeyondHorizon(false);
+    setMatches(hydratedMatches);
+    setMatchesLoadedAt(loadedAt);
+    await loadEnabledDates(selectedDate);
+  } finally {
+    setSyncingOdds(false);
+    oddsSyncInFlightRef.current = false;
   }
+}
 
   useEffect(() => {
     let cancelled = false;

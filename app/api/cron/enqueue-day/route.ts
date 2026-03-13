@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireCronSecret } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,9 @@ function jsonError(message: string, status = 400) {
 }
 
 export async function POST(req: Request) {
+  const unauthorized = requireCronSecret(req);
+  if (unauthorized) return unauthorized;
+
   try {
     const { day } = await req.json(); // format: YYYY-MM-DD
 
