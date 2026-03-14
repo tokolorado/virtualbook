@@ -1,8 +1,12 @@
+# .github/workflows/cron.yml
 name: VirtualBook Cron
 
 on:
   schedule:
+    - cron: "*/5 * * * *"
     - cron: "*/10 * * * *"
+    - cron: "*/15 * * * *"
+    - cron: "*/20 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -11,16 +15,37 @@ jobs:
 
     steps:
       - name: Call results cron
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/10 * * * *'
         run: |
           curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/results" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
 
       - name: Call settle cron
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/10 * * * *'
         run: |
           curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/settle" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
 
       - name: Call pipeline cron
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/10 * * * *'
         run: |
           curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/pipeline" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
+
+      - name: Call match-center pre-match cron
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/15 * * * *'
+        run: |
+          curl -fsS "${{ secrets.CRON_BASE_URL }}/api/cron/import-match-center-batch?statuses=SCHEDULED,TIMED&onlyMissingLineups=1&limit=8&poolSize=60&preKickoffMinutes=180&postKickoffGraceMinutes=90&refreshCooldownMinutes=15" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
+
+      - name: Call match-center live cron
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
+        run: |
+          curl -fsS "${{ secrets.CRON_BASE_URL }}/api/cron/import-match-center-batch?statuses=IN_PLAY,PAUSED,LIVE&limit=12&poolSize=60&refreshCooldownMinutes=3" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
+
+      - name: Call match-center finalize cron
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/20 * * * *'
+        run: |
+          curl -fsS "${{ secrets.CRON_BASE_URL }}/api/cron/import-match-center-batch?statuses=FINISHED&onlyMissingStats=1&limit=10&poolSize=60&finishedLookbackHours=18&refreshCooldownMinutes=20" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
