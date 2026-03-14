@@ -1,5 +1,7 @@
+//app/(main)/events/[matchId]/MatchMarketsClient.tsx
 "use client";
 
+import MatchInsightsSection from "@/components/match/MatchInsightsSection";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -852,6 +854,13 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         )}
       </div>
 
+    <MatchInsightsSection
+      matchId={matchId}
+      competitionCode={competitionCode}
+      homeTeam={matchUI.home}
+      awayTeam={matchUI.away}
+    />
+
       {err ? (
         <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
           {err}
@@ -967,6 +976,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           Brak aktywnych rynków w bazie dla tego meczu.
         </div>
       )}
+
     </div>
   );
 }

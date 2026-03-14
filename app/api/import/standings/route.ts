@@ -12,18 +12,69 @@ const DEFAULT_COMPETITIONS = ["CL", "PL", "BL1", "FL1", "SA", "PD", "WC"] as con
 type ImportBody = {
   competitions?: string[];
   season?: string;
-  snapshotDate?: string; // YYYY-MM-DD
 };
 
-function jsonError(message: string, status = 400, extra?: any) {
+type JsonObject = Record<string, unknown>;
+
+type StandingRowInsert = {
+  competition_id: string;
+  competition_name: string | null;
+  season: string;
+  matchday: number | null;
+  team_id: number;
+  team_name: string;
+  position: number;
+  played: number;
+  won: number;
+  draw: number;
+  lost: number;
+  goals_for: number;
+  goals_against: number;
+  goal_diff: number;
+  points: number;
+  form: string | null;
+  source: string;
+};
+
+function jsonError(message: string, status = 400, extra?: unknown) {
   return NextResponse.json({ error: message, extra }, { status });
 }
 
-function isYYYYMMDD(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+function asObject(value: unknown): JsonObject {
+  return typeof value === "object" && value !== null
+    ? (value as JsonObject)
+    : {};
 }
 
-async function fdFetch(path: string) {
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : fallback;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return fallback;
+}
+
+function nullableText(value: unknown): string | null {
+  const text = safeText(value, "");
+  return text.length > 0 ? text : null;
+}
+
+function safeInt(value: unknown, fallback: number | null = null): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.trunc(n);
+}
+
+async function fdFetch(path: string): Promise<unknown> {
   const token =
     process.env.FOOTBALL_DATA_TOKEN || process.env.FOOTBALL_DATA_API_KEY;
 
@@ -31,44 +82,62 @@ async function fdFetch(path: string) {
     throw new Error("Missing FOOTBALL_DATA_TOKEN (or FOOTBALL_DATA_API_KEY)");
   }
 
-  const r = await fetch(`${FOOTBALL_DATA_BASE}${path}`, {
+  const response = await fetch(`${FOOTBALL_DATA_BASE}${path}`, {
     headers: {
       "X-Auth-Token": token,
     },
     cache: "no-store",
   });
 
-  const text = await r.text();
+  const text = await response.text();
 
-  let payload: any = null;
+  let payload: unknown;
   try {
-    payload = JSON.parse(text);
+    payload = JSON.parse(text) as unknown;
   } catch {
-    payload = { raw: text?.slice(0, 500) || "" };
+    payload = { raw: text.slice(0, 500) };
   }
 
-  if (!r.ok) {
+  if (!response.ok) {
+    const payloadObj = asObject(payload);
     throw new Error(
-      payload?.message ||
-        payload?.error ||
-        `football-data error (HTTP ${r.status})`
+      safeText(payloadObj.message) ||
+        safeText(payloadObj.error) ||
+        `football-data error (HTTP ${response.status})`
     );
   }
 
   return payload;
 }
 
-function pickTable(standingsJson: any) {
-  const standings = Array.isArray(standingsJson?.standings)
-    ? standingsJson.standings
-    : [];
+function pickTable(payload: unknown): JsonObject[] {
+  const root = asObject(payload);
+  const standings = asArray(root.standings);
 
-  const total =
-    standings.find((x: any) => x?.type === "TOTAL" && Array.isArray(x?.table)) ??
-    standings.find((x: any) => Array.isArray(x?.table)) ??
+  const preferred =
+    standings.find((entry) => {
+      const row = asObject(entry);
+      return safeText(row.type) === "TOTAL" && Array.isArray(row.table);
+    }) ??
+    standings.find((entry) => {
+      const row = asObject(entry);
+      return Array.isArray(row.table);
+    }) ??
     null;
 
-  return Array.isArray(total?.table) ? total.table : [];
+  const preferredObj = asObject(preferred);
+  return asArray(preferredObj.table).map((entry) => asObject(entry));
+}
+
+function resolveSeasonLabel(seasonValue: string | null, seasonObj: JsonObject): string {
+  if (seasonValue) return seasonValue;
+
+  const startDate = safeText(seasonObj.startDate);
+  if (startDate.length >= 4) {
+    return startDate.slice(0, 4);
+  }
+
+  return String(new Date().getUTCFullYear());
 }
 
 export async function POST(req: Request) {
@@ -80,182 +149,156 @@ export async function POST(req: Request) {
     let body: ImportBody = {};
 
     try {
-      body = raw ? JSON.parse(raw) : {};
+      body = raw ? (JSON.parse(raw) as ImportBody) : {};
     } catch {
       return jsonError("Invalid JSON body", 400);
     }
 
-    const competitions =
-      Array.isArray(body.competitions) && body.competitions.length
-        ? body.competitions.map(String)
+    const competitionsSource =
+      Array.isArray(body.competitions) && body.competitions.length > 0
+        ? body.competitions
         : [...DEFAULT_COMPETITIONS];
 
-    const snapshotDate = isYYYYMMDD(body.snapshotDate)
-      ? body.snapshotDate
-      : new Date().toISOString().slice(0, 10);
+    const competitions = Array.from(
+      new Set(
+        competitionsSource
+          .map((value) => safeText(value).toUpperCase())
+          .filter((value) => value.length > 0)
+      )
+    );
 
-    const season =
-      typeof body.season === "string" && body.season.trim()
+    if (competitions.length === 0) {
+      return jsonError("No competitions provided", 400);
+    }
+
+    const requestedSeason =
+      typeof body.season === "string" && body.season.trim().length > 0
         ? body.season.trim()
         : null;
 
     const sb = supabaseAdmin();
 
-    const results: any[] = [];
+    const results: Array<{
+      competition: string;
+      competitionName: string;
+      season: string;
+      rows: number;
+      ok: boolean;
+      note?: string;
+    }> = [];
+
     let competitionsUpserted = 0;
-    let teamsUpserted = 0;
-    let snapshotsUpserted = 0;
+    let standingsRowsUpserted = 0;
 
     for (const code of competitions) {
-      const path = season
-        ? `/competitions/${encodeURIComponent(code)}/standings?season=${encodeURIComponent(season)}`
+      const path = requestedSeason
+        ? `/competitions/${encodeURIComponent(code)}/standings?season=${encodeURIComponent(
+            requestedSeason
+          )}`
         : `/competitions/${encodeURIComponent(code)}/standings`;
 
-      const standingsJson = await fdFetch(path);
+      const payload = await fdFetch(path);
+      const root = asObject(payload);
 
-      const competition = standingsJson?.competition ?? {};
-      const area = standingsJson?.area ?? {};
-      const seasonObj = standingsJson?.season ?? {};
-      const table = pickTable(standingsJson);
+      const competition = asObject(root.competition);
+      const seasonObj = asObject(root.season);
+      const table = pickTable(payload);
 
-      if (!table.length) {
+      const competitionId = safeText(competition.code, code).toUpperCase();
+      const competitionName = safeText(competition.name, competitionId);
+      const seasonLabel = resolveSeasonLabel(requestedSeason, seasonObj);
+      const currentMatchday = safeInt(seasonObj.currentMatchday, null);
+
+      if (table.length === 0) {
         results.push({
-          competition: code,
-          ok: true,
+          competition: competitionId,
+          competitionName,
+          season: seasonLabel,
           rows: 0,
+          ok: true,
           note: "No standings rows returned",
         });
         continue;
       }
 
-      const competitionId = String(competition?.code || code);
-      const competitionName = String(competition?.name || code);
-      const competitionType =
-        competition?.type != null ? String(competition.type) : null;
-      const areaName = area?.name != null ? String(area.name) : null;
-      const emblem = competition?.emblem != null ? String(competition.emblem) : null;
+      const rows: StandingRowInsert[] = table
+        .map<StandingRowInsert | null>((entry) => {
+          const team = asObject(entry.team);
+          const teamId = safeInt(team.id, null);
 
-      const seasonLabel =
-        season ||
-        (seasonObj?.startDate
-          ? String(seasonObj.startDate).slice(0, 4)
-          : new Date().getUTCFullYear().toString());
-
-      const { error: compErr } = await sb.from("competitions").upsert(
-        {
-          id: competitionId,
-          name: competitionName,
-          type: competitionType,
-          area_name: areaName,
-          emblem,
-          last_sync_at: new Date().toISOString(),
-        },
-        { onConflict: "id" }
-      );
-
-      if (compErr) {
-        throw new Error(`competitions upsert failed (${code}): ${compErr.message}`);
-      }
-
-      competitionsUpserted += 1;
-
-      const teamRows = table
-        .map((row: any) => {
-          const team = row?.team;
-          const teamId = Number(team?.id);
-          if (!Number.isFinite(teamId)) return null;
-
-          return {
-            id: teamId,
-            name: String(team?.name || `Team ${teamId}`),
-            short_name: team?.shortName != null ? String(team.shortName) : null,
-            tla: team?.tla != null ? String(team.tla) : null,
-            crest: team?.crest != null ? String(team.crest) : null,
-            area_name: areaName,
-            last_sync_at: new Date().toISOString(),
-          };
-        })
-        .filter(Boolean);
-
-      if (teamRows.length) {
-        const { error: teamErr } = await sb
-          .from("teams")
-          .upsert(teamRows, { onConflict: "id" });
-
-        if (teamErr) {
-          throw new Error(`teams upsert failed (${code}): ${teamErr.message}`);
-        }
-
-        teamsUpserted += teamRows.length;
-      }
-
-      const snapshotRows = table
-        .map((row: any) => {
-          const team = row?.team;
-          const teamId = Number(team?.id);
-          if (!Number.isFinite(teamId)) return null;
+          if (teamId == null) return null;
 
           return {
             competition_id: competitionId,
-            team_id: teamId,
+            competition_name: competitionName || null,
             season: seasonLabel,
-            snapshot_date: snapshotDate,
-
-            position: Number(row?.position ?? 0),
-            played_games: Number(row?.playedGames ?? 0),
-
-            won: Number(row?.won ?? 0),
-            draw: Number(row?.draw ?? 0),
-            lost: Number(row?.lost ?? 0),
-
-            goals_for: Number(row?.goalsFor ?? 0),
-            goals_against: Number(row?.goalsAgainst ?? 0),
-            goal_difference: Number(row?.goalDifference ?? 0),
-
-            points: Number(row?.points ?? 0),
+            matchday: currentMatchday,
+            team_id: teamId,
+            team_name: safeText(team.name, `Team ${teamId}`),
+            position: safeInt(entry.position, 0) ?? 0,
+            played: safeInt(entry.playedGames, 0) ?? 0,
+            won: safeInt(entry.won, 0) ?? 0,
+            draw: safeInt(entry.draw, 0) ?? 0,
+            lost: safeInt(entry.lost, 0) ?? 0,
+            goals_for: safeInt(entry.goalsFor, 0) ?? 0,
+            goals_against: safeInt(entry.goalsAgainst, 0) ?? 0,
+            goal_diff: safeInt(entry.goalDifference, 0) ?? 0,
+            points: safeInt(entry.points, 0) ?? 0,
+            form: nullableText(entry.form),
+            source: "football-data",
           };
         })
-        .filter(Boolean);
+        .filter((row): row is StandingRowInsert => row !== null);
 
-      if (snapshotRows.length) {
-        const { error: snapErr } = await sb
-          .from("standings_snapshots")
-          .upsert(snapshotRows, {
-            onConflict: "competition_id,team_id,season,snapshot_date",
-          });
-
-        if (snapErr) {
-          throw new Error(
-            `standings_snapshots upsert failed (${code}): ${snapErr.message}`
-          );
-        }
-
-        snapshotsUpserted += snapshotRows.length;
+      if (rows.length === 0) {
+        results.push({
+          competition: competitionId,
+          competitionName,
+          season: seasonLabel,
+          rows: 0,
+          ok: true,
+          note: "No valid standings rows after normalization",
+        });
+        continue;
       }
+
+      const { error: standingsErr } = await sb.from("standings").upsert(rows, {
+        onConflict: "competition_id,season,team_id",
+      });
+
+      if (standingsErr) {
+        throw new Error(
+          `standings upsert failed (${competitionId}): ${standingsErr.message}`
+        );
+      }
+
+      competitionsUpserted += 1;
+      standingsRowsUpserted += rows.length;
 
       results.push({
         competition: competitionId,
         competitionName,
         season: seasonLabel,
-        rows: snapshotRows.length,
+        rows: rows.length,
         ok: true,
       });
     }
 
     return NextResponse.json({
       ok: true,
-      snapshotDate,
-      season,
       competitions,
+      requestedSeason,
       competitionsUpserted,
-      teamsUpserted,
-      snapshotsUpserted,
+      standingsRowsUpserted,
       results,
     });
-  } catch (e: any) {
+  } catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : "Server error";
+
     return NextResponse.json(
       {
-        error: e?.message || "Server error",
+        error: message,
       },
       { status: 500 }
     );
