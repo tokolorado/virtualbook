@@ -1,4 +1,3 @@
-// app/api/cron/settle/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
@@ -14,6 +13,12 @@ type MatchSettleResult = {
   error: string | null;
   betsTouched: number;
   betsSettleCalls: number;
+};
+
+type PendingBetBackfillResult = {
+  betId: string;
+  ok: boolean;
+  error: string | null;
 };
 
 function json(status: number, body: any) {
@@ -49,17 +54,29 @@ export async function POST(req: Request) {
 
     const supabase = supabaseAdmin();
 
-    const BATCH_LIMIT = Number(process.env.SETTLE_BATCH_LIMIT ?? "25");
-    const LIMIT = Number.isFinite(BATCH_LIMIT) && BATCH_LIMIT > 0 ? BATCH_LIMIT : 25;
+    const MATCH_BATCH_LIMIT = Number(process.env.SETTLE_BATCH_LIMIT ?? "25");
+    const BET_BACKFILL_LIMIT = Number(process.env.SETTLE_BET_BACKFILL_LIMIT ?? "100");
 
-    // 1) Candidate matches: takie, które mają bet_items.settled = false/null
+    const matchLimit =
+      Number.isFinite(MATCH_BATCH_LIMIT) && MATCH_BATCH_LIMIT > 0
+        ? MATCH_BATCH_LIMIT
+        : 25;
+
+    const betBackfillLimit =
+      Number.isFinite(BET_BACKFILL_LIMIT) && BET_BACKFILL_LIMIT > 0
+        ? BET_BACKFILL_LIMIT
+        : 100;
+
+    // ------------------------------------------------------------
+    // ETAP 1: świeże FINISHED mecze, które mają jeszcze nierozliczone bet_items
+    // ------------------------------------------------------------
     const { data: candRows, error: candErr } = await supabase
       .from("bet_items")
       .select("match_id_bigint, kickoff_at")
       .or("settled.is.false,settled.is.null")
       .not("match_id_bigint", "is", null)
       .order("kickoff_at", { ascending: true })
-      .limit(LIMIT * 5);
+      .limit(matchLimit * 5);
 
     if (candErr) throw candErr;
 
@@ -71,81 +88,43 @@ export async function POST(req: Request) {
       )
     );
 
-    if (!candidateIds.length) {
-      await cronLogSuccess(logId, {
-        ok: true,
-        job: "settle",
-        requested: 0,
-        settledOk: 0,
-        skipped: 0,
-        note: "No unsettled bet_items found",
-      });
+    let matchIdsToSettle: number[] = [];
 
-      return json(200, {
-        ok: true,
-        requested: 0,
-        settledOk: 0,
-        skipped: 0,
-        results: [],
-        note: "No unsettled bet_items found",
-      });
+    if (candidateIds.length) {
+      const { data: finishedRows, error: finErr } = await supabase
+        .from("matches")
+        .select("id,status,utc_date")
+        .in("id", candidateIds)
+        .eq("status", "FINISHED")
+        .order("utc_date", { ascending: true })
+        .limit(matchLimit);
+
+      if (finErr) throw finErr;
+
+      matchIdsToSettle = (finishedRows ?? [])
+        .map((m: any) => Number(m.id))
+        .filter((x: number) => Number.isFinite(x));
     }
 
-    // 2) Bierzemy tylko mecze FINISHED
-    const { data: finishedRows, error: finErr } = await supabase
-      .from("matches")
-      .select("id,status,utc_date")
-      .in("id", candidateIds)
-      .eq("status", "FINISHED")
-      .order("utc_date", { ascending: true })
-      .limit(LIMIT);
-
-    if (finErr) throw finErr;
-
-    const matchIdsToSettle = (finishedRows ?? [])
-      .map((m: any) => Number(m.id))
-      .filter((x: number) => Number.isFinite(x));
-
-    if (!matchIdsToSettle.length) {
-      await cronLogSuccess(logId, {
-        ok: true,
-        job: "settle",
-        requested: 0,
-        settledOk: 0,
-        skipped: 0,
-        note: "No FINISHED matches among candidates",
-      });
-
-      return json(200, {
-        ok: true,
-        requested: 0,
-        settledOk: 0,
-        skipped: 0,
-        results: [],
-        note: "No FINISHED matches among candidates",
-      });
-    }
-
-    // 3) Settle match -> settle affected bets
-    const results: MatchSettleResult[] = [];
-    let settledOk = 0;
-    let skippedCount = 0;
+    const matchResults: MatchSettleResult[] = [];
+    let matchesSettledOk = 0;
+    let matchesSkipped = 0;
 
     for (const matchId of matchIdsToSettle) {
       try {
-        // 3a) Idempotent: tylko raz na mecz
         const { data: smData, error: smErr } = await supabase.rpc("settle_match_once", {
           p_match_id: matchId,
         });
+
         if (smErr) throw smErr;
 
         const skipped = Boolean((smData as any)?.skipped);
         const reason = (smData as any)?.reason ?? null;
 
         if (skipped) {
-          skippedCount++;
+          matchesSkipped++;
 
-          results.push({
+          matchResults.push({
             matchId,
             ok: true,
             skipped: true,
@@ -155,30 +134,35 @@ export async function POST(req: Request) {
             betsSettleCalls: 0,
           });
 
-          settledOk++;
+          matchesSettledOk++;
           continue;
         }
 
-        // 3b) Bet IDs dotknięte tym meczem (opcjonalnie tylko nierozliczone)
+        // Po settle_match_once bierzemy WSZYSTKIE bety dotknięte tym meczem,
+        // nie tylko te z unsettled bet_items.
         const { data: betRows, error: betErr } = await supabase
           .from("bet_items")
           .select("bet_id")
-          .eq("match_id_bigint", matchId)
-          .or("settled.is.false,settled.is.null");
+          .eq("match_id_bigint", matchId);
 
         if (betErr) throw betErr;
 
-        const betIds = Array.from(new Set((betRows ?? []).map((x: any) => x.bet_id).filter(Boolean)));
+        const betIds = Array.from(
+          new Set((betRows ?? []).map((x: any) => x.bet_id).filter(Boolean))
+        );
 
-        // 3c) Rozlicz kupony (idempotentne)
         let calls = 0;
+
         for (const betId of betIds) {
-          const { error: sbErr } = await supabase.rpc("settle_bet", { p_bet_id: betId });
+          const { error: sbErr } = await supabase.rpc("settle_bet", {
+            p_bet_id: betId,
+          });
+
           if (sbErr) throw sbErr;
           calls++;
         }
 
-        results.push({
+        matchResults.push({
           matchId,
           ok: true,
           skipped: false,
@@ -188,9 +172,9 @@ export async function POST(req: Request) {
           betsSettleCalls: calls,
         });
 
-        settledOk++;
+        matchesSettledOk++;
       } catch (e: any) {
-        results.push({
+        matchResults.push({
           matchId,
           ok: false,
           error: e?.message ?? String(e),
@@ -200,21 +184,101 @@ export async function POST(req: Request) {
       }
     }
 
+    // ------------------------------------------------------------
+    // ETAP 2: backfill wiszących parent-betów
+    // ------------------------------------------------------------
+    const { data: pendingResolvedBets, error: pendingResolvedErr } = await supabase
+      .from("bets")
+      .select("id, created_at")
+      .eq("settled", false)
+      .order("created_at", { ascending: true })
+      .limit(betBackfillLimit);
+
+    if (pendingResolvedErr) throw pendingResolvedErr;
+
+    const pendingBetIds = (pendingResolvedBets ?? []).map((b: any) => b.id).filter(Boolean);
+
+    const backfillResults: PendingBetBackfillResult[] = [];
+
+    if (pendingBetIds.length) {
+      const { data: backfillRows, error: backfillErr } = await supabase
+        .from("bet_items")
+        .select("bet_id, settled, result")
+        .in("bet_id", pendingBetIds);
+
+      if (backfillErr) throw backfillErr;
+
+      const byBet = new Map<
+        string,
+        { total: number; resolved: number }
+      >();
+
+      for (const row of backfillRows ?? []) {
+        const betId = String((row as any).bet_id);
+        const current = byBet.get(betId) ?? { total: 0, resolved: 0 };
+
+        current.total += 1;
+
+        const isResolved =
+          (row as any).settled === true && (row as any).result != null;
+
+        if (isResolved) {
+          current.resolved += 1;
+        }
+
+        byBet.set(betId, current);
+      }
+
+      const readyBetIds = pendingBetIds.filter((betId) => {
+        const agg = byBet.get(String(betId));
+        if (!agg) return false;
+        return agg.total > 0 && agg.total === agg.resolved;
+      });
+
+      for (const betId of readyBetIds) {
+        try {
+          const { error: sbErr } = await supabase.rpc("settle_bet", {
+            p_bet_id: betId,
+          });
+
+          if (sbErr) throw sbErr;
+
+          backfillResults.push({
+            betId: String(betId),
+            ok: true,
+            error: null,
+          });
+        } catch (e: any) {
+          backfillResults.push({
+            betId: String(betId),
+            ok: false,
+            error: e?.message ?? String(e),
+          });
+        }
+      }
+    }
+
     await cronLogSuccess(logId, {
       ok: true,
       job: "settle",
-      requested: matchIdsToSettle.length,
-      settledOk,
-      skipped: skippedCount,
-      results,
+      requestedMatches: matchIdsToSettle.length,
+      matchesSettledOk,
+      matchesSkipped,
+      pendingBetBackfillChecked: pendingBetIds.length,
+      pendingBetBackfillSettled: backfillResults.filter((x) => x.ok).length,
+      matchResults,
+      backfillResults,
     });
 
     return json(200, {
       ok: true,
-      requested: matchIdsToSettle.length,
-      settledOk,
-      skipped: skippedCount,
-      results,
+      requestedMatches: matchIdsToSettle.length,
+      matchesSettledOk,
+      matchesSkipped,
+      pendingBetBackfillChecked: pendingBetIds.length,
+      pendingBetBackfillSettled: backfillResults.filter((x) => x.ok).length,
+      matchResults,
+      backfillResults,
     });
   } catch (e: any) {
     await cronLogError(logId, e);
