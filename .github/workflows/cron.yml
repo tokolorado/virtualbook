@@ -1,4 +1,3 @@
-# .github/workflows/cron.yml
 name: VirtualBook Cron
 
 on:
@@ -14,18 +13,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Call results cron
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/10 * * * *'
-        run: |
-          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/results" \
-            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
-
-      - name: Call settle cron
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/10 * * * *'
-        run: |
-          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/settle" \
-            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
-
       - name: Call pipeline cron
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/10 * * * *'
         run: |

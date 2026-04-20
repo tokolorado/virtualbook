@@ -9,6 +9,10 @@ function json(status: number, body: any) {
   return NextResponse.json(body, { status });
 }
 
+async function readJsonSafe(res: Response) {
+  return res.json().catch(() => ({}));
+}
+
 export async function POST(req: Request) {
   let logId: number | null = null;
 
@@ -36,12 +40,37 @@ export async function POST(req: Request) {
       return json(401, { ok: false, error: "Unauthorized" });
     }
 
-    // bazujemy na aktualnym origin (działa i lokalnie i na prod)
     const origin = new URL(req.url).origin;
 
     const headers = {
+      "Content-Type": "application/json",
       "x-cron-secret": cronSecret,
     };
+
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
+
+    const dateFrom = yesterday.toISOString().slice(0, 10);
+    const dateTo = now.toISOString().slice(0, 10);
+    const oddsDate = now.toISOString().slice(0, 10);
+
+    // 0) odds sync
+    // Nie blokujemy results/settle, jeśli odds padną.
+    // To osobny obszar operacyjny, ale status ma być widoczny w logs/details.
+    const r0 = await fetch(`${origin}/api/odds/sync`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        date: oddsDate,
+        oddsTtlHours: 6,
+        batchLimit: 30,
+        throttleMs: 800,
+        maxRetries: 2,
+        engine: "v2",
+      }),
+      cache: "no-store",
+    });
+    const odds = await readJsonSafe(r0);
 
     // 1) results (stale-timed)
     const r1 = await fetch(`${origin}/api/cron/results?mode=stale-timed&limit=50`, {
@@ -49,15 +78,9 @@ export async function POST(req: Request) {
       headers,
       cache: "no-store",
     });
-    const results1 = await r1.json().catch(() => ({}));
+    const results1 = await readJsonSafe(r1);
 
-    // 1b) (opcjonalnie, ale bardzo pomocne) range: wczoraj -> dzisiaj
-    // jeśli chcesz, pipeline będzie “dociągał brakujące” mecze nawet jak nie były w matches
-    const now = new Date();
-    const y = new Date(now.getTime() - 24 * 3600 * 1000);
-    const dateFrom = y.toISOString().slice(0, 10);
-    const dateTo = now.toISOString().slice(0, 10);
-
+    // 1b) range: wczoraj -> dzisiaj
     const r1b = await fetch(
       `${origin}/api/cron/results?mode=range&dateFrom=${dateFrom}&dateTo=${dateTo}&limit=200`,
       {
@@ -66,7 +89,7 @@ export async function POST(req: Request) {
         cache: "no-store",
       }
     );
-    const results1b = await r1b.json().catch(() => ({}));
+    const results1b = await readJsonSafe(r1b);
 
     // 2) settle
     const r2 = await fetch(`${origin}/api/cron/settle`, {
@@ -74,11 +97,12 @@ export async function POST(req: Request) {
       headers,
       cache: "no-store",
     });
-    const settle = await r2.json().catch(() => ({}));
+    const settle = await readJsonSafe(r2);
 
     const responseBody = {
       ok: true,
       steps: {
+        odds_sync: { ok: r0.ok, status: r0.status, body: odds },
         results_stale_timed: { ok: r1.ok, status: r1.status, body: results1 },
         results_range: { ok: r1b.ok, status: r1b.status, body: results1b },
         settle: { ok: r2.ok, status: r2.status, body: settle },
