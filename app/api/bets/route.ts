@@ -19,6 +19,7 @@ type SlipItem = {
 type Body = {
   slip: SlipItem[];
   stake: number;
+  idempotencyKey?: string;
 };
 
 const MAX_ITEMS = 20;
@@ -36,6 +37,10 @@ function nonEmpty(v: unknown): string | null {
 
 function normalizeMarket(m: unknown) {
   return String(m ?? "").trim().toLowerCase();
+}
+
+function isUuid(v: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 }
 
 export async function POST(req: Request) {
@@ -66,7 +71,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // JWT
+    const headerIdempotencyKey = nonEmpty(req.headers.get("x-idempotency-key"));
+    const bodyIdempotencyKey = nonEmpty(body.idempotencyKey);
+    const idempotencyKey = bodyIdempotencyKey ?? headerIdempotencyKey ?? crypto.randomUUID();
+
+    if (
+      (bodyIdempotencyKey && !isUuid(bodyIdempotencyKey)) ||
+      (headerIdempotencyKey && !isUuid(headerIdempotencyKey))
+    ) {
+      return NextResponse.json(
+        { error: "Nieprawidłowy idempotency key." },
+        { status: 400 }
+      );
+    }
+
     const authHeader = req.headers.get("authorization") || "";
     const jwt = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
@@ -86,7 +104,6 @@ export async function POST(req: Request) {
       }
     );
 
-    // sprawdzenie usera z sesji
     const {
       data: { user },
       error: userErr,
@@ -99,7 +116,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // blokada dla zbanowanego użytkownika
     const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select("id,is_banned")
@@ -157,6 +173,7 @@ export async function POST(req: Request) {
     const { data, error } = await supabase.rpc("place_bet", {
       p_stake: stake,
       p_items: payloadItems,
+      p_request_id: idempotencyKey,
     });
 
     if (error) {
@@ -165,6 +182,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      idempotencyKey,
       betId: data?.betId ?? null,
       stake: data?.stake ?? stake,
       totalOdds: data?.totalOdds ?? 0,
