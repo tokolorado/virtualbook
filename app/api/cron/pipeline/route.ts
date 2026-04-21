@@ -1,4 +1,3 @@
-// app/api/cron/pipeline/route.ts
 import { NextResponse } from "next/server";
 import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
 
@@ -52,18 +51,21 @@ export async function POST(req: Request) {
 
     const dateFrom = yesterday.toISOString().slice(0, 10);
     const dateTo = now.toISOString().slice(0, 10);
-    const oddsDate = now.toISOString().slice(0, 10);
 
-    // 0) odds sync
-    // Nie blokujemy results/settle, jeśli odds padną.
-    // To osobny obszar operacyjny, ale status ma być widoczny w logs/details.
+    // 0) odds sync — HORYZONT, nie tylko dziś
+    // odds/sync sam ma:
+    // - lock anty-duplikatowy
+    // - TTL świeżości odds
+    // - batch selection po brakujących / najstarszych rekordach
+    // - horizon do 30 dni do przodu
+    //
+    // Dlatego NIE przekazujemy tutaj date.
     const r0 = await fetch(`${origin}/api/odds/sync`, {
       method: "POST",
       headers,
       body: JSON.stringify({
-        date: oddsDate,
         oddsTtlHours: 6,
-        batchLimit: 30,
+        batchLimit: 80,
         throttleMs: 800,
         maxRetries: 2,
         engine: "v2",
@@ -73,11 +75,14 @@ export async function POST(req: Request) {
     const odds = await readJsonSafe(r0);
 
     // 1) results (stale-timed)
-    const r1 = await fetch(`${origin}/api/cron/results?mode=stale-timed&limit=50`, {
-      method: "POST",
-      headers,
-      cache: "no-store",
-    });
+    const r1 = await fetch(
+      `${origin}/api/cron/results?mode=stale-timed&limit=50`,
+      {
+        method: "POST",
+        headers,
+        cache: "no-store",
+      }
+    );
     const results1 = await readJsonSafe(r1);
 
     // 1b) range: wczoraj -> dzisiaj
@@ -102,7 +107,7 @@ export async function POST(req: Request) {
     const responseBody = {
       ok: true,
       steps: {
-        odds_sync: { ok: r0.ok, status: r0.status, body: odds },
+        odds_sync_horizon: { ok: r0.ok, status: r0.status, body: odds },
         results_stale_timed: { ok: r1.ok, status: r1.status, body: results1 },
         results_range: { ok: r1b.ok, status: r1b.status, body: results1b },
         settle: { ok: r2.ok, status: r2.status, body: settle },
