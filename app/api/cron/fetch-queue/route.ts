@@ -207,6 +207,7 @@ export async function POST(req: Request) {
       .eq("status", "pending")
       .lte("next_run_at", nowIso)
       .order("next_run_at", { ascending: true })
+      .order("day", { ascending: true })
       .limit(1)
       .maybeSingle();
 
@@ -446,7 +447,16 @@ export async function POST(req: Request) {
       upsertedRowsCount = Array.isArray(upsertedData)
         ? upsertedData.length
         : rows.length;
+        try {
+          await sb
+            .from("api_cache")
+            .delete()
+            .like("key", "events_enabled_dates:%");
+        } catch (e) {
+          console.error("events_enabled_dates cache clear failed:", e);
+        }
     }
+    
 
     // 6) harmonogram kolejnego odświeżenia
     const isTodayOrFuture = day >= today;
