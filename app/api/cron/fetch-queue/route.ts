@@ -31,54 +31,6 @@ function utcTodayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function fdFetch(path: string, opts?: { maxRetries?: number }) {
-  const token = process.env.FOOTBALL_DATA_TOKEN || process.env.FOOTBALL_DATA_API_KEY;
-  if (!token) throw new Error("Missing FOOTBALL_DATA_TOKEN");
-
-  const url = `${FOOTBALL_DATA_BASE}${path}`;
-  const maxRetries = Math.max(0, opts?.maxRetries ?? 2);
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const r = await fetch(url, {
-      headers: { "X-Auth-Token": token },
-      cache: "no-store",
-    });
-
-    const text = await r.text();
-    let j: any = null;
-    try {
-      j = JSON.parse(text);
-    } catch {
-      j = { raw: text?.slice(0, 500) };
-    }
-
-    if (r.ok) return j;
-
-    const msg =
-      j?.message ||
-      j?.error ||
-      (typeof j?.raw === "string" ? j.raw : "") ||
-      `football-data error (HTTP ${r.status})`;
-
-    const waitSecs = extractWaitSeconds(String(msg));
-    const canRetry = attempt < maxRetries;
-
-    if (waitSecs != null && canRetry) {
-      await sleep(waitSecs * 1000 + 500);
-      continue;
-    }
-
-    if (r.status === 429 && canRetry) {
-      await sleep((attempt + 1) * 1000 + 250);
-      continue;
-    }
-
-    throw new Error(msg);
-  }
-
-  throw new Error("football-data error: retries exhausted");
-}
-
 function toIsoOrNull(v: any): string | null {
   if (!v) return null;
   const dt = new Date(String(v));
@@ -134,6 +86,98 @@ function computeBettingClosed(status: string, utcDateIso: string | null) {
   return kickoffMs <= Date.now();
 }
 
+function seasonToText(match: any): string | null {
+  const seasonId = match?.season?.id;
+  if (seasonId !== null && seasonId !== undefined && seasonId !== "") {
+    return String(seasonId);
+  }
+
+  const startDate = match?.season?.startDate;
+  if (typeof startDate === "string" && startDate.length >= 4) {
+    return startDate.slice(0, 4);
+  }
+
+  return null;
+}
+
+async function fdFetch(path: string, opts?: { maxRetries?: number }) {
+  const token = process.env.FOOTBALL_DATA_TOKEN || process.env.FOOTBALL_DATA_API_KEY;
+  if (!token) throw new Error("Missing FOOTBALL_DATA_TOKEN");
+
+  const url = `${FOOTBALL_DATA_BASE}${path}`;
+  const maxRetries = Math.max(0, opts?.maxRetries ?? 2);
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const r = await fetch(url, {
+      headers: { "X-Auth-Token": token },
+      cache: "no-store",
+    });
+
+    const text = await r.text();
+    let j: any = null;
+
+    try {
+      j = JSON.parse(text);
+    } catch {
+      j = { raw: text?.slice(0, 500) };
+    }
+
+    if (r.ok) return j;
+
+    const msg =
+      j?.message ||
+      j?.error ||
+      (typeof j?.raw === "string" ? j.raw : "") ||
+      `football-data error (HTTP ${r.status})`;
+
+    const waitSecs = extractWaitSeconds(String(msg));
+    const canRetry = attempt < maxRetries;
+
+    if (waitSecs != null && canRetry) {
+      await sleep(waitSecs * 1000 + 500);
+      continue;
+    }
+
+    if (r.status === 429 && canRetry) {
+      await sleep((attempt + 1) * 1000 + 250);
+      continue;
+    }
+
+    throw new Error(msg);
+  }
+
+  throw new Error("football-data error: retries exhausted");
+}
+
+async function writeSyncLog(
+  sb: ReturnType<typeof supabaseAdmin>,
+  payload: {
+    cursor_date: string;
+    phase: string;
+    ok: boolean;
+    matches_upserted?: number;
+    odds_upserted?: number;
+    leagues?: string[];
+    message?: string | null;
+    extra?: any;
+  }
+) {
+  try {
+    await sb.from("sync_logs").insert({
+      cursor_date: payload.cursor_date,
+      phase: payload.phase,
+      ok: payload.ok,
+      matches_upserted: payload.matches_upserted ?? 0,
+      odds_upserted: payload.odds_upserted ?? 0,
+      leagues: payload.leagues ?? [],
+      message: payload.message ?? null,
+      extra: payload.extra ?? {},
+    });
+  } catch (e) {
+    console.error("sync_logs insert failed:", e);
+  }
+}
+
 export async function POST(req: Request) {
   const unauthorized = requireCronSecret(req);
   if (unauthorized) return unauthorized;
@@ -144,6 +188,7 @@ export async function POST(req: Request) {
     const nowIso = now.toISOString();
     const today = utcTodayYYYYMMDD();
 
+    // 1) weź 1 dzień do obsłużenia
     const { data: job, error: qErr } = await sb
       .from("fetch_queue")
       .select("day,status,attempts,next_run_at")
@@ -153,7 +198,9 @@ export async function POST(req: Request) {
       .limit(1)
       .maybeSingle();
 
-    if (qErr) return jsonError(qErr.message, 500, { stage: "queue_select" });
+    if (qErr) {
+      return jsonError(qErr.message, 500, { stage: "queue_select" });
+    }
 
     if (!job?.day) {
       return NextResponse.json({
@@ -165,6 +212,7 @@ export async function POST(req: Request) {
 
     const day = String(job.day);
 
+    // 2) zaznacz próbę
     const { error: u0Err } = await sb
       .from("fetch_queue")
       .update({
@@ -181,17 +229,69 @@ export async function POST(req: Request) {
       });
     }
 
-    const data = await fdFetch(
-      `/matches?dateFrom=${encodeURIComponent(day)}&dateTo=${encodeURIComponent(day)}`,
-      { maxRetries: 2 }
-    );
+    // 3) pobierz mecze z football-data dla jednego dnia
+    let data: any;
+    try {
+      data = await fdFetch(
+        `/matches?dateFrom=${encodeURIComponent(day)}&dateTo=${encodeURIComponent(day)}`,
+        { maxRetries: 2 }
+      );
+    } catch (e: any) {
+      const msg = e?.message || "football-data fetch failed";
+
+      await sb
+        .from("fetch_queue")
+        .update({
+          status: "pending",
+          next_run_at: new Date(Date.now() + 65_000).toISOString(),
+          last_error: msg,
+        })
+        .eq("day", day);
+
+      await writeSyncLog(sb, {
+        cursor_date: day,
+        phase: "FETCH_QUEUE_DAY",
+        ok: false,
+        matches_upserted: 0,
+        odds_upserted: 0,
+        leagues: [],
+        message: msg,
+        extra: {
+          stage: "fdFetch",
+          day,
+        },
+      });
+
+      return jsonError(msg, 500, { stage: "fdFetch", day });
+    }
 
     const list = Array.isArray(data?.matches) ? data.matches : [];
 
-    const rows: any[] = [];
-    for (const m of list) {
-      if (!isSupportedCompetition(m)) continue;
+    const supportedMatches = list.filter((m: any) => isSupportedCompetition(m));
 
+    const allCompetitionCodesSeen: string[] = Array.from(
+      new Set<string>(
+        list
+          .map((m: any): string =>
+            String(m?.competition?.code ?? "").toUpperCase().trim()
+          )
+          .filter((code: string) => code.length > 0)
+      )
+    ).sort();
+
+    const supportedCompetitionCodesSeen: string[] = Array.from(
+      new Set<string>(
+        supportedMatches
+          .map((m: any): string =>
+            String(m?.competition?.code ?? "").toUpperCase().trim()
+          )
+          .filter((code: string) => code.length > 0)
+      )
+    ).sort();
+
+    // 4) przygotuj wiersze do UPSERT
+    const rows: any[] = [];
+    for (const m of supportedMatches) {
       const matchId = Number(m?.id);
       if (!Number.isFinite(matchId)) continue;
 
@@ -208,6 +308,8 @@ export async function POST(req: Request) {
       const awayTeam =
         typeof m?.awayTeam?.name === "string" ? m.awayTeam.name : null;
 
+      if (!homeTeam || !awayTeam) continue;
+
       const homeTeamId = Number.isFinite(Number(m?.homeTeam?.id))
         ? Number(m.homeTeam.id)
         : null;
@@ -223,44 +325,73 @@ export async function POST(req: Request) {
 
       rows.push({
         id: matchId,
-        utc_date: utcDateIso,
-        status,
         competition_id: compCode || null,
         competition_name: compName,
+        utc_date: utcDateIso,
+        status,
+        matchday: toIntOrNull(m?.matchday),
+        season: seasonToText(m),
         home_team: homeTeam,
         away_team: awayTeam,
-        home_team_id: homeTeamId,
-        away_team_id: awayTeamId,
-        betting_closed: bettingClosed,
         home_score: status === "FINISHED" ? ftHome : null,
         away_score: status === "FINISHED" ? ftAway : null,
-        created_at: nowIso,
         last_sync_at: nowIso,
+        betting_closed: bettingClosed,
+        home_team_id: homeTeamId,
+        away_team_id: awayTeamId,
       });
     }
 
-    if (rows.length > 0) {
-      const { error: insErr } = await sb
-        .from("matches")
-        .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
+    let upsertedRowsCount = 0;
 
-      if (insErr) {
+    // 5) prawdziwy UPSERT po id — aktualizuje istniejące rekordy
+    if (rows.length > 0) {
+      const { data: upsertedData, error: upsertErr } = await sb
+        .from("matches")
+        .upsert(rows, { onConflict: "id" })
+        .select("id");
+
+      if (upsertErr) {
         await sb
           .from("fetch_queue")
           .update({
-            last_error: insErr.message,
-            next_run_at: new Date(Date.now() + 65_000).toISOString(),
             status: "pending",
+            next_run_at: new Date(Date.now() + 65_000).toISOString(),
+            last_error: upsertErr.message,
           })
           .eq("day", day);
 
-        return jsonError(insErr.message, 500, {
-          stage: "matches_insert",
+        await writeSyncLog(sb, {
+          cursor_date: day,
+          phase: "FETCH_QUEUE_DAY",
+          ok: false,
+          matches_upserted: 0,
+          odds_upserted: 0,
+          leagues: supportedCompetitionCodesSeen,
+          message: upsertErr.message,
+          extra: {
+            stage: "matches_upsert",
+            day,
+            fetchedFromApi: list.length,
+            supportedAfterFilter: supportedMatches.length,
+            upsertPayloadCount: rows.length,
+            allCompetitionCodesSeen,
+            supportedCompetitionCodesSeen,
+          },
+        });
+
+        return jsonError(upsertErr.message, 500, {
+          stage: "matches_upsert",
           day,
         });
       }
+
+      upsertedRowsCount = Array.isArray(upsertedData)
+        ? upsertedData.length
+        : rows.length;
     }
 
+    // 6) harmonogram kolejnego odświeżenia
     const isTodayOrFuture = day >= today;
 
     const nextRunAt = isTodayOrFuture
@@ -272,21 +403,70 @@ export async function POST(req: Request) {
       .update({
         status: "done",
         next_run_at: nextRunAt,
+        last_error: null,
       })
       .eq("day", day);
 
     if (doneErr) {
+      await writeSyncLog(sb, {
+        cursor_date: day,
+        phase: "FETCH_QUEUE_DAY",
+        ok: false,
+        matches_upserted: upsertedRowsCount,
+        odds_upserted: 0,
+        leagues: supportedCompetitionCodesSeen,
+        message: doneErr.message,
+        extra: {
+          stage: "queue_done_update",
+          day,
+          fetchedFromApi: list.length,
+          supportedAfterFilter: supportedMatches.length,
+          upsertPayloadCount: rows.length,
+          upsertedRowsCount,
+          allCompetitionCodesSeen,
+          supportedCompetitionCodesSeen,
+        },
+      });
+
       return jsonError(doneErr.message, 500, {
         stage: "queue_done_update",
         day,
       });
     }
 
+    await writeSyncLog(sb, {
+      cursor_date: day,
+      phase: "FETCH_QUEUE_DAY",
+      ok: true,
+      matches_upserted: upsertedRowsCount,
+      odds_upserted: 0,
+      leagues: supportedCompetitionCodesSeen,
+      message:
+        rows.length > 0
+          ? `Fetched ${list.length} matches, ${supportedMatches.length} supported, upserted ${upsertedRowsCount}`
+          : `Fetched ${list.length} matches, no supported rows to upsert`,
+      extra: {
+        day,
+        fetchedFromApi: list.length,
+        supportedAfterFilter: supportedMatches.length,
+        upsertPayloadCount: rows.length,
+        upsertedRowsCount,
+        allCompetitionCodesSeen,
+        supportedCompetitionCodesSeen,
+        nextRunAt,
+        refreshHours: isTodayOrFuture ? FUTURE_REFRESH_HOURS : null,
+      },
+    });
+
     return NextResponse.json({
       ok: true,
       day,
       fetchedFromApi: list.length,
-      insertedCandidates: rows.length,
+      supportedAfterFilter: supportedMatches.length,
+      upsertPayloadCount: rows.length,
+      upsertedRowsCount,
+      allCompetitionCodesSeen,
+      supportedCompetitionCodesSeen,
       supported: Array.from(SUPPORTED_COMP_CODES.values()),
       scheduledRefreshAt: nextRunAt,
       refreshHours: isTodayOrFuture ? FUTURE_REFRESH_HOURS : null,
