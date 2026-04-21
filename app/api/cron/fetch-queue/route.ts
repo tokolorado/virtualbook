@@ -6,7 +6,18 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const FOOTBALL_DATA_BASE = "https://api.football-data.org/v4";
-const SUPPORTED_COMP_CODES = new Set(["CL", "PL", "BL1", "FL1", "SA", "PD", "WC"]);
+
+const SUPPORTED_COMP_CODES = [
+  "CL",
+  "PL",
+  "BL1",
+  "FL1",
+  "SA",
+  "PD",
+  "WC",
+] as const;
+
+const SUPPORTED_COMP_CODES_SET = new Set<string>(SUPPORTED_COMP_CODES);
 
 // przyszłe dni odświeżamy periodycznie, żeby łapać później publikowane fixture'y
 const FUTURE_REFRESH_HOURS = 12;
@@ -71,7 +82,7 @@ function normalizeStatus(raw: string): string {
 
 function isSupportedCompetition(match: any) {
   const code = String(match?.competition?.code ?? "").toUpperCase().trim();
-  return SUPPORTED_COMP_CODES.has(code);
+  return SUPPORTED_COMP_CODES_SET.has(code);
 }
 
 function computeBettingClosed(status: string, utcDateIso: string | null) {
@@ -101,7 +112,8 @@ function seasonToText(match: any): string | null {
 }
 
 async function fdFetch(path: string, opts?: { maxRetries?: number }) {
-  const token = process.env.FOOTBALL_DATA_TOKEN || process.env.FOOTBALL_DATA_API_KEY;
+  const token =
+    process.env.FOOTBALL_DATA_TOKEN || process.env.FOOTBALL_DATA_API_KEY;
   if (!token) throw new Error("Missing FOOTBALL_DATA_TOKEN");
 
   const url = `${FOOTBALL_DATA_BASE}${path}`;
@@ -229,43 +241,87 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3) pobierz mecze z football-data dla jednego dnia
-    let data: any;
-    try {
-      data = await fdFetch(
-        `/matches?dateFrom=${encodeURIComponent(day)}&dateTo=${encodeURIComponent(day)}`,
-        { maxRetries: 2 }
-      );
-    } catch (e: any) {
-      const msg = e?.message || "football-data fetch failed";
+    // 3) pobierz mecze osobno dla każdej wspieranej ligi
+    const perCompetitionResults: {
+      code: string;
+      ok: boolean;
+      fetchedCount: number;
+      error?: string;
+    }[] = [];
 
-      await sb
-        .from("fetch_queue")
-        .update({
-          status: "pending",
-          next_run_at: new Date(Date.now() + 65_000).toISOString(),
-          last_error: msg,
-        })
-        .eq("day", day);
+    const dedupedByMatchId = new Map<number, any>();
 
-      await writeSyncLog(sb, {
-        cursor_date: day,
-        phase: "FETCH_QUEUE_DAY",
-        ok: false,
-        matches_upserted: 0,
-        odds_upserted: 0,
-        leagues: [],
-        message: msg,
-        extra: {
-          stage: "fdFetch",
+    for (const code of SUPPORTED_COMP_CODES) {
+      try {
+        const data = await fdFetch(
+          `/competitions/${encodeURIComponent(
+            code
+          )}/matches?dateFrom=${encodeURIComponent(
+            day
+          )}&dateTo=${encodeURIComponent(day)}`,
+          { maxRetries: 2 }
+        );
+
+        const matches = Array.isArray(data?.matches) ? data.matches : [];
+
+        perCompetitionResults.push({
+          code,
+          ok: true,
+          fetchedCount: matches.length,
+        });
+
+        for (const match of matches) {
+          const matchId = Number(match?.id);
+          if (!Number.isFinite(matchId)) continue;
+          dedupedByMatchId.set(matchId, match);
+        }
+
+        // lekkie odciążenie API między ligami
+        await sleep(150);
+      } catch (e: any) {
+        const msg = e?.message || `competition fetch failed: ${code}`;
+
+        perCompetitionResults.push({
+          code,
+          ok: false,
+          fetchedCount: 0,
+          error: msg,
+        });
+
+        await sb
+          .from("fetch_queue")
+          .update({
+            status: "pending",
+            next_run_at: new Date(Date.now() + 65_000).toISOString(),
+            last_error: msg,
+          })
+          .eq("day", day);
+
+        await writeSyncLog(sb, {
+          cursor_date: day,
+          phase: "FETCH_QUEUE_DAY",
+          ok: false,
+          matches_upserted: 0,
+          odds_upserted: 0,
+          leagues: [...SUPPORTED_COMP_CODES],
+          message: msg,
+          extra: {
+            stage: "competition_fetch",
+            day,
+            failedCompetition: code,
+            perCompetitionResults,
+          },
+        });
+
+        return jsonError(msg, 500, {
+          stage: "competition_fetch",
           day,
-        },
-      });
-
-      return jsonError(msg, 500, { stage: "fdFetch", day });
+          competition: code,
+        });
+      }
     }
 
-    const list = Array.isArray(data?.matches) ? data.matches : [];
+    const list = Array.from(dedupedByMatchId.values());
 
     const supportedMatches = list.filter((m: any) => isSupportedCompetition(m));
 
@@ -377,6 +433,7 @@ export async function POST(req: Request) {
             upsertPayloadCount: rows.length,
             allCompetitionCodesSeen,
             supportedCompetitionCodesSeen,
+            perCompetitionResults,
           },
         });
 
@@ -395,7 +452,9 @@ export async function POST(req: Request) {
     const isTodayOrFuture = day >= today;
 
     const nextRunAt = isTodayOrFuture
-      ? new Date(Date.now() + FUTURE_REFRESH_HOURS * 60 * 60 * 1000).toISOString()
+      ? new Date(
+          Date.now() + FUTURE_REFRESH_HOURS * 60 * 60 * 1000
+        ).toISOString()
       : new Date(Date.now() + 365 * 24 * 3600_000).toISOString();
 
     const { error: doneErr } = await sb
@@ -425,6 +484,7 @@ export async function POST(req: Request) {
           upsertedRowsCount,
           allCompetitionCodesSeen,
           supportedCompetitionCodesSeen,
+          perCompetitionResults,
         },
       });
 
@@ -443,8 +503,8 @@ export async function POST(req: Request) {
       leagues: supportedCompetitionCodesSeen,
       message:
         rows.length > 0
-          ? `Fetched ${list.length} matches, ${supportedMatches.length} supported, upserted ${upsertedRowsCount}`
-          : `Fetched ${list.length} matches, no supported rows to upsert`,
+          ? `Fetched ${list.length} matches across competitions, ${supportedMatches.length} supported, upserted ${upsertedRowsCount}`
+          : `Fetched 0 supported matches across competitions for ${day}`,
       extra: {
         day,
         fetchedFromApi: list.length,
@@ -453,6 +513,7 @@ export async function POST(req: Request) {
         upsertedRowsCount,
         allCompetitionCodesSeen,
         supportedCompetitionCodesSeen,
+        perCompetitionResults,
         nextRunAt,
         refreshHours: isTodayOrFuture ? FUTURE_REFRESH_HOURS : null,
       },
@@ -467,7 +528,8 @@ export async function POST(req: Request) {
       upsertedRowsCount,
       allCompetitionCodesSeen,
       supportedCompetitionCodesSeen,
-      supported: Array.from(SUPPORTED_COMP_CODES.values()),
+      perCompetitionResults,
+      supported: [...SUPPORTED_COMP_CODES],
       scheduledRefreshAt: nextRunAt,
       refreshHours: isTodayOrFuture ? FUTURE_REFRESH_HOURS : null,
       updatedAt: nowIso,
