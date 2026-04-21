@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireCronSecret } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const FOOTBALL_DATA_BASE = "https://api.football-data.org/v4";
 const SUPPORTED_COMP_CODES = new Set(["CL", "PL", "BL1", "FL1", "SA", "PD", "WC"]);
+
+// przyszłe dni odświeżamy periodycznie, żeby łapać później publikowane fixture'y
+const FUTURE_REFRESH_HOURS = 12;
 
 function jsonError(message: string, status = 400, extra?: any) {
   return NextResponse.json({ error: message, extra }, { status });
@@ -21,6 +25,10 @@ function extractWaitSeconds(msg: string): number | null {
   const s = Number(m[1]);
   if (!Number.isFinite(s) || s < 0) return null;
   return s;
+}
+
+function utcTodayYYYYMMDD() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 async function fdFetch(path: string, opts?: { maxRetries?: number }) {
@@ -100,11 +108,12 @@ function normalizeStatus(raw: string): string {
     "AWARDED",
     "CANCELED",
   ]);
-  if (allowed.has(s)) return s;
 
+  if (allowed.has(s)) return s;
   if (s === "DELAYED") return "POSTPONED";
   if (s === "ABANDONED") return "SUSPENDED";
   if (s === "LIVE") return "IN_PLAY";
+
   return "TIMED";
 }
 
@@ -118,27 +127,26 @@ function computeBettingClosed(status: string, utcDateIso: string | null) {
   if (s !== "SCHEDULED" && s !== "TIMED") return true;
 
   if (!utcDateIso) return false;
+
   const kickoffMs = Date.parse(utcDateIso);
   if (!Number.isFinite(kickoffMs)) return false;
+
   return kickoffMs <= Date.now();
 }
 
 export async function POST(req: Request) {
+  const unauthorized = requireCronSecret(req);
+  if (unauthorized) return unauthorized;
+
   try {
-    // ✅ cron auth
-    const secret = process.env.CRON_SECRET;
-    if (secret) {
-      const got = req.headers.get("x-cron-secret");
-      if (got !== secret) return jsonError("Unauthorized", 401);
-    }
-
     const sb = supabaseAdmin();
-    const nowIso = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const today = utcTodayYYYYMMDD();
 
-    // 1) weź 1 dzień do obsłużenia
     const { data: job, error: qErr } = await sb
       .from("fetch_queue")
-      .select("day, status, attempts, next_run_at")
+      .select("day,status,attempts,next_run_at")
       .eq("status", "pending")
       .lte("next_run_at", nowIso)
       .order("next_run_at", { ascending: true })
@@ -148,12 +156,15 @@ export async function POST(req: Request) {
     if (qErr) return jsonError(qErr.message, 500, { stage: "queue_select" });
 
     if (!job?.day) {
-      return NextResponse.json({ ok: true, skipped: true, reason: "no_pending_jobs" });
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "no_pending_jobs",
+      });
     }
 
-    const day = String(job.day); // YYYY-MM-DD
+    const day = String(job.day);
 
-    // 2) zaznacz próbę
     const { error: u0Err } = await sb
       .from("fetch_queue")
       .update({
@@ -163,16 +174,20 @@ export async function POST(req: Request) {
       })
       .eq("day", day);
 
-    if (u0Err) return jsonError(u0Err.message, 500, { stage: "queue_attempt_update", day });
+    if (u0Err) {
+      return jsonError(u0Err.message, 500, {
+        stage: "queue_attempt_update",
+        day,
+      });
+    }
 
-    // 3) pobierz MECZE z football-data (jedno wywołanie zwraca całość danego dnia)
-    const data = await fdFetch(`/matches?dateFrom=${encodeURIComponent(day)}&dateTo=${encodeURIComponent(day)}`, {
-      maxRetries: 2,
-    });
+    const data = await fdFetch(
+      `/matches?dateFrom=${encodeURIComponent(day)}&dateTo=${encodeURIComponent(day)}`,
+      { maxRetries: 2 }
+    );
 
     const list = Array.isArray(data?.matches) ? data.matches : [];
 
-    // 4) przygotuj wiersze do INSERT — tylko wspierane ligi
     const rows: any[] = [];
     for (const m of list) {
       if (!isSupportedCompetition(m)) continue;
@@ -185,20 +200,27 @@ export async function POST(req: Request) {
       if (!utcDateIso) continue;
 
       const compCode = String(m?.competition?.code ?? "").toUpperCase().trim();
-      const compName = typeof m?.competition?.name === "string" ? m.competition.name : null;
+      const compName =
+        typeof m?.competition?.name === "string" ? m.competition.name : null;
 
-      const homeTeam = typeof m?.homeTeam?.name === "string" ? m.homeTeam.name : null;
-      const awayTeam = typeof m?.awayTeam?.name === "string" ? m.awayTeam.name : null;
+      const homeTeam =
+        typeof m?.homeTeam?.name === "string" ? m.homeTeam.name : null;
+      const awayTeam =
+        typeof m?.awayTeam?.name === "string" ? m.awayTeam.name : null;
 
-      const homeTeamId = Number.isFinite(Number(m?.homeTeam?.id)) ? Number(m.homeTeam.id) : null;
-      const awayTeamId = Number.isFinite(Number(m?.awayTeam?.id)) ? Number(m.awayTeam.id) : null;
+      const homeTeamId = Number.isFinite(Number(m?.homeTeam?.id))
+        ? Number(m.homeTeam.id)
+        : null;
+
+      const awayTeamId = Number.isFinite(Number(m?.awayTeam?.id))
+        ? Number(m.awayTeam.id)
+        : null;
 
       const bettingClosed = computeBettingClosed(status, utcDateIso);
 
       const ftHome = toIntOrNull(m?.score?.fullTime?.home);
       const ftAway = toIntOrNull(m?.score?.fullTime?.away);
 
-      // ✅ NIE nadpisujemy istniejących meczów, więc tu tworzymy pełny rekord do insert
       rows.push({
         id: matchId,
         utc_date: utcDateIso,
@@ -210,7 +232,6 @@ export async function POST(req: Request) {
         home_team_id: homeTeamId,
         away_team_id: awayTeamId,
         betting_closed: bettingClosed,
-        // ✅ wynik tylko po FINISHED (żeby nie było fake 0:0)
         home_score: status === "FINISHED" ? ftHome : null,
         away_score: status === "FINISHED" ? ftAway : null,
         created_at: nowIso,
@@ -218,12 +239,10 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5) INSERT z ignorowaniem duplikatów (czyli brak nadpisywania!)
-    //    -> to spełnia: "mecze które raz już są mają być nienadpisywane"
     if (rows.length > 0) {
       const { error: insErr } = await sb
         .from("matches")
-        .upsert(rows, { onConflict: "id", ignoreDuplicates: true }); // <= kluczowy parametr
+        .upsert(rows, { onConflict: "id", ignoreDuplicates: true });
 
       if (insErr) {
         await sb
@@ -231,24 +250,37 @@ export async function POST(req: Request) {
           .update({
             last_error: insErr.message,
             next_run_at: new Date(Date.now() + 65_000).toISOString(),
+            status: "pending",
           })
           .eq("day", day);
 
-        return jsonError(insErr.message, 500, { stage: "matches_insert", day });
+        return jsonError(insErr.message, 500, {
+          stage: "matches_insert",
+          day,
+        });
       }
     }
 
-    // 6) Oznacz dzień jako done (bo football-data zwraca pełną listę meczu dla dateFrom=dateTo)
-    //    Jeśli chcesz “retry co 65s”, robimy to dopiero na ODDS (następny krok).
+    const isTodayOrFuture = day >= today;
+
+    const nextRunAt = isTodayOrFuture
+      ? new Date(Date.now() + FUTURE_REFRESH_HOURS * 60 * 60 * 1000).toISOString()
+      : new Date(Date.now() + 365 * 24 * 3600_000).toISOString();
+
     const { error: doneErr } = await sb
       .from("fetch_queue")
       .update({
         status: "done",
-        next_run_at: new Date(Date.now() + 365 * 24 * 3600_000).toISOString(), // daleko w przyszłość
+        next_run_at: nextRunAt,
       })
       .eq("day", day);
 
-    if (doneErr) return jsonError(doneErr.message, 500, { stage: "queue_done_update", day });
+    if (doneErr) {
+      return jsonError(doneErr.message, 500, {
+        stage: "queue_done_update",
+        day,
+      });
+    }
 
     return NextResponse.json({
       ok: true,
@@ -256,6 +288,8 @@ export async function POST(req: Request) {
       fetchedFromApi: list.length,
       insertedCandidates: rows.length,
       supported: Array.from(SUPPORTED_COMP_CODES.values()),
+      scheduledRefreshAt: nextRunAt,
+      refreshHours: isTodayOrFuture ? FUTURE_REFRESH_HOURS : null,
       updatedAt: nowIso,
     });
   } catch (e: any) {
