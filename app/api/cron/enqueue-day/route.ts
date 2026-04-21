@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   if (unauthorized) return unauthorized;
 
   try {
-    const { day } = await req.json(); // format: YYYY-MM-DD
+    const { day } = await req.json(); // YYYY-MM-DD
 
     if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
       return jsonError("Invalid day format (YYYY-MM-DD required)");
@@ -22,20 +22,36 @@ export async function POST(req: Request) {
 
     const sb = supabaseAdmin();
 
-    const { error } = await sb
+    const { data: existing, error: readErr } = await sb
       .from("fetch_queue")
-      .upsert(
-        {
-          day,
-          status: "pending",
-          next_run_at: new Date().toISOString(),
-        },
-        { onConflict: "day" }
-      );
+      .select("day,status,attempts,last_run_at,next_run_at,last_error")
+      .eq("day", day)
+      .maybeSingle();
 
-    if (error) return jsonError(error.message, 500);
+    if (readErr) return jsonError(readErr.message, 500);
 
-    return NextResponse.json({ ok: true, day });
+    if (existing) {
+      return NextResponse.json({
+        ok: true,
+        day,
+        skipped: true,
+        reason: "already_exists",
+        existing,
+      });
+    }
+
+    const { error: insertErr } = await sb.from("fetch_queue").insert({
+      day,
+      status: "pending",
+      attempts: 0,
+      last_run_at: null,
+      next_run_at: new Date().toISOString(),
+      last_error: null,
+    });
+
+    if (insertErr) return jsonError(insertErr.message, 500);
+
+    return NextResponse.json({ ok: true, day, inserted: true });
   } catch (e: any) {
     return jsonError(e?.message || "Server error", 500);
   }
