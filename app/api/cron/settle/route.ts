@@ -10,7 +10,7 @@ type MatchSettleResult = {
   ok: boolean;
   skipped?: boolean;
   reason?: string | null;
-  error: string | null;
+  error?: string | null;
   betsTouched: number;
   betsSettleCalls: number;
 };
@@ -23,6 +23,12 @@ type PendingBetBackfillResult = {
 
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
+}
+
+function isResolvedBetItem(row: any) {
+  const settled = row?.settled === true;
+  const result = String(row?.result ?? "").toLowerCase();
+  return settled && (result === "won" || result === "lost" || result === "void");
 }
 
 export async function POST(req: Request) {
@@ -138,8 +144,6 @@ export async function POST(req: Request) {
           continue;
         }
 
-        // Po settle_match_once bierzemy WSZYSTKIE bety dotknięte tym meczem,
-        // nie tylko te z unsettled bet_items.
         const { data: betRows, error: betErr } = await supabase
           .from("bet_items")
           .select("bet_id")
@@ -190,13 +194,15 @@ export async function POST(req: Request) {
     const { data: pendingResolvedBets, error: pendingResolvedErr } = await supabase
       .from("bets")
       .select("id, created_at")
-      .eq("settled", false)
+      .or("settled.is.false,settled.is.null")
       .order("created_at", { ascending: true })
       .limit(betBackfillLimit);
 
     if (pendingResolvedErr) throw pendingResolvedErr;
 
-    const pendingBetIds = (pendingResolvedBets ?? []).map((b: any) => b.id).filter(Boolean);
+    const pendingBetIds = (pendingResolvedBets ?? [])
+      .map((b: any) => b.id)
+      .filter(Boolean);
 
     const backfillResults: PendingBetBackfillResult[] = [];
 
@@ -208,10 +214,7 @@ export async function POST(req: Request) {
 
       if (backfillErr) throw backfillErr;
 
-      const byBet = new Map<
-        string,
-        { total: number; resolved: number }
-      >();
+      const byBet = new Map<string, { total: number; resolved: number }>();
 
       for (const row of backfillRows ?? []) {
         const betId = String((row as any).bet_id);
@@ -219,10 +222,7 @@ export async function POST(req: Request) {
 
         current.total += 1;
 
-        const isResolved =
-          (row as any).settled === true && (row as any).result != null;
-
-        if (isResolved) {
+        if (isResolvedBetItem(row)) {
           current.resolved += 1;
         }
 
