@@ -1,4 +1,3 @@
-//components/BetSlip.tsx
 "use client";
 
 import { formatOdd, formatVB } from "@/lib/format";
@@ -9,7 +8,7 @@ import { useBetSlip, type SlipItem } from "@/lib/BetSlipContext";
 const MIN_STAKE = 1;
 const MAX_STAKE = 10000;
 
-// ✅ started = kickoff osiągnięty (frontowe UX)
+// started = kickoff osiągnięty
 function isStarted(kickoffUtc?: string | null) {
   if (!kickoffUtc) return false;
   const t = Date.parse(kickoffUtc);
@@ -29,18 +28,34 @@ function keyOf(it: SlipItem) {
   return `${it.matchId}__${it.market}`;
 }
 
-            function pickLabel(it: SlipItem) {
-            const p = String(it.pick || "").toUpperCase();
+function pickLabel(it: SlipItem) {
+  const p = String(it.pick || "").toUpperCase();
 
-            if (it.market === "1x2") {
-              if (p === "1") return it.home;
-              if (p === "2") return it.away;
-              if (p === "X") return "Remis";
-            }
+  if (it.market === "1x2") {
+    if (p === "1") return it.home;
+    if (p === "2") return it.away;
+    if (p === "X") return "Remis";
+  }
 
-            return it.pick;
-          }
+  return it.pick;
+}
 
+function buildAttemptFingerprint(items: SlipItem[], stakeNum: number | null) {
+  const normalizedStake =
+    stakeNum != null && Number.isFinite(stakeNum) ? stakeNum.toFixed(2) : "null";
+
+  const normalizedItems = [...items]
+    .map((it) => {
+      const matchId = Number(it.matchId);
+      const market = String(it.market ?? "").trim().toLowerCase();
+      const pick = String(it.pick ?? "").trim();
+      return `${matchId}:${market}:${pick}`;
+    })
+    .sort()
+    .join("|");
+
+  return `${normalizedStake}__${normalizedItems}`;
+}
 
 type SuccessModalData = {
   itemsCount: number;
@@ -51,7 +66,6 @@ type SuccessModalData = {
   betId?: string | null;
 };
 
-
 function formatStakeInput(v: string) {
   if (!v) return v;
 
@@ -59,15 +73,13 @@ function formatStakeInput(v: string) {
   const parts = normalized.split(".");
 
   const int = parts[0].replace(/\D/g, "");
-  const formattedInt = Number(int).toLocaleString("pl-PL");
+  const formattedInt = int ? Number(int).toLocaleString("pl-PL") : "";
 
   if (parts.length === 1) return formattedInt;
 
   const decimals = parts[1].replace(/\D/g, "");
   return `${formattedInt},${decimals}`;
 }
-
-
 
 export default function BetSlip({ variant }: { variant?: string }) {
   const { slip, stake, setStake, removeFromSlip, clearSlip, addToSlip } =
@@ -76,38 +88,31 @@ export default function BetSlip({ variant }: { variant?: string }) {
   const isMobile = variant === "mobile";
   const isDesktop = variant === "desktop";
 
-  // MOBILE drawer state
   const [open, setOpen] = useState(false);
-
-  // ✅ lokalny input stawki — naprawia problem z wpisywaniem wielu cyfr
   const [stakeInput, setStakeInput] = useState(stake);
 
-  // UX: flash on change
   const prevSlipRef = useRef<SlipItem[]>([]);
   const [flashKey, setFlashKey] = useState<string | null>(null);
 
-  // UX: shake on invalid submit / error
   const [shake, setShake] = useState(false);
 
-  // ✅ Modal success
   const [successModal, setSuccessModal] = useState<SuccessModalData | null>(
     null
   );
   const [showTicket, setShowTicket] = useState(false);
 
-  // loading + api error
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // ✅ Modal error (np. niewystarczające środki)
   const [errorModal, setErrorModal] = useState<string | null>(null);
 
-  // ✅ sync context -> local input
+  // Stabilny klucz dla jednej próby submitu
+  const attemptKeyRef = useRef<string | null>(null);
+  const attemptFingerprintRef = useRef<string>("");
+
   useEffect(() => {
     setStakeInput(stake);
   }, [stake]);
 
-  // ✅ auto-stawka 10 VB przy pierwszym dodaniu zdarzenia do pustego kuponu
   useEffect(() => {
     if (slip.length > 0 && (!stake || !String(stake).trim())) {
       setStake("10");
@@ -143,7 +148,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
     }
   }, [slip]);
 
-  // Close drawer on ESC
   useEffect(() => {
     if (!isMobile || !open) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -153,7 +157,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isMobile, open]);
 
-  // Close modal on ESC (success)
   useEffect(() => {
     if (!successModal) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -163,7 +166,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [successModal]);
 
-  // Close modal on ESC (error)
   useEffect(() => {
     if (!errorModal) return;
     const onKeyDown = (e: KeyboardEvent) => {
@@ -174,6 +176,28 @@ export default function BetSlip({ variant }: { variant?: string }) {
   }, [errorModal]);
 
   const stakeNum = useMemo(() => parseStake(stakeInput), [stakeInput]);
+
+  const currentAttemptFingerprint = useMemo(() => {
+    return buildAttemptFingerprint(slip, stakeNum);
+  }, [slip, stakeNum]);
+
+  // Reset idempotency key tylko gdy zaczyna się nowa, istotnie zmieniona próba
+  useEffect(() => {
+    if (!slip.length) {
+      attemptKeyRef.current = null;
+      attemptFingerprintRef.current = "";
+      return;
+    }
+
+    if (
+      attemptFingerprintRef.current &&
+      attemptFingerprintRef.current !== currentAttemptFingerprint
+    ) {
+      attemptKeyRef.current = null;
+    }
+
+    attemptFingerprintRef.current = currentAttemptFingerprint;
+  }, [currentAttemptFingerprint, slip.length]);
 
   const totalOdds = useMemo(() => {
     if (!slip.length) return 0;
@@ -201,7 +225,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
     return null;
   }, [stakeInput, stakeNum, slip.length]);
 
-  // ✅ blokuj postawienie jeśli w kuponie jest mecz rozpoczęty
   const hasStarted = useMemo(() => {
     return slip.some((it) => isStarted(it.kickoffUtc));
   }, [slip]);
@@ -210,7 +233,21 @@ export default function BetSlip({ variant }: { variant?: string }) {
     return slip.length > 0 && !stakeError && !submitting && !hasStarted;
   }, [slip.length, stakeError, submitting, hasStarted]);
 
+  const resetAttemptIdentity = () => {
+    attemptKeyRef.current = null;
+    attemptFingerprintRef.current = "";
+  };
+
+  const resetSlipState = () => {
+    clearSlip();
+    setStake("");
+    setStakeInput("");
+    setSubmitError(null);
+    resetAttemptIdentity();
+  };
+
   const restoreSlip = (snapshot: SlipItem[]) => {
+    resetAttemptIdentity();
     for (const it of snapshot) addToSlip(it);
     if (isMobile) setOpen(true);
   };
@@ -225,7 +262,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
     setStake(String(next));
   }
 
-
   const onSubmit = async () => {
     setSubmitError(null);
     setErrorModal(null);
@@ -237,6 +273,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
     }
 
     const snapshot = slip.slice();
+    const requestId = attemptKeyRef.current ?? crypto.randomUUID();
+
+    attemptKeyRef.current = requestId;
+    attemptFingerprintRef.current = currentAttemptFingerprint;
 
     try {
       setSubmitting(true);
@@ -253,8 +293,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "x-idempotency-key": requestId,
         },
-        body: JSON.stringify({ slip: snapshot, stake: stakeNum }),
+        body: JSON.stringify({
+          slip: snapshot,
+          stake: stakeNum,
+          idempotencyKey: requestId,
+        }),
       });
 
       const text = await r.text();
@@ -336,9 +381,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         betId,
       });
 
-      clearSlip();
-      setStake("");
-      setStakeInput("");
+      resetSlipState();
       setOpen(false);
     } catch (e: any) {
       const msg = e?.message || "Nie udało się postawić kuponu.";
@@ -521,8 +564,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         <div className="mt-4 grid grid-cols-1 gap-2">
           <button
             onClick={() => {
-              for (const it of successModal.slipSnapshot) addToSlip(it);
-              if (isMobile) setOpen(true);
+              restoreSlip(successModal.slipSnapshot);
               setSuccessModal(null);
             }}
             className="w-full rounded-xl bg-white text-black px-4 py-3 text-sm font-semibold active:scale-[0.99] transition"
@@ -663,7 +705,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
                     <button
                       onClick={() => removeFromSlip(it.matchId, it.market)}
-                      className="mt-2 text-xs text-neutral-400 hover:text-white transition"
+                      disabled={submitting}
+                      className={[
+                        "mt-2 text-xs transition",
+                        submitting
+                          ? "text-neutral-600 cursor-not-allowed"
+                          : "text-neutral-400 hover:text-white",
+                      ].join(" ")}
                     >
                       Usuń
                     </button>
@@ -705,10 +753,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 setStakeInput(formatted);
                 setStake(raw);
               }}
+              disabled={submitting}
               inputMode="decimal"
               placeholder={`np. ${MIN_STAKE}`}
               className={[
                 "w-full rounded-xl border bg-neutral-950 px-3 py-3 pr-14 text-sm outline-none transition",
+                submitting ? "opacity-70 cursor-not-allowed" : "",
                 stakeError
                   ? "border-red-400/60 focus:border-red-300"
                   : "border-neutral-800 focus:border-neutral-600",
@@ -726,7 +776,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 key={v}
                 type="button"
                 onClick={() => addStake(v)}
-                className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs text-neutral-300 hover:bg-neutral-900 transition"
+                disabled={submitting}
+                className={[
+                  "rounded-lg border px-2 py-1.5 text-xs transition",
+                  submitting
+                    ? "border-neutral-900 bg-neutral-950 text-neutral-600 cursor-not-allowed"
+                    : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900",
+                ].join(" ")}
               >
                 +{v}
               </button>
@@ -758,15 +814,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
         </button>
 
         <button
-          onClick={() => {
-            clearSlip();
-            setStake("");
-            setStakeInput("");
-          }}
+          onClick={resetSlipState}
           disabled={!slip.length || submitting}
           className={[
             "w-full rounded-xl border px-4 py-3 text-sm transition",
-            slip.length
+            slip.length && !submitting
               ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900 active:scale-[0.99]"
               : "border-neutral-900 bg-neutral-950 text-neutral-600 cursor-not-allowed",
           ].join(" ")}
