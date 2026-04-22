@@ -466,3 +466,11 @@ select:focus {
     0 0 0 1px rgba(255, 255, 255, 0.03),
     0 12px 30px rgba(0, 0, 0, 0.24);
 }
+
+@media (min-width: 1280px) {
+  .vb-sticky-rail {
+    position: sticky;
+    top: 84px;
+    height: calc(100dvh - 100px);
+  }
+}

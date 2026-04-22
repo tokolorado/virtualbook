@@ -74,6 +74,10 @@ const FREE_TIER_LEAGUES: League[] = [
 const MARKET_ID_1X2 = "1x2";
 const BETTING_CLOSE_BUFFER_MS = 60_000;
 
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
 function safeNum(v: unknown): number | null {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
@@ -155,8 +159,7 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
     if (!code) continue;
 
     const fixtures = item?.fixtures;
-    const competitionName =
-      fixtures?.competition?.name ?? league?.name ?? code;
+    const competitionName = fixtures?.competition?.name ?? league?.name ?? code;
 
     const list = Array.isArray(fixtures?.matches) ? fixtures.matches : [];
 
@@ -169,10 +172,8 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
         minute: "2-digit",
       });
 
-      const homeId =
-        typeof m?.homeTeam?.id === "number" ? m.homeTeam.id : null;
-      const awayId =
-        typeof m?.awayTeam?.id === "number" ? m.awayTeam.id : null;
+      const homeId = typeof m?.homeTeam?.id === "number" ? m.homeTeam.id : null;
+      const awayId = typeof m?.awayTeam?.id === "number" ? m.awayTeam.id : null;
 
       const homeName = m?.homeTeam?.name ?? "Home";
       const awayName = m?.awayTeam?.name ?? "Away";
@@ -273,7 +274,6 @@ async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
   };
 }
 
-
 function SectionHeader({
   title,
   count,
@@ -288,10 +288,10 @@ function SectionHeader({
       <div className="flex items-center gap-2">
         <h3 className="text-sm font-semibold text-neutral-100">{title}</h3>
         <span
-          className={[
+          className={cx(
             "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-            badgeClassName ?? "border-neutral-800 bg-neutral-950 text-neutral-300",
-          ].join(" ")}
+            badgeClassName ?? "border-neutral-800 bg-neutral-950 text-neutral-300"
+          )}
         >
           {count}
         </span>
@@ -323,6 +323,75 @@ function LoadingMatchesSkeleton() {
         </div>
       ))}
     </div>
+  );
+}
+
+function LeagueRailButton({
+  label,
+  active,
+  count,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  count?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={cx(
+        "w-full rounded-2xl border px-3 py-3 text-left transition",
+        active
+          ? "border-white/15 bg-white/[0.08] text-white"
+          : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="truncate text-sm font-medium">{label}</span>
+        {typeof count === "number" ? (
+          <span
+            className={cx(
+              "rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+              active
+                ? "border-white/15 bg-black/20 text-white"
+                : "border-neutral-800 bg-black/20 text-neutral-400"
+            )}
+          >
+            {count}
+          </span>
+        ) : null}
+      </div>
+    </button>
+  );
+}
+
+function SegmentedButton({
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cx(
+        "flex-1 rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
+        disabled
+          ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+          : active
+            ? "border-white/15 bg-white text-black"
+            : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+      )}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -361,11 +430,6 @@ export default function EventsPage() {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [reloadKey, setReloadKey] = useState(0);
 
-  useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 10_000);
-    return () => window.clearInterval(id);
-  }, []);
-
   const [syncingOdds, setSyncingOdds] = useState(false);
   const oddsSyncInFlightRef = useRef(false);
 
@@ -373,6 +437,11 @@ export default function EventsPage() {
   const matchesLoadedAtCacheRef = useRef<Record<string, string | null>>({});
   const horizonCacheRef = useRef<Record<string, string | null>>({});
   const beyondCacheRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 10_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   const selectedLeagueLabel = useMemo(() => {
     if (selectedLeague === "ALL") return "Wszystkie ligi";
@@ -455,7 +524,7 @@ export default function EventsPage() {
       }
     };
 
-    checkBanned();
+    void checkBanned();
 
     return () => {
       cancelled = true;
@@ -493,7 +562,7 @@ export default function EventsPage() {
       }
     };
 
-    checkAdmin();
+    void checkAdmin();
 
     return () => {
       cancelled = true;
@@ -504,126 +573,125 @@ export default function EventsPage() {
     void loadEnabledDates(selectedDate);
   }, [loadEnabledDates, selectedDate]);
 
-async function manualSyncOddsForDay(args: { date: string; league: string }) {
-  if (oddsSyncInFlightRef.current) return;
+  async function manualSyncOddsForDay(args: { date: string; league: string }) {
+    if (oddsSyncInFlightRef.current) return;
 
-  oddsSyncInFlightRef.current = true;
-  setSyncingOdds(true);
-  setMatchesError(null);
+    oddsSyncInFlightRef.current = true;
+    setSyncingOdds(true);
+    setMatchesError(null);
 
-  try {
-    const leagues = args.league === "ALL" ? undefined : [String(args.league)];
-
-    const { data: sessionData } = await supabase.auth.getSession();
-    const token = sessionData.session?.access_token;
-
-    if (!token) {
-      setMatchesError("Brak sesji admina.");
-      return;
-    }
-
-    const r = await fetch("/api/admin/manual-odds-sync", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        date: args.date,
-        leagues,
-        oddsTtlHours: 6,
-        batchLimit: 30,
-        throttleMs: 800,
-        maxRetries: 2,
-      }),
-    });
-
-    const text = await r.text().catch(() => "");
-    let j: any = {};
     try {
-      j = text ? JSON.parse(text) : {};
-    } catch {
-      j = { raw: text?.slice(0, 300) || "" };
-    }
+      const leagues = args.league === "ALL" ? undefined : [String(args.league)];
 
-    if (!r.ok) {
-      const msg =
-        j?.error ||
-        j?.message ||
-        (typeof j?.raw === "string" && j.raw ? j.raw : "") ||
-        `odds sync failed (HTTP ${r.status})`;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
 
-      setMatchesError(`Nie udało się zsynchronizować kursów: ${msg}`);
-      return;
-    }
+      if (!token) {
+        setMatchesError("Brak sesji admina.");
+        return;
+      }
 
-    const rr = await fetch(
-      `/api/events?date=${encodeURIComponent(selectedDate)}`,
-      { cache: "no-store" }
-    );
+      const r = await fetch("/api/admin/manual-odds-sync", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          date: args.date,
+          leagues,
+          oddsTtlHours: 6,
+          batchLimit: 30,
+          throttleMs: 800,
+          maxRetries: 2,
+        }),
+      });
 
-    const text2 = await rr.text();
-    let payload: any = null;
-    try {
-      payload = JSON.parse(text2);
-    } catch {
-      payload = { error: text2?.slice(0, 300) || "Non-JSON response" };
-    }
+      const text = await r.text().catch(() => "");
+      let j: any = {};
+      try {
+        j = text ? JSON.parse(text) : {};
+      } catch {
+        j = { raw: text?.slice(0, 300) || "" };
+      }
 
-    if (!rr.ok) {
-      const msg = payload?.error || `Błąd /api/events (HTTP ${rr.status})`;
-      setMatchesError(msg);
-      return;
-    }
+      if (!r.ok) {
+        const msg =
+          j?.error ||
+          j?.message ||
+          (typeof j?.raw === "string" && j.raw ? j.raw : "") ||
+          `odds sync failed (HTTP ${r.status})`;
 
-    const apiHorizonTo =
-      typeof payload?.horizonTo === "string" ? payload.horizonTo : null;
-    setHorizonYmd(apiHorizonTo);
+        setMatchesError(`Nie udało się zsynchronizować kursów: ${msg}`);
+        return;
+      }
 
-    const apiSaysBeyond = Boolean(payload?.isBeyondHorizon);
-    const uiSaysBeyond = isBeyondHorizonDay(selectedDate, apiHorizonTo);
+      const rr = await fetch(`/api/events?date=${encodeURIComponent(selectedDate)}`, {
+        cache: "no-store",
+      });
 
-    if (apiSaysBeyond || uiSaysBeyond) {
-      matchesCacheRef.current[selectedDate] = [];
+      const text2 = await rr.text();
+      let payload: any = null;
+      try {
+        payload = JSON.parse(text2);
+      } catch {
+        payload = { error: text2?.slice(0, 300) || "Non-JSON response" };
+      }
+
+      if (!rr.ok) {
+        const msg = payload?.error || `Błąd /api/events (HTTP ${rr.status})`;
+        setMatchesError(msg);
+        return;
+      }
+
+      const apiHorizonTo =
+        typeof payload?.horizonTo === "string" ? payload.horizonTo : null;
+      setHorizonYmd(apiHorizonTo);
+
+      const apiSaysBeyond = Boolean(payload?.isBeyondHorizon);
+      const uiSaysBeyond = isBeyondHorizonDay(selectedDate, apiHorizonTo);
+
+      if (apiSaysBeyond || uiSaysBeyond) {
+        matchesCacheRef.current[selectedDate] = [];
+        horizonCacheRef.current[selectedDate] = apiHorizonTo;
+        beyondCacheRef.current[selectedDate] = true;
+
+        setBeyondHorizon(true);
+        setMatches([]);
+        setMatchesLoadedAt(new Date().toISOString());
+        setMatchesError(null);
+        await loadEnabledDates(selectedDate);
+        return;
+      }
+
+      const baseMatches = sortMatches(
+        buildMatchesFromPayload(payload, selectedDate),
+        Date.now()
+      );
+
+      const { matches: hydratedMatches, latestOddsUpdatedAt } =
+        await hydrateMatchesWithDbOdds(baseMatches);
+
+      const loadedAt =
+        latestOddsUpdatedAt ??
+        (typeof payload?.updatedAt === "string"
+          ? payload.updatedAt
+          : new Date().toISOString());
+
+      matchesCacheRef.current[selectedDate] = hydratedMatches;
+      matchesLoadedAtCacheRef.current[selectedDate] = loadedAt;
       horizonCacheRef.current[selectedDate] = apiHorizonTo;
-      beyondCacheRef.current[selectedDate] = true;
+      beyondCacheRef.current[selectedDate] = false;
 
-      setBeyondHorizon(true);
-      setMatches([]);
-      setMatchesLoadedAt(new Date().toISOString());
-      setMatchesError(null);
+      setBeyondHorizon(false);
+      setMatches(hydratedMatches);
+      setMatchesLoadedAt(loadedAt);
       await loadEnabledDates(selectedDate);
-      return;
+    } finally {
+      setSyncingOdds(false);
+      oddsSyncInFlightRef.current = false;
     }
-
-    const baseMatches = sortMatches(
-      buildMatchesFromPayload(payload, selectedDate),
-      Date.now()
-    );
-
-    const { matches: hydratedMatches, latestOddsUpdatedAt } =
-      await hydrateMatchesWithDbOdds(baseMatches);
-
-    const loadedAt =
-      latestOddsUpdatedAt ??
-      (typeof payload?.updatedAt === "string"
-        ? payload.updatedAt
-        : new Date().toISOString());
-
-    matchesCacheRef.current[selectedDate] = hydratedMatches;
-    matchesLoadedAtCacheRef.current[selectedDate] = loadedAt;
-    horizonCacheRef.current[selectedDate] = apiHorizonTo;
-    beyondCacheRef.current[selectedDate] = false;
-
-    setBeyondHorizon(false);
-    setMatches(hydratedMatches);
-    setMatchesLoadedAt(loadedAt);
-    await loadEnabledDates(selectedDate);
-  } finally {
-    setSyncingOdds(false);
-    oddsSyncInFlightRef.current = false;
   }
-}
 
   useEffect(() => {
     let cancelled = false;
@@ -649,10 +717,9 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
       }
 
       try {
-        const r = await fetch(
-          `/api/events?date=${encodeURIComponent(selectedDate)}`,
-          { cache: "no-store" }
-        );
+        const r = await fetch(`/api/events?date=${encodeURIComponent(selectedDate)}`, {
+          cache: "no-store",
+        });
 
         const text = await r.text();
         let payload: any = null;
@@ -664,9 +731,7 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
 
         if (!r.ok) {
           if (!cancelled) {
-            setMatchesError(
-              payload?.error || `Błąd /api/events (HTTP ${r.status})`
-            );
+            setMatchesError(payload?.error || `Błąd /api/events (HTTP ${r.status})`);
           }
           return;
         }
@@ -726,7 +791,7 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
       }
     };
 
-    load();
+    void load();
 
     return () => {
       cancelled = true;
@@ -766,9 +831,7 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
         if (!r.ok) {
           if (!cancelled) {
             setStandings(null);
-            setStandingsError(
-              j?.error || `Błąd /api/standings (HTTP ${r.status})`
-            );
+            setStandingsError(j?.error || `Błąd /api/standings (HTTP ${r.status})`);
           }
           return;
         }
@@ -797,7 +860,7 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
       }
     };
 
-    loadStandings();
+    void loadStandings();
 
     return () => {
       cancelled = true;
@@ -832,6 +895,33 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
     () => filteredMatches.filter((m) => isFinishedStatus(m.status)),
     [filteredMatches]
   );
+
+  const featuredMatches = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Match[] = [];
+
+    for (const source of [liveMatches, openMatches]) {
+      for (const m of source) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        result.push(m);
+        if (result.length >= 6) return result;
+      }
+    }
+
+    return result;
+  }, [liveMatches, openMatches]);
+
+  const leagueCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const match of matches) {
+      counts.set(
+        match.competitionCode,
+        (counts.get(match.competitionCode) ?? 0) + 1
+      );
+    }
+    return counts;
+  }, [matches]);
 
   const openSectionTitle =
     selectedDate === todayLocalYYYYMMDD() ? "Dziś" : "Zaplanowane";
@@ -898,7 +988,146 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
     };
   }, [selectedTeam, matches]);
 
-  const renderMatchCard = (m: Match) => {
+  const renderOddButton = (
+    m: Match,
+    pick: Pick,
+    compact = false
+  ) => {
+    const live = isLiveStatus(m.status);
+    const finished = isFinishedStatus(m.status);
+    const closed = live || finished || isBettingClosed(m.kickoffUtc, nowMs);
+    const active = isActivePick(m.id, MARKET_ID_1X2, pick);
+
+    const oddRaw = m.odds[pick];
+    const hasOdd =
+      typeof oddRaw === "number" && Number.isFinite(oddRaw) && oddRaw > 0;
+    const odd = hasOdd ? oddRaw : 0;
+
+    return (
+      <button
+        key={pick}
+        disabled={!hasOdd || closed}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!hasOdd || closed) return;
+
+          if (active) {
+            removeFromSlip(m.id, MARKET_ID_1X2);
+            return;
+          }
+
+          addToSlip({
+            matchId: m.id,
+            competitionCode: m.competitionCode,
+            league: m.competitionName,
+            home: m.home,
+            away: m.away,
+            market: MARKET_ID_1X2,
+            pick,
+            odd,
+            kickoffUtc: m.kickoffUtc,
+          });
+        }}
+        className={cx(
+          compact ? "w-full min-w-0" : "w-20",
+          "rounded-xl border px-3 py-2 text-sm transition",
+          !hasOdd || closed
+            ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+            : active
+              ? "border-neutral-200 bg-white text-black"
+              : "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-800"
+        )}
+        title={
+          !hasOdd
+            ? "Brak kursu w bazie (odds)"
+            : closed
+              ? "Zakłady zamknięte dla tego meczu"
+              : `Kurs: ${formatOdd(odd)}`
+        }
+      >
+        <div className="leading-none font-semibold">{pick}</div>
+        <div className="mt-1 text-[11px] opacity-80">
+          {hasOdd ? formatOdd(odd) : "—"}
+        </div>
+      </button>
+    );
+  };
+
+  const renderMatchState = (m: Match) => {
+    const live = isLiveStatus(m.status);
+    const finished = isFinishedStatus(m.status);
+    const closed = live || finished || isBettingClosed(m.kickoffUtc, nowMs);
+
+    if (live) {
+      return (
+        <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-semibold text-red-300">
+          LIVE
+        </span>
+      );
+    }
+
+    if (finished) {
+      return (
+        <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[11px] text-neutral-300">
+          Zakończony
+        </span>
+      );
+    }
+
+    if (closed) {
+      return (
+        <span className="rounded-full border border-amber-500/20 bg-amber-500/10 px-3 py-1 text-[11px] text-amber-300">
+          Zakłady zamknięte
+        </span>
+      );
+    }
+
+    return (
+      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[11px] text-neutral-300">
+        Pre-match
+      </span>
+    );
+  };
+
+  const renderFeaturedCard = (m: Match) => {
+    return (
+      <div
+        key={`featured-${m.id}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => goMatch(m)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            goMatch(m);
+          }
+        }}
+        className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 transition hover:bg-neutral-900/60 cursor-pointer"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs text-neutral-400">{m.competitionName}</div>
+            <div className="mt-1 text-sm text-neutral-500">{m.time}</div>
+          </div>
+
+          <div className="shrink-0">{renderMatchState(m)}</div>
+        </div>
+
+        <div className="mt-4 min-h-[56px]">
+          <div className="text-base font-semibold text-white">{m.home}</div>
+          <div className="mt-1 text-base font-semibold text-white">{m.away}</div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          {(["1", "X", "2"] as Pick[]).map((pick) =>
+            renderOddButton(m, pick, true)
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderMatchRowCard = (m: Match) => {
     const live = isLiveStatus(m.status);
     const finished = isFinishedStatus(m.status);
     const closed = live || finished || isBettingClosed(m.kickoffUtc, nowMs);
@@ -915,94 +1144,275 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
             goMatch(m);
           }
         }}
-        className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 hover:bg-neutral-900/60 transition cursor-pointer"
+        className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 transition hover:bg-neutral-900/60 cursor-pointer"
       >
-        <div className="text-xs text-neutral-400 flex items-center justify-between gap-2">
-          <span>{m.leagueLine}</span>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-neutral-400">{m.leagueLine}</span>
+              {renderMatchState(m)}
+            </div>
 
-          {live ? (
-            <span className="text-[11px] px-2 py-1 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 font-semibold animate-pulse">
-              LIVE
-            </span>
-          ) : finished ? (
-            <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-300">
-              Zakończony
-            </span>
-          ) : closed ? (
-            <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-amber-300">
-              Mecz rozpoczęty • zakłady zamknięte
-            </span>
-          ) : (
-            <span className="text-[11px] px-2 py-1 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-300">
-              Pre-match
-            </span>
-          )}
-        </div>
-
-        <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-lg font-semibold">
-            {m.home} <span className="text-neutral-400 font-normal">vs</span>{" "}
-            {m.away}
+            <div className="mt-3 text-lg font-semibold text-white">
+              {m.home} <span className="font-normal text-neutral-400">vs</span>{" "}
+              {m.away}
+            </div>
           </div>
 
           <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-            {!closed &&
-              (["1", "X", "2"] as Pick[]).map((pick) => {
-                const active = isActivePick(m.id, MARKET_ID_1X2, pick);
-
-                const oddRaw = m.odds[pick];
-                const hasOdd =
-                  typeof oddRaw === "number" &&
-                  Number.isFinite(oddRaw) &&
-                  oddRaw > 0;
-                const odd = hasOdd ? oddRaw : 0;
-
-                return (
-                  <button
-                    key={pick}
-                    disabled={!hasOdd}
-                    onClick={() => {
-                      if (!hasOdd) return;
-
-                      if (active) {
-                        removeFromSlip(m.id, MARKET_ID_1X2);
-                        return;
-                      }
-
-                      addToSlip({
-                        matchId: m.id,
-                        competitionCode: m.competitionCode,
-                        league: m.competitionName,
-                        home: m.home,
-                        away: m.away,
-                        market: MARKET_ID_1X2,
-                        pick,
-                        odd,
-                        kickoffUtc: m.kickoffUtc,
-                      });
-                    }}
-                    className={[
-                      "w-20 rounded-xl border px-3 py-2 text-sm transition",
-                      !hasOdd
-                        ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
-                        : active
-                          ? "border-neutral-200 bg-white text-black"
-                          : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800",
-                    ].join(" ")}
-                    title={
-                      hasOdd
-                        ? `Kurs: ${formatOdd(odd)}`
-                        : "Brak kursu w bazie (odds)"
-                    }
-                  >
-                    <div className="leading-none font-semibold">{pick}</div>
-                    <div className="text-[11px] opacity-80 mt-1">
-                      {hasOdd ? formatOdd(odd) : "—"}
-                    </div>
-                  </button>
-                );
-              })}
+            {(["1", "X", "2"] as Pick[]).map((pick) => renderOddButton(m, pick))}
           </div>
+        </div>
+
+        {closed && !live && !finished ? (
+          <div className="mt-3 text-xs text-amber-300">
+            Mecz rozpoczęty — zakłady są już zamknięte.
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderTableView = () => {
+    if (selectedLeague === "ALL") {
+      return (
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
+          Wybierz ligę po lewej stronie, aby zobaczyć tabelę.
+        </div>
+      );
+    }
+
+    if (loadingStandings) {
+      return (
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
+          Ładowanie tabeli…
+        </div>
+      );
+    }
+
+    if (standingsError) {
+      return (
+        <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-6 text-red-300">
+          {standingsError}
+        </div>
+      );
+    }
+
+    if (!standings?.rows?.length) {
+      return (
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
+          Brak danych tabeli dla tej ligi.
+        </div>
+      );
+    }
+
+    return (
+      <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <div className="text-lg font-semibold text-white">
+                {standings.competitionName}
+              </div>
+              {standings.season ? (
+                <div className="mt-1 text-xs text-neutral-400">
+                  Sezon: {standings.season}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="text-xs text-neutral-500">Tabela ligowa</div>
+          </div>
+
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead>
+                <tr className="border-b border-neutral-800 text-neutral-400">
+                  <th className="w-10 py-2 pr-2 text-left font-medium">#</th>
+                  <th className="py-2 pr-2 text-left font-medium">Drużyna</th>
+                  <th className="w-10 py-2 pl-2 text-right font-medium">M</th>
+                  <th className="w-10 py-2 pl-2 text-right font-medium">Z</th>
+                  <th className="w-10 py-2 pl-2 text-right font-medium">R</th>
+                  <th className="w-10 py-2 pl-2 text-right font-medium">P</th>
+                  <th className="w-12 py-2 pl-2 text-right font-medium">PKT</th>
+                  <th className="w-12 py-2 pl-2 text-right font-medium">RB</th>
+                  <th className="w-44 py-2 pl-2 text-left font-medium">Forma</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {standings.rows.map((r) => {
+                  const form = formatForm(r.form);
+
+                  return (
+                    <tr
+                      key={r.teamId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedTeamId(r.teamId)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedTeamId(r.teamId);
+                        }
+                      }}
+                      className={cx(
+                        "border-b border-neutral-800/60 cursor-pointer transition",
+                        selectedTeamId === r.teamId
+                          ? "bg-neutral-900/60"
+                          : "hover:bg-neutral-900/40"
+                      )}
+                    >
+                      <td className="py-2 pr-2 text-neutral-300">{r.position}</td>
+                      <td className="py-2 pr-2 text-neutral-200">{r.teamName}</td>
+                      <td className="py-2 pl-2 text-right text-neutral-300">
+                        {r.playedGames}
+                      </td>
+                      <td className="py-2 pl-2 text-right text-neutral-300">
+                        {r.won}
+                      </td>
+                      <td className="py-2 pl-2 text-right text-neutral-300">
+                        {r.draw}
+                      </td>
+                      <td className="py-2 pl-2 text-right text-neutral-300">
+                        {r.lost}
+                      </td>
+                      <td className="py-2 pl-2 text-right font-semibold text-neutral-100">
+                        {r.points}
+                      </td>
+                      <td className="py-2 pl-2 text-right text-neutral-300">
+                        {r.goalDifference}
+                      </td>
+                      <td className="py-2 pl-2 text-neutral-300">
+                        {form?.length ? (
+                          <div className="flex gap-1">
+                            {form.map((x, idx) => (
+                              <span
+                                key={`${r.teamId}-${idx}-${x}`}
+                                className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-neutral-800 bg-neutral-900 text-[11px] text-neutral-200"
+                                title={
+                                  x === "W"
+                                    ? "Win"
+                                    : x === "D"
+                                      ? "Draw"
+                                      : x === "L"
+                                        ? "Loss"
+                                        : x
+                                }
+                              >
+                                {x}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-neutral-500">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {!selectedTeam || !selectedTeamInsights ? (
+            <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5">
+              <div className="text-sm font-semibold text-white">
+                Insight drużyny
+              </div>
+              <div className="mt-2 text-sm text-neutral-400">
+                Kliknij drużynę w tabeli, aby zobaczyć szybkie podsumowanie formy.
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-base font-semibold text-white">
+                    {selectedTeam.position}. {selectedTeam.teamName}
+                  </div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    M: {selectedTeam.playedGames} • Z: {selectedTeam.won} • R:{" "}
+                    {selectedTeam.draw} • P: {selectedTeam.lost}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setSelectedTeamId(null)}
+                  className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition hover:bg-neutral-800"
+                >
+                  Zamknij
+                </button>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    PPG
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-white">
+                    {selectedTeamInsights.ppg.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Win rate
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-white">
+                    {selectedTeamInsights.winRate.toFixed(0)}%
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Gole / mecz
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-white">
+                    {selectedTeamInsights.gfpg.toFixed(2)}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Stracone / mecz
+                  </div>
+                  <div className="mt-2 text-lg font-semibold text-white">
+                    {selectedTeamInsights.gapg.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                  Bilans
+                </div>
+                <div className="mt-2 text-sm text-white">
+                  {selectedTeamInsights.winRate.toFixed(0)}% /{" "}
+                  {selectedTeamInsights.drawRate.toFixed(0)}% /{" "}
+                  {selectedTeamInsights.lossRate.toFixed(0)}%
+                </div>
+              </div>
+
+              {selectedTeamInsights.todayMatch ? (
+                <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Mecz w wybranym dniu
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-white">
+                    {selectedTeamInsights.todayMatch.home}{" "}
+                    <span className="font-normal text-neutral-400">vs</span>{" "}
+                    {selectedTeamInsights.todayMatch.away}
+                  </div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    {selectedTeamInsights.todayMatch.time}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1010,186 +1420,280 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold">Mecze</h1>
-            <p className="text-neutral-400 mt-1">
-              Wybierz dzień i ligę — pokażemy mecze tylko z wybranego dnia.
-            </p>
+      <section className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 sm:p-5">
+        <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
+            <div className="max-w-3xl">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                VirtualBook Football
+              </div>
+              <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">
+                Mecze i kursy 1X2
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-neutral-400">
+                Przegląd wybranego dnia, szybki wybór ligi, wyróżnione mecze i
+                pełna lista spotkań z aktualnymi kursami z bazy.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 xl:flex-row xl:flex-wrap xl:items-center">
+              <DayBar
+                value={selectedDate}
+                onChange={setSelectedDate}
+                enabledDates={enabledDates}
+                enabledDatesLoaded={enabledDatesLoaded}
+              />
+
+              <button
+                onClick={refreshCurrentDay}
+                disabled={loadingMatches}
+                className={cx(
+                  "rounded-2xl border px-4 py-3 text-sm transition",
+                  loadingMatches
+                    ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+                    : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
+                )}
+                title="Odśwież listę meczów dla wybranego dnia"
+              >
+                {loadingMatches ? "Odświeżam…" : "Odśwież mecze"}
+              </button>
+
+              {!checkingAdmin && isAdmin ? (
+                <button
+                  onClick={() =>
+                    manualSyncOddsForDay({
+                      date: selectedDate,
+                      league: selectedLeague,
+                    })
+                  }
+                  disabled={syncingOdds}
+                  className={cx(
+                    "rounded-2xl border px-4 py-3 text-sm transition",
+                    syncingOdds
+                      ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+                      : "border-neutral-200 bg-white text-black hover:opacity-90"
+                  )}
+                  title="Pomocniczo: uruchamia /api/odds/sync (normalnie robi to cron)"
+                >
+                  {syncingOdds ? "Synchronizuję…" : "Synchronizuj kursy"}
+                </button>
+              ) : null}
+            </div>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <DayBar
-              value={selectedDate}
-              onChange={setSelectedDate}
-              enabledDates={enabledDates}
-              enabledDatesLoaded={enabledDatesLoaded}
-            />
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+              Liga:{" "}
+              <span className="font-semibold text-white">{selectedLeagueLabel}</span>
+            </span>
 
-            <button
-              onClick={refreshCurrentDay}
-              disabled={loadingMatches}
-              className={[
-                "rounded-xl border px-3 py-2 text-sm transition",
-                loadingMatches
-                  ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
-                  : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800",
-              ].join(" ")}
-              title="Odśwież listę meczów dla wybranego dnia"
-            >
-              {loadingMatches ? "Odświeżam…" : "Odśwież mecze"}
-            </button>
+            <span className="rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-red-300">
+              LIVE: {liveMatches.length}
+            </span>
 
-            {!checkingAdmin && isAdmin ? (
-              <button
-                onClick={() =>
-                  manualSyncOddsForDay({
-                    date: selectedDate,
-                    league: selectedLeague,
-                  })
-                }
-                disabled={syncingOdds}
-                className={[
-                  "rounded-xl border px-3 py-2 text-sm transition",
-                  syncingOdds
-                    ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
-                    : "border-neutral-200 bg-white text-black hover:opacity-90",
-                ].join(" ")}
-                title="Pomocniczo: uruchamia /api/odds/sync (normalnie robi to cron)"
-              >
-                {syncingOdds ? "Synchronizuję…" : "Synchronizuj kursy"}
-              </button>
+            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+              {openSectionTitle}: {openMatches.length}
+            </span>
+
+            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+              Zakończone: {finishedMatches.length}
+            </span>
+
+            {matchesLoadedAt ? (
+              <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-500">
+                Ostatnia aktualizacja:{" "}
+                {new Date(matchesLoadedAt).toLocaleTimeString()}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="text-sm text-neutral-400">
+              {loadingMatches ? (
+                <span>Ładowanie…</span>
+              ) : matchesError ? (
+                <span className="text-red-300">{matchesError}</span>
+              ) : (
+                <span>
+                  Wyświetlasz:{" "}
+                  <span className="font-semibold text-white">
+                    {selectedLeagueLabel}
+                  </span>{" "}
+                  • {filteredMatches.length} meczów
+                </span>
+              )}
+            </div>
+
+            {beyondHorizon && horizonYmd ? (
+              <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-500">
+                Horyzont danych: do {horizonYmd} (UTC)
+              </span>
             ) : null}
           </div>
         </div>
-
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
-            Liga: <span className="font-semibold text-white">{selectedLeagueLabel}</span>
-          </span>
-
-          <span className="rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-red-300">
-            LIVE: {liveMatches.length}
-          </span>
-
-          <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
-            {openSectionTitle}: {openMatches.length}
-          </span>
-
-          <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
-            Zakończone: {finishedMatches.length}
-          </span>
-
-          {matchesLoadedAt ? (
-            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-500">
-              Ostatnia aktualizacja: {new Date(matchesLoadedAt).toLocaleTimeString()}
-            </span>
-          ) : null}
-        </div>
-
-        <div className="mt-3 flex items-center gap-2 text-sm">
-          {loadingMatches ? (
-            <span className="text-neutral-400">Ładowanie…</span>
-          ) : matchesError ? (
-            <span className="text-red-300">{matchesError}</span>
-          ) : (
-            <span className="text-neutral-400">
-              Wyświetlasz:{" "}
-              <span className="text-white font-semibold">{selectedLeagueLabel}</span>{" "}
-              • {filteredMatches.length} meczów
-            </span>
-          )}
-        </div>
       </section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[170px_1fr] gap-6">
-        <aside className="h-fit lg:sticky lg:top-24 rounded-2xl border border-neutral-800 bg-neutral-900/40 p-3">
-          <div className="text-sm font-semibold">Ligi</div>
+      <div className="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="hidden xl:block">
+          <div className="sticky top-24 max-h-[calc(100dvh-110px)] overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900/40">
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="border-b border-neutral-800 p-4">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                  Discover
+                </div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  Ligi i filtry
+                </div>
+                <div className="mt-1 text-sm text-neutral-400">
+                  Odkrywaj mecze dla wybranego dnia bez przewijania całego feedu.
+                </div>
+              </div>
 
-          <div className="mt-3">
-            <button
-              onClick={() => {
-                setSelectedLeague("ALL");
-                setActiveRightTab("matches");
-              }}
-              className={[
-                "w-full rounded-xl border px-2 py-2 text-xs transition text-left",
-                selectedLeague === "ALL"
-                  ? "border-neutral-200 bg-white text-black"
-                  : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800",
-              ].join(" ")}
-            >
-              <div className="whitespace-nowrap">Wszystkie ligi</div>
-            </button>
-          </div>
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Wybrany dzień
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-white">
+                    {selectedDate}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs">
+                    <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1 text-neutral-300">
+                      LIVE {liveMatches.length}
+                    </span>
+                    <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1 text-neutral-300">
+                      Open {openMatches.length}
+                    </span>
+                    <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1 text-neutral-300">
+                      Finished {finishedMatches.length}
+                    </span>
+                  </div>
+                </div>
 
-          <div className="mt-3 space-y-2">
-            {FREE_TIER_LEAGUES.map((lg) => {
-              const active = selectedLeague === lg.code;
+                <div className="space-y-2">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Liga
+                  </div>
 
-              return (
-                <button
-                  key={lg.code}
-                  onClick={() => {
-                    setSelectedLeague(lg.code);
-                    setActiveRightTab("matches");
-                  }}
-                  className={[
-                    "w-full rounded-xl border px-2 py-2 text-xs transition text-left",
-                    active
-                      ? "border-neutral-200 bg-white text-black"
-                      : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800",
-                  ].join(" ")}
-                  title={lg.name}
-                >
-                  <div className="whitespace-nowrap">{lg.name}</div>
-                </button>
-              );
-            })}
+                  <LeagueRailButton
+                    label="Wszystkie ligi"
+                    count={matches.length}
+                    active={selectedLeague === "ALL"}
+                    onClick={() => {
+                      setSelectedLeague("ALL");
+                      setActiveRightTab("matches");
+                    }}
+                  />
+
+                  {FREE_TIER_LEAGUES.map((lg) => (
+                    <LeagueRailButton
+                      key={lg.code}
+                      label={lg.name}
+                      count={leagueCounts.get(lg.code) ?? 0}
+                      active={selectedLeague === lg.code}
+                      onClick={() => {
+                        setSelectedLeague(lg.code);
+                        setActiveRightTab("matches");
+                      }}
+                    />
+                  ))}
+                </div>
+
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Tryb widoku
+                  </div>
+
+                  <div className="mt-3 flex flex-col gap-2">
+                    <SegmentedButton
+                      active={activeRightTab === "matches"}
+                      onClick={() => setActiveRightTab("matches")}
+                    >
+                      Mecze
+                    </SegmentedButton>
+
+                    <SegmentedButton
+                      active={activeRightTab === "table"}
+                      disabled={selectedLeague === "ALL"}
+                      onClick={() => setActiveRightTab("table")}
+                    >
+                      Tabela
+                    </SegmentedButton>
+                  </div>
+
+                  <div className="mt-3 text-xs text-neutral-500">
+                    {selectedLeague === "ALL"
+                      ? "Tabela jest dostępna po wyborze konkretnej ligi."
+                      : `Tabela dla: ${selectedLeagueLabel}`}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </aside>
 
-        <section className="space-y-3">
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-3">
-            <div className="flex gap-2">
-              <button
-                onClick={() => setActiveRightTab("matches")}
-                className={[
-                  "flex-1 rounded-xl border px-3 py-2 text-sm transition",
-                  activeRightTab === "matches"
-                    ? "border-neutral-200 bg-white text-black"
-                    : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800",
-                ].join(" ")}
-              >
-                Mecze
-              </button>
+        <section className="min-w-0 space-y-6">
+          <div className="xl:hidden">
+            <div className="overflow-x-auto pb-1">
+              <div className="flex gap-2">
+                <LeagueRailButton
+                  label="Wszystkie"
+                  count={matches.length}
+                  active={selectedLeague === "ALL"}
+                  onClick={() => {
+                    setSelectedLeague("ALL");
+                    setActiveRightTab("matches");
+                  }}
+                />
 
-              <button
-                onClick={() => setActiveRightTab("table")}
-                disabled={selectedLeague === "ALL"}
-                className={[
-                  "flex-1 rounded-xl border px-3 py-2 text-sm transition",
-                  selectedLeague === "ALL"
-                    ? "border-neutral-800 bg-neutral-950 text-neutral-600 cursor-not-allowed"
-                    : activeRightTab === "table"
-                      ? "border-neutral-200 bg-white text-black"
-                      : "border-neutral-800 bg-neutral-950 hover:bg-neutral-800",
-                ].join(" ")}
-                title={
-                  selectedLeague === "ALL"
-                    ? "Wybierz ligę, żeby zobaczyć tabelę"
-                    : ""
-                }
-              >
-                Tabela
-              </button>
+                {FREE_TIER_LEAGUES.map((lg) => (
+                  <button
+                    key={lg.code}
+                    onClick={() => {
+                      setSelectedLeague(lg.code);
+                      setActiveRightTab("matches");
+                    }}
+                    className={cx(
+                      "shrink-0 rounded-2xl border px-4 py-3 text-sm transition",
+                      selectedLeague === lg.code
+                        ? "border-white/15 bg-white text-black"
+                        : "border-neutral-800 bg-neutral-950 text-neutral-300"
+                    )}
+                  >
+                    {lg.name}
+                  </button>
+                ))}
+              </div>
             </div>
+          </div>
 
-            <div className="mt-2 text-xs text-neutral-400">
-              {selectedLeague === "ALL"
-                ? "Wyświetlasz mecze ze wszystkich lig. Tabela dostępna po wybraniu ligi."
-                : `Liga: ${selectedLeagueLabel}`}
+          <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <div className="text-lg font-semibold text-white">
+                  Feed dnia
+                </div>
+                <div className="mt-1 text-sm text-neutral-400">
+                  Najważniejsze mecze, pełna lista spotkań i tabela wybranej ligi.
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <SegmentedButton
+                  active={activeRightTab === "matches"}
+                  onClick={() => setActiveRightTab("matches")}
+                >
+                  Mecze
+                </SegmentedButton>
+
+                <SegmentedButton
+                  active={activeRightTab === "table"}
+                  disabled={selectedLeague === "ALL"}
+                  onClick={() => setActiveRightTab("table")}
+                >
+                  Tabela
+                </SegmentedButton>
+              </div>
             </div>
           </div>
 
@@ -1197,260 +1701,88 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
             loadingMatches ? (
               <LoadingMatchesSkeleton />
             ) : matchesError ? (
-              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-6">
-                <div className="text-sm font-medium text-red-200">Nie udało się pobrać meczów</div>
+              <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-6">
+                <div className="text-sm font-medium text-red-200">
+                  Nie udało się pobrać meczów
+                </div>
                 <div className="mt-1 text-sm text-red-300">{matchesError}</div>
                 <button
                   onClick={refreshCurrentDay}
-                  className="mt-4 rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-neutral-200 transition hover:bg-neutral-900"
+                  className="mt-4 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-neutral-200 transition hover:bg-neutral-900"
                 >
                   Spróbuj ponownie
                 </button>
               </div>
             ) : filteredMatches.length === 0 ? (
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
+              <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
                 {beyondHorizon
                   ? "Jeszcze brak meczów, wkrótce się pojawią 🙂 Dodajemy mecze na 2 tygodnie do przodu."
                   : "Brak meczów dla wybranego dnia lub filtra ligi."}
 
                 {beyondHorizon && horizonYmd ? (
-                  <div className="text-xs text-neutral-500 mt-2">
+                  <div className="mt-2 text-xs text-neutral-500">
                     Horyzont danych: do {horizonYmd} (UTC)
                   </div>
                 ) : null}
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="space-y-6">
+                {featuredMatches.length > 0 ? (
+                  <section className="space-y-3">
+                    <SectionHeader
+                      title="Najważniejsze mecze"
+                      count={featuredMatches.length}
+                      badgeClassName="border-neutral-800 bg-neutral-950 text-neutral-300"
+                    />
+                    <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+                      {featuredMatches.map((m) => renderFeaturedCard(m))}
+                    </div>
+                  </section>
+                ) : null}
+
                 {liveMatches.length > 0 ? (
-                  <div className="space-y-3">
+                  <section className="space-y-3">
                     <SectionHeader
                       title="LIVE"
                       count={liveMatches.length}
                       badgeClassName="border-red-500/30 bg-red-500/10 text-red-300"
                     />
                     <div className="space-y-3">
-                      {liveMatches.map((m) => renderMatchCard(m))}
+                      {liveMatches.map((m) => renderMatchRowCard(m))}
                     </div>
-                  </div>
+                  </section>
                 ) : null}
 
                 {openMatches.length > 0 ? (
-                  <div className="space-y-3">
+                  <section className="space-y-3">
                     <SectionHeader
                       title={openSectionTitle}
                       count={openMatches.length}
                       badgeClassName="border-neutral-800 bg-neutral-950 text-neutral-300"
                     />
                     <div className="space-y-3">
-                      {openMatches.map((m) => renderMatchCard(m))}
+                      {openMatches.map((m) => renderMatchRowCard(m))}
                     </div>
-                  </div>
+                  </section>
                 ) : null}
 
                 {finishedMatches.length > 0 ? (
-                  <div className="space-y-3">
+                  <section className="space-y-3">
                     <SectionHeader
                       title="Zakończone"
                       count={finishedMatches.length}
                       badgeClassName="border-neutral-800 bg-neutral-950 text-neutral-300"
                     />
                     <div className="space-y-3">
-                      {finishedMatches.map((m) => renderMatchCard(m))}
+                      {finishedMatches.map((m) => renderMatchRowCard(m))}
                     </div>
-                  </div>
+                  </section>
                 ) : null}
               </div>
             )
           ) : null}
 
-          {activeRightTab === "table" ? (
-            selectedLeague === "ALL" ? (
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
-                Wybierz ligę po lewej stronie, aby zobaczyć tabelę.
-              </div>
-            ) : loadingStandings ? (
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
-                Ładowanie tabeli…
-              </div>
-            ) : standingsError ? (
-              <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-6 text-red-300">
-                {standingsError}
-              </div>
-            ) : standings?.rows?.length ? (
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-                <div className="flex items-end justify-between gap-3">
-                  <div>
-                    <div className="text-lg font-semibold">
-                      {standings.competitionName}
-                    </div>
-                    {standings.season ? (
-                      <div className="text-xs text-neutral-400 mt-1">
-                        Sezon: {standings.season}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="text-xs text-neutral-500">Tabela</div>
-                </div>
-
-                <div className="mt-3 overflow-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-neutral-400 border-b border-neutral-800">
-                        <th className="text-left font-medium py-2 pr-2 w-10">#</th>
-                        <th className="text-left font-medium py-2 pr-2">Drużyna</th>
-                        <th className="text-right font-medium py-2 pl-2 w-10">M</th>
-                        <th className="text-right font-medium py-2 pl-2 w-10">Z</th>
-                        <th className="text-right font-medium py-2 pl-2 w-10">R</th>
-                        <th className="text-right font-medium py-2 pl-2 w-10">P</th>
-                        <th className="text-right font-medium py-2 pl-2 w-12">PKT</th>
-                        <th className="text-right font-medium py-2 pl-2 w-12">RB</th>
-                        <th className="text-left font-medium py-2 pl-2 w-44">Forma</th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {standings.rows.map((r) => {
-                        const form = formatForm(r.form);
-
-                        return (
-                          <tr
-                            key={r.teamId}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setSelectedTeamId(r.teamId)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                setSelectedTeamId(r.teamId);
-                              }
-                            }}
-                            className={[
-                              "border-b border-neutral-800/60 cursor-pointer transition",
-                              selectedTeamId === r.teamId
-                                ? "bg-neutral-900/60"
-                                : "hover:bg-neutral-900/40",
-                            ].join(" ")}
-                          >
-                            <td className="py-2 pr-2 text-neutral-300">{r.position}</td>
-                            <td className="py-2 pr-2 text-neutral-200">{r.teamName}</td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">{r.playedGames}</td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">{r.won}</td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">{r.draw}</td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">{r.lost}</td>
-                            <td className="py-2 pl-2 text-right text-neutral-100 font-semibold">{r.points}</td>
-                            <td className="py-2 pl-2 text-right text-neutral-300">{r.goalDifference}</td>
-                            <td className="py-2 pl-2 text-neutral-300">
-                              {form?.length ? (
-                                <div className="flex gap-1">
-                                  {form.map((x, idx) => (
-                                    <span
-                                      key={`${r.teamId}-${idx}-${x}`}
-                                      className="inline-flex items-center justify-center w-6 h-6 rounded-md border border-neutral-800 bg-neutral-900 text-[11px] text-neutral-200"
-                                      title={
-                                        x === "W"
-                                          ? "Win"
-                                          : x === "D"
-                                            ? "Draw"
-                                            : x === "L"
-                                              ? "Loss"
-                                              : x
-                                      }
-                                    >
-                                      {x}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-neutral-500">—</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                {selectedTeam && selectedTeamInsights ? (
-                  <div className="mt-4 rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-neutral-100">
-                          {selectedTeam.position}. {selectedTeam.teamName}
-                        </div>
-                        <div className="text-[11px] text-neutral-400 mt-1">
-                          M: {selectedTeam.playedGames} • Z: {selectedTeam.won} •
-                          R: {selectedTeam.draw} • P: {selectedTeam.lost} • PKT:{" "}
-                          {selectedTeam.points} • RB: {selectedTeam.goalDifference}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => setSelectedTeamId(null)}
-                        className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 transition"
-                      >
-                        Zamknij
-                      </button>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-2">
-                        <div className="text-[11px] text-neutral-400">PPG</div>
-                        <div className="text-sm font-semibold">
-                          {selectedTeamInsights.ppg.toFixed(2)}
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-2">
-                        <div className="text-[11px] text-neutral-400">Win/Draw/Loss</div>
-                        <div className="text-sm font-semibold">
-                          {selectedTeamInsights.winRate.toFixed(0)}% /{" "}
-                          {selectedTeamInsights.drawRate.toFixed(0)}% /{" "}
-                          {selectedTeamInsights.lossRate.toFixed(0)}%
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-2">
-                        <div className="text-[11px] text-neutral-400">
-                          Gole strzelone / mecz
-                        </div>
-                        <div className="text-sm font-semibold">
-                          {selectedTeamInsights.gfpg.toFixed(2)}
-                        </div>
-                      </div>
-
-                      <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-2">
-                        <div className="text-[11px] text-neutral-400">
-                          Gole stracone / mecz
-                        </div>
-                        <div className="text-sm font-semibold">
-                          {selectedTeamInsights.gapg.toFixed(2)}
-                        </div>
-                      </div>
-                    </div>
-
-                    {selectedTeamInsights.todayMatch ? (
-                      <div className="mt-3 rounded-xl border border-neutral-800 bg-neutral-900 p-2">
-                        <div className="text-[11px] text-neutral-400">
-                          Mecz w wybranym dniu
-                        </div>
-                        <div className="text-sm font-semibold mt-0.5">
-                          {selectedTeamInsights.todayMatch.home}{" "}
-                          <span className="text-neutral-400 font-normal">vs</span>{" "}
-                          {selectedTeamInsights.todayMatch.away} •{" "}
-                          {selectedTeamInsights.todayMatch.time}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6 text-neutral-300">
-                Brak danych tabeli dla tej ligi.
-              </div>
-            )
-          ) : null}
+          {activeRightTab === "table" ? renderTableView() : null}
         </section>
       </div>
     </div>

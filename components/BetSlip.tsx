@@ -1,3 +1,4 @@
+// components/BetSlip.tsx
 "use client";
 
 import { formatOdd, formatVB } from "@/lib/format";
@@ -7,6 +8,10 @@ import { useBetSlip, type SlipItem } from "@/lib/BetSlipContext";
 
 const MIN_STAKE = 1;
 const MAX_STAKE = 10000;
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
 // started = kickoff osiągnięty
 function isStarted(kickoffUtc?: string | null) {
@@ -345,8 +350,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
         window.dispatchEvent(new Event("vb:refresh-balance"));
       }
 
-      window.dispatchEvent(new Event("vb:refresh-balance"));
-
       try {
         const uid = sessionData.session?.user?.id;
         if (uid) {
@@ -416,7 +419,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
   const errorModalNode = errorModal ? (
     <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70" onClick={() => setErrorModal(null)} />
+      <div
+        className="absolute inset-0 bg-black/70"
+        onClick={() => setErrorModal(null)}
+      />
 
       <div className="relative w-full max-w-md rounded-3xl border border-neutral-800 bg-neutral-950 p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
@@ -424,12 +430,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
             <div className="text-lg font-semibold text-neutral-100">
               Nie udało się postawić kuponu
             </div>
-            <div className="text-sm text-neutral-400 mt-1">{errorModal}</div>
+            <div className="mt-1 text-sm text-neutral-400">{errorModal}</div>
           </div>
 
           <button
             onClick={() => setErrorModal(null)}
-            className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 transition"
+            className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition hover:bg-neutral-800"
           >
             Zamknij
           </button>
@@ -438,7 +444,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         <div className="mt-4">
           <button
             onClick={() => setErrorModal(null)}
-            className="w-full rounded-xl bg-white text-black px-4 py-3 text-sm font-semibold active:scale-[0.99] transition"
+            className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black transition active:scale-[0.99]"
           >
             OK
           </button>
@@ -449,7 +455,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
   const successModalNode = successModal ? (
     <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70" onClick={() => setSuccessModal(null)} />
+      <div
+        className="absolute inset-0 bg-black/70"
+        onClick={() => setSuccessModal(null)}
+      />
 
       <div className="relative w-full max-w-md rounded-3xl border border-neutral-800 bg-neutral-950 p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
@@ -457,11 +466,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
             <div className="text-lg font-semibold text-neutral-100">
               Kupon został postawiony ✅
             </div>
-            <div className="text-sm text-neutral-400 mt-1">
+            <div className="mt-1 text-sm text-neutral-400">
               Wirtualny zakład — bez prawdziwych pieniędzy.
             </div>
             {successModal.betId ? (
-              <div className="text-[11px] text-neutral-500 mt-1">
+              <div className="mt-1 text-[11px] text-neutral-500">
                 ID kuponu: {successModal.betId}
               </div>
             ) : null}
@@ -469,7 +478,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
           <button
             onClick={() => setSuccessModal(null)}
-            className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 transition"
+            className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition hover:bg-neutral-800"
           >
             Zamknij
           </button>
@@ -478,21 +487,21 @@ export default function BetSlip({ variant }: { variant?: string }) {
         <div className="mt-4 space-y-3">
           <div className="flex items-center justify-between text-sm">
             <span className="text-neutral-400">Zdarzeń</span>
-            <span className="text-neutral-100 font-semibold">
+            <span className="font-semibold text-neutral-100">
               {successModal.itemsCount}
             </span>
           </div>
 
           <div className="flex items-center justify-between text-sm">
             <span className="text-neutral-400">Stawka</span>
-            <span className="text-neutral-100 font-semibold">
+            <span className="font-semibold text-neutral-100">
               {formatVB(successModal.stake)} VB
             </span>
           </div>
 
           <div className="flex items-center justify-between text-sm">
             <span className="text-neutral-400">Kurs łączny</span>
-            <span className="text-neutral-100 font-semibold">
+            <span className="font-semibold text-neutral-100">
               {formatOdd(successModal.totalOdds)}
             </span>
           </div>
@@ -511,13 +520,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
         <div className="mt-4">
           <button
             onClick={() => setShowTicket((v) => !v)}
-            className="w-full rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-2.5 text-sm text-neutral-200 hover:bg-neutral-800 transition"
+            className="w-full rounded-xl border border-neutral-800 bg-neutral-900 px-4 py-2.5 text-sm text-neutral-200 transition hover:bg-neutral-800"
           >
             {showTicket ? "Ukryj kupon" : "Zobacz kupon"}
           </button>
 
           {showTicket ? (
-            <div className="mt-3 space-y-2 max-h-[40vh] overflow-auto pr-1">
+            <div className="mt-3 max-h-[40vh] space-y-2 overflow-auto pr-1">
               {successModal.slipSnapshot.map((it) => {
                 const started = isStarted(it.kickoffUtc);
                 return (
@@ -530,16 +539,16 @@ export default function BetSlip({ variant }: { variant?: string }) {
                     </div>
                     <div className="mt-1 text-sm font-semibold text-neutral-100">
                       {it.home}{" "}
-                      <span className="text-neutral-400 font-normal">vs</span>{" "}
+                      <span className="font-normal text-neutral-400">vs</span>{" "}
                       {it.away}
                     </div>
                     <div className="mt-2 text-sm text-neutral-200">
                       Rynek:{" "}
-                      <span className="text-neutral-100 font-semibold">
+                      <span className="font-semibold text-neutral-100">
                         {it.market}
                       </span>{" "}
                       • Typ:{" "}
-                      <span className="text-neutral-100 font-semibold">
+                      <span className="font-semibold text-neutral-100">
                         {pickLabel(it)}
                       </span>
                     </div>
@@ -547,7 +556,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                     {!started ? (
                       <div className="mt-1 text-sm text-neutral-300">
                         Kurs:{" "}
-                        <span className="text-neutral-100 font-semibold">
+                        <span className="font-semibold text-neutral-100">
                           {formatOdd(it.odd)}
                         </span>
                       </div>
@@ -567,14 +576,14 @@ export default function BetSlip({ variant }: { variant?: string }) {
               restoreSlip(successModal.slipSnapshot);
               setSuccessModal(null);
             }}
-            className="w-full rounded-xl bg-white text-black px-4 py-3 text-sm font-semibold active:scale-[0.99] transition"
+            className="w-full rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black transition active:scale-[0.99]"
           >
             Postaw ponownie
           </button>
 
           <button
             onClick={() => setSuccessModal(null)}
-            className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-200 hover:bg-neutral-900 active:scale-[0.99] transition"
+            className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-200 transition hover:bg-neutral-900 active:scale-[0.99]"
           >
             Zamknij okienko
           </button>
@@ -584,7 +593,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
   ) : null;
 
   const slipContent = (
-    <div className="space-y-4">
+    <div
+      className={cx(
+        "flex flex-col",
+        isDesktop ? "h-full min-h-0" : "space-y-4"
+      )}
+    >
       <style jsx global>{`
         @keyframes vb-shake {
           0% {
@@ -623,21 +637,25 @@ export default function BetSlip({ variant }: { variant?: string }) {
         }
       `}</style>
 
-      <div className="flex items-center justify-between">
-        <h3 className="text-xl font-semibold">Kupon</h3>
-        <div className="text-sm text-neutral-400">{slip.length} zdarzeń</div>
+      <div className={cx("shrink-0", isDesktop ? "space-y-4" : "")}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-xl font-semibold">Kupon</h3>
+          <div className="text-sm text-neutral-400">{slip.length} zdarzeń</div>
+        </div>
+
+        {hasStarted ? (
+          <div className="rounded-xl border border-red-400/40 bg-red-950/20 p-3 text-sm text-red-200">
+            Masz w kuponie mecz, który już się rozpoczął — usuń go, aby móc postawić
+            kupon.
+          </div>
+        ) : null}
       </div>
 
-      {hasStarted ? (
-        <div className="rounded-xl border border-red-400/40 bg-red-950/20 p-3 text-sm text-red-200">
-          Masz w kuponie mecz, który już się rozpoczął — usuń go, aby móc postawić kupon.
-        </div>
-      ) : null}
-
       <div
-        className={
-          isDesktop ? "space-y-3 max-h-[46vh] overflow-auto pr-1" : "space-y-3"
-        }
+        className={cx(
+          "space-y-3",
+          isDesktop ? "mt-4 min-h-0 flex-1 overflow-y-auto pr-1" : ""
+        )}
       >
         {slip.length === 0 ? (
           <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3 text-sm text-neutral-300">
@@ -653,11 +671,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
             return (
               <div
                 key={k}
-                className={[
+                className={cx(
                   "rounded-2xl border border-neutral-800 bg-neutral-950 p-4 transition",
-                  flash ? "vb-pop ring-2 ring-neutral-200/60" : "",
-                  started ? "opacity-50" : "",
-                ].join(" ")}
+                  flash && "vb-pop ring-2 ring-neutral-200/60",
+                  started && "opacity-50"
+                )}
               >
                 <div className="text-xs text-neutral-400">
                   {it.competitionCode || it.league}
@@ -665,7 +683,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
                 <div className="mt-1 text-sm font-semibold">
                   {it.home}{" "}
-                  <span className="text-neutral-400 font-normal">vs</span>{" "}
+                  <span className="font-normal text-neutral-400">vs</span>{" "}
                   {it.away}
                 </div>
 
@@ -679,13 +697,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
                   <div className="text-sm text-neutral-200">
                     <div>
                       Rynek:{" "}
-                      <span className="text-neutral-100 font-semibold">
+                      <span className="font-semibold text-neutral-100">
                         {it.market}
                       </span>
                     </div>
                     <div>
                       Typ:{" "}
-                      <span className="text-neutral-100 font-semibold">
+                      <span className="font-semibold text-neutral-100">
                         {pickLabel(it)}
                       </span>
                     </div>
@@ -695,7 +713,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                     {!started ? (
                       <div className="text-sm text-neutral-300">
                         Kurs:{" "}
-                        <span className="text-neutral-100 font-semibold">
+                        <span className="font-semibold text-neutral-100">
                           {Number(it.odd).toFixed(2)}
                         </span>
                       </div>
@@ -706,12 +724,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
                     <button
                       onClick={() => removeFromSlip(it.matchId, it.market)}
                       disabled={submitting}
-                      className={[
+                      className={cx(
                         "mt-2 text-xs transition",
                         submitting
-                          ? "text-neutral-600 cursor-not-allowed"
-                          : "text-neutral-400 hover:text-white",
-                      ].join(" ")}
+                          ? "cursor-not-allowed text-neutral-600"
+                          : "text-neutral-400 hover:text-white"
+                      )}
                     >
                       Usuń
                     </button>
@@ -723,118 +741,134 @@ export default function BetSlip({ variant }: { variant?: string }) {
         )}
       </div>
 
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-neutral-300">Kurs łączny</span>
-          <span className="font-semibold">
-            {slip.length ? formatOdd(totalOdds) : "—"}
-          </span>
-        </div>
-
-        <div className="mt-2 flex items-center justify-between text-sm">
-          <span className="text-neutral-300">Potencjalna wygrana</span>
-          <span className="font-semibold">
-            {potentialWin ? `${formatVB(potentialWin)} VB` : "—"}
-          </span>
-        </div>
-      </div>
-
-      <div>
-        <label className="text-sm text-neutral-300">Stawka</label>
-
-        <div className="mt-2">
-          <div className="relative">
-            <input
-              value={stakeInput}
-              onChange={(e) => {
-                const raw = e.target.value.replace(/[^\d.,]/g, "");
-                const formatted = formatStakeInput(raw);
-
-                setStakeInput(formatted);
-                setStake(raw);
-              }}
-              disabled={submitting}
-              inputMode="decimal"
-              placeholder={`np. ${MIN_STAKE}`}
-              className={[
-                "w-full rounded-xl border bg-neutral-950 px-3 py-3 pr-14 text-sm outline-none transition",
-                submitting ? "opacity-70 cursor-not-allowed" : "",
-                stakeError
-                  ? "border-red-400/60 focus:border-red-300"
-                  : "border-neutral-800 focus:border-neutral-600",
-              ].join(" ")}
-            />
-
-            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">
-              VB
+      <div
+        className={cx(
+          "shrink-0 space-y-4",
+          isDesktop ? "border-t border-neutral-800 pt-4" : ""
+        )}
+      >
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-neutral-300">Kurs łączny</span>
+            <span className="font-semibold">
+              {slip.length ? formatOdd(totalOdds) : "—"}
             </span>
           </div>
 
-          <div className="mt-2 grid grid-cols-4 gap-2">
-            {[10, 50, 100, 500].map((v) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => addStake(v)}
-                disabled={submitting}
-                className={[
-                  "rounded-lg border px-2 py-1.5 text-xs transition",
-                  submitting
-                    ? "border-neutral-900 bg-neutral-950 text-neutral-600 cursor-not-allowed"
-                    : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900",
-                ].join(" ")}
-              >
-                +{v}
-              </button>
-            ))}
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span className="text-neutral-300">Potencjalna wygrana</span>
+            <span className="font-semibold">
+              {potentialWin ? `${formatVB(potentialWin)} VB` : "—"}
+            </span>
           </div>
         </div>
 
-        {stakeError ? (
-          <div className="mt-2 text-xs text-red-300">{stakeError}</div>
-        ) : (
-          <div className="mt-2 text-xs text-neutral-500">
-            Min: {MIN_STAKE} • Max: {MAX_STAKE}
+        <div>
+          <label className="text-sm text-neutral-300">Stawka</label>
+
+          <div className="mt-2">
+            <div className="relative">
+              <input
+                value={stakeInput}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/[^\d.,]/g, "");
+                  const formatted = formatStakeInput(raw);
+
+                  setStakeInput(formatted);
+                  setStake(raw);
+                }}
+                disabled={submitting}
+                inputMode="decimal"
+                placeholder={`np. ${MIN_STAKE}`}
+                className={cx(
+                  "w-full rounded-xl border bg-neutral-950 px-3 py-3 pr-14 text-sm outline-none transition",
+                  submitting && "cursor-not-allowed opacity-70",
+                  stakeError
+                    ? "border-red-400/60 focus:border-red-300"
+                    : "border-neutral-800 focus:border-neutral-600"
+                )}
+              />
+
+              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-neutral-400">
+                VB
+              </span>
+            </div>
+
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {[10, 50, 100, 500].map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => addStake(v)}
+                  disabled={submitting}
+                  className={cx(
+                    "rounded-lg border px-2 py-1.5 text-xs transition",
+                    submitting
+                      ? "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-600"
+                      : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
+                  )}
+                >
+                  +{v}
+                </button>
+              ))}
+            </div>
           </div>
-        )}
-      </div>
 
-      <div className={["space-y-2", shake ? "vb-shake" : ""].join(" ")}>
-        <button
-          onClick={onSubmit}
-          disabled={!canSubmit}
-          className={[
-            "w-full rounded-xl px-4 py-3 text-sm font-semibold transition",
-            canSubmit
-              ? "bg-white text-black hover:opacity-95 active:scale-[0.99]"
-              : "bg-neutral-800 text-neutral-500 cursor-not-allowed",
-          ].join(" ")}
-        >
-          {submitting ? "Stawiam…" : "POSTAW KUPON"}
-        </button>
+          {stakeError ? (
+            <div className="mt-2 text-xs text-red-300">{stakeError}</div>
+          ) : (
+            <div className="mt-2 text-xs text-neutral-500">
+              Min: {MIN_STAKE} • Max: {MAX_STAKE}
+            </div>
+          )}
+        </div>
 
-        <button
-          onClick={resetSlipState}
-          disabled={!slip.length || submitting}
-          className={[
-            "w-full rounded-xl border px-4 py-3 text-sm transition",
-            slip.length && !submitting
-              ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900 active:scale-[0.99]"
-              : "border-neutral-900 bg-neutral-950 text-neutral-600 cursor-not-allowed",
-          ].join(" ")}
-        >
-          Wyczyść kupon
-        </button>
+        <div className={cx("space-y-2", shake && "vb-shake")}>
+          <button
+            onClick={onSubmit}
+            disabled={!canSubmit}
+            className={cx(
+              "w-full rounded-xl px-4 py-3 text-sm font-semibold transition",
+              canSubmit
+                ? "bg-white text-black hover:opacity-95 active:scale-[0.99]"
+                : "cursor-not-allowed bg-neutral-800 text-neutral-500"
+            )}
+          >
+            {submitting ? "Stawiam…" : "POSTAW KUPON"}
+          </button>
 
-        <div className="text-xs text-neutral-500">
-          Wirtualne zakłady — bez prawdziwych pieniędzy.
+          <button
+            onClick={resetSlipState}
+            disabled={!slip.length || submitting}
+            className={cx(
+              "w-full rounded-xl border px-4 py-3 text-sm transition",
+              slip.length && !submitting
+                ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900 active:scale-[0.99]"
+                : "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-600"
+            )}
+          >
+            Wyczyść kupon
+          </button>
+
+          {submitError ? (
+            <div className="text-xs text-red-300">{submitError}</div>
+          ) : null}
+
+          <div className="text-xs text-neutral-500">
+            Wirtualne zakłady — bez prawdziwych pieniędzy.
+          </div>
         </div>
       </div>
     </div>
   );
 
-  const cardWrap = (content: React.ReactNode) => (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+  const cardWrap = (content: React.ReactNode, className?: string) => (
+    <div
+      className={cx(
+        "rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4",
+        className
+      )}
+    >
       {content}
     </div>
   );
@@ -844,7 +878,9 @@ export default function BetSlip({ variant }: { variant?: string }) {
       <>
         {successModalNode}
         {errorModalNode}
-        <div className="sticky top-24">{cardWrap(slipContent)}</div>
+        <div className="h-full min-h-0">
+          {cardWrap(slipContent, "flex h-full min-h-0 flex-col overflow-hidden")}
+        </div>
       </>
     );
   }
@@ -855,21 +891,21 @@ export default function BetSlip({ variant }: { variant?: string }) {
         {successModalNode}
         {errorModalNode}
 
-        <div className="fixed left-0 right-0 bottom-0 z-40 border-t border-neutral-800 bg-neutral-950/95 backdrop-blur">
-          <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3">
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-neutral-800 bg-neutral-950/95 backdrop-blur">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
               <div className="text-sm font-semibold text-neutral-100">
                 Kupon ({slip.length})
               </div>
-              <div className="text-xs text-neutral-400 truncate">
-                Kurs: {slip.length ? formatOdd(totalOdds) : "—"} • Potencjalna wygrana:{" "}
-                {potentialWin != null ? formatVB(potentialWin) : "—"} VB
+              <div className="truncate text-xs text-neutral-400">
+                Kurs: {slip.length ? formatOdd(totalOdds) : "—"} • Potencjalna
+                wygrana: {potentialWin != null ? formatVB(potentialWin) : "—"} VB
               </div>
             </div>
 
             <button
               onClick={() => setOpen(true)}
-              className="shrink-0 rounded-xl bg-white text-black px-4 py-2 text-sm font-semibold active:scale-[0.99] transition"
+              className="shrink-0 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition active:scale-[0.99]"
             >
               Otwórz
             </button>
@@ -884,18 +920,20 @@ export default function BetSlip({ variant }: { variant?: string }) {
               className="absolute inset-0 bg-black/60"
               onClick={() => setOpen(false)}
             />
-            <div className="absolute left-0 right-0 bottom-0 rounded-t-3xl border border-neutral-800 bg-neutral-950 max-h-[85vh] overflow-auto">
-              <div className="px-4 py-3 border-b border-neutral-800 flex items-center justify-between">
+            <div className="absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-hidden rounded-t-3xl border border-neutral-800 bg-neutral-950">
+              <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
                 <div className="text-sm font-semibold">Kupon</div>
                 <button
                   onClick={() => setOpen(false)}
-                  className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 hover:bg-neutral-800 transition"
+                  className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition hover:bg-neutral-800"
                 >
                   Zamknij
                 </button>
               </div>
 
-              <div className="p-4">{slipContent}</div>
+              <div className="max-h-[calc(85vh-58px)] overflow-y-auto p-4">
+                {slipContent}
+              </div>
             </div>
           </div>
         ) : null}

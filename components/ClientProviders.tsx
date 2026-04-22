@@ -1,4 +1,3 @@
-//components/Clientproviders.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -32,7 +31,6 @@ export default function ClientProviders({
   children: React.ReactNode;
 }) {
   const pathname = usePathname() || "";
-
   const hideSlip = shouldHideSlip(pathname);
 
   useEffect(() => {
@@ -48,30 +46,34 @@ export default function ClientProviders({
       });
     };
 
-    runWeeklyGrant();
+    void runWeeklyGrant();
   }, [pathname]);
 
   return (
     <BetSlipProvider>
-      <div className="w-full min-w-0 px-4 py-6">
+      <main className="w-full min-w-0 px-3 py-4 md:px-4 md:py-6 xl:px-6">
         {hideSlip ? (
-          <div className="min-w-0">{children}</div>
+          <div className="mx-auto w-full max-w-[1680px] min-w-0">
+            {children}
+          </div>
         ) : (
-          <>
-            <div className="min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6">
-              <div className="min-w-0">{children}</div>
+          <div className="mx-auto w-full max-w-[1680px] min-w-0 xl:grid xl:grid-cols-[minmax(0,1fr)_380px] xl:gap-6">
+            <div className="min-w-0">{children}</div>
 
-              <div className="hidden lg:block">
-                <BetSlip variant="desktop" />
+            <aside className="hidden xl:block">
+              <div className="vb-sticky-rail">
+                <div className="h-full overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900/40">
+                  <BetSlip variant="desktop" />
+                </div>
               </div>
-            </div>
+            </aside>
 
-            <div className="lg:hidden">
+            <div className="xl:hidden">
               <BetSlip variant="mobile" />
             </div>
-          </>
+          </div>
         )}
-      </div>
+      </main>
     </BetSlipProvider>
   );
 }
