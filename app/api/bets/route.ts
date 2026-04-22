@@ -73,7 +73,27 @@ export async function POST(req: Request) {
 
     const headerIdempotencyKey = nonEmpty(req.headers.get("x-idempotency-key"));
     const bodyIdempotencyKey = nonEmpty(body.idempotencyKey);
-    const idempotencyKey = bodyIdempotencyKey ?? headerIdempotencyKey ?? crypto.randomUUID();
+
+    // jeśli jednocześnie wyślesz body.idempotencyKey i x-idempotency-key, a będą różne, to teraz backend po prostu weźmie ten z body. To nie jest błąd krytyczny, ale docelowo warto dodać ochronę:
+    if (
+      bodyIdempotencyKey &&
+      headerIdempotencyKey &&
+      bodyIdempotencyKey !== headerIdempotencyKey
+    ) {
+      return NextResponse.json(
+        { error: "Różne idempotency key w body i nagłówku." },
+        { status: 400 }
+      );
+    }
+
+    const idempotencyKey = bodyIdempotencyKey ?? headerIdempotencyKey;
+
+    if (!idempotencyKey) {
+    return NextResponse.json(
+      { error: "Brak idempotency key." },
+      { status: 400 }
+    );
+  }
 
     if (
       (bodyIdempotencyKey && !isUuid(bodyIdempotencyKey)) ||
