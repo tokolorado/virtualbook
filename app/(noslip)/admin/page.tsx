@@ -1545,7 +1545,6 @@ export default function AdminPage() {
       <div className="space-y-4">
         <Panel
           title="System Health"
-          description="Bieżący stan spójności najważniejszych obszarów aplikacji."
           actions={
             <button
               onClick={refreshHealth}
@@ -1627,7 +1626,6 @@ export default function AdminPage() {
 
         <Panel
           title="Skróty diagnostyczne"
-          description="Najczęściej używane przejścia i akcje."
         >
           <div className="grid gap-3">
             <button
@@ -1668,7 +1666,6 @@ export default function AdminPage() {
 
       <Panel
         title="System Check"
-        description="Read-only check suite uruchamiany z panelu admina. Wyniki są zapisywane i renderowane poniżej."
         actions={
           <div className="flex gap-2">
             <button
@@ -1735,7 +1732,7 @@ export default function AdminPage() {
               <MetricCard
                 label="Failed"
                 value={systemCheckRun.checks_failed}
-                hint={`source: ${systemCheckRun.source}`}
+                //hint={`source: ${systemCheckRun.source}`}
                 tone={systemCheckRun.checks_failed > 0 ? "red" : "neutral"}
               />
             </div>
