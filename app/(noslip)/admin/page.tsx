@@ -1,10 +1,10 @@
-//app/(noslip)/admin/page.tsx
 "use client";
 
-import SystemCheckPanel from "@/components/admin/SystemCheckPanel";
+import type { ReactNode } from "react";
 import Link from "next/link";
-import { formatOdd, formatVB } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
+import SystemCheckPanel from "@/components/admin/SystemCheckPanel";
+import { formatOdd, formatVB } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
 
 type Bet = {
@@ -73,6 +73,10 @@ type AuditLog = {
   created_at: string;
 };
 
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
+
 function fmtDate(v?: string | null) {
   if (!v) return "—";
   const d = new Date(v);
@@ -84,6 +88,121 @@ function fmtPct(v?: number | null) {
   return `${Number(v ?? 0).toFixed(2)}%`;
 }
 
+function SectionCard({
+  title,
+  description,
+  action,
+  children,
+  className,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={cn(
+        "rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]",
+        className
+      )}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-white">{title}</h2>
+          {description ? (
+            <p className="mt-1 text-sm text-neutral-400">{description}</p>
+          ) : null}
+        </div>
+        {action ? <div className="shrink-0">{action}</div> : null}
+      </div>
+
+      <div className="mt-5">{children}</div>
+    </section>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  hint,
+  tone = "neutral",
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: ReactNode;
+  tone?: "neutral" | "green" | "yellow" | "red" | "blue";
+}) {
+  const toneClass =
+    tone === "green"
+      ? "border-green-500/20 bg-green-500/5"
+      : tone === "yellow"
+        ? "border-yellow-500/20 bg-yellow-500/5"
+        : tone === "red"
+          ? "border-red-500/20 bg-red-500/5"
+          : tone === "blue"
+            ? "border-blue-500/20 bg-blue-500/5"
+            : "border-neutral-800 bg-neutral-950/70";
+
+  return (
+    <div className={cn("rounded-2xl border p-4", toneClass)}>
+      <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+        {label}
+      </div>
+      <div className="mt-3 text-2xl font-semibold text-white">{value}</div>
+      {hint ? <div className="mt-2 text-xs text-neutral-400">{hint}</div> : null}
+    </div>
+  );
+}
+
+function StatusPill({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "green" | "yellow" | "red" | "blue";
+}) {
+  const toneClass =
+    tone === "green"
+      ? "border-green-500/30 bg-green-500/10 text-green-300"
+      : tone === "yellow"
+        ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+        : tone === "red"
+          ? "border-red-500/30 bg-red-500/10 text-red-300"
+          : tone === "blue"
+            ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
+            : "border-neutral-700 bg-neutral-950 text-neutral-300";
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        toneClass
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function SmallInfoCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3">
+      <div className="text-[11px] uppercase tracking-[0.14em] text-neutral-500">
+        {label}
+      </div>
+      <div className="mt-2 text-sm font-medium text-white break-words">{value}</div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [bets, setBets] = useState<Bet[]>([]);
@@ -93,6 +212,7 @@ export default function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [manualAmount, setManualAmount] = useState<string>("");
+  const [userSearch, setUserSearch] = useState("");
 
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -118,13 +238,33 @@ export default function AdminPage() {
     [users, selectedUserId]
   );
 
-const getAccessToken = async (): Promise<string> => {
-  const { data: sessionData } = await supabase.auth.getSession();
-  const token = sessionData.session?.access_token;
-  if (!token) throw new Error("No session token");
-  return token;
-};
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
 
+    if (!q) return users;
+
+    return users.filter((u) => {
+      const haystack = [
+        u.username ?? "",
+        u.email ?? "",
+        u.id,
+        u.email_status ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return haystack.includes(q);
+    });
+  }, [users, userSearch]);
+
+  const compactAuditLogs = useMemo(() => auditLogs.slice(0, 5), [auditLogs]);
+
+  const getAccessToken = async (): Promise<string> => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error("No session token");
+    return token;
+  };
 
   const load = async () => {
     setLoading(true);
@@ -175,9 +315,7 @@ const getAccessToken = async (): Promise<string> => {
     try {
       setUsersLoading(true);
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("No session token");
+      const token = await getAccessToken();
 
       const res = await fetch("/api/admin/users", {
         cache: "no-store",
@@ -195,6 +333,7 @@ const getAccessToken = async (): Promise<string> => {
 
       if (!selectedUserId && nextUsers.length) {
         setSelectedUserId(nextUsers[0].id);
+        setSurpriseEmail(nextUsers[0].email ?? "");
       }
     } catch (e) {
       console.error(e);
@@ -255,9 +394,7 @@ const getAccessToken = async (): Promise<string> => {
     try {
       setHealthLoading(true);
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("No session token");
+      const token = await getAccessToken();
 
       const r = await fetch("/api/admin/system-health-ui?staleHours=3&limit=20", {
         cache: "no-store",
@@ -305,6 +442,7 @@ const getAccessToken = async (): Promise<string> => {
     await load();
     await refreshStats();
     await refreshHealth();
+    await loadAuditLogs();
   };
 
   const runAutoSettle = async () => {
@@ -405,11 +543,11 @@ const getAccessToken = async (): Promise<string> => {
     }
 
     if (action === "delete_user") {
-  alert(
-    "Hard delete użytkownika jest tymczasowo wyłączony. Zrobimy później bezpieczne RPC do archiwizacji/usuwania konta."
-  );
-  return;
-}
+      alert(
+        "Hard delete użytkownika jest tymczasowo wyłączony. Zrobimy później bezpieczne RPC do archiwizacji/usuwania konta."
+      );
+      return;
+    }
 
     if (action === "reset_balance") {
       const ok = confirm("Wyzerować saldo użytkownika?");
@@ -437,9 +575,7 @@ const getAccessToken = async (): Promise<string> => {
     try {
       setActionLoading(action);
 
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
-      if (!token) throw new Error("No session token");
+      const token = await getAccessToken();
 
       const res = await fetch("/api/admin/users", {
         method: "POST",
@@ -476,12 +612,30 @@ const getAccessToken = async (): Promise<string> => {
     }
   };
 
-  if (loading) return <div className="text-neutral-400">Ładowanie...</div>;
+  const refreshEverything = async () => {
+    await load();
+    await refreshStats();
+    await refreshHealth();
+    await loadUsers();
+    await loadAuditLogs();
+  };
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-8 text-neutral-400">
+          Ładowanie...
+        </div>
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return (
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 text-neutral-300">
-        Brak dostępu. To jest panel admina.
+      <div className="mx-auto max-w-7xl">
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-8 text-neutral-300">
+          Brak dostępu. To jest panel admina.
+        </div>
       </div>
     );
   }
@@ -496,560 +650,755 @@ const getAccessToken = async (): Promise<string> => {
     (hm?.pendingButAllItemsSettled ?? 0) +
     (hm?.missingPayoutLedger ?? 0);
 
+  const selectedUserProfitTone =
+    (selectedUser?.profit ?? 0) > 0
+      ? "green"
+      : (selectedUser?.profit ?? 0) < 0
+        ? "red"
+        : "neutral";
+
   return (
-    <div className="max-w-6xl mx-auto space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Admin — rozliczanie kuponów</h1>
-          <p className="text-neutral-400 mt-1 text-sm">
-            Kliknij WON/LOST/VOID — baza dopisze wypłatę do salda.
-          </p>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <section className="rounded-[28px] border border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-950 to-black p-6 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+          <div className="max-w-3xl">
+            <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+              VirtualBook Admin
+            </div>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
+              Control Center
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-neutral-400">
+              Narzędziowy panel operacyjny do zarządzania użytkownikami, diagnostyką
+              systemu, rozliczaniem zakładów i szybką kontrolą spójności wallet /
+              ledger / bets / settlement.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={refreshEverything}
+              className="rounded-2xl border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm text-white transition hover:bg-neutral-800"
+            >
+              Odśwież wszystko
+            </button>
+
+            <Link
+              href="/admin/logs"
+              className="rounded-2xl border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm text-white transition hover:bg-neutral-800"
+            >
+              Pełne logi
+            </Link>
+
+            <Link
+              href="/admin/surprises"
+              className="rounded-2xl border border-neutral-700 bg-neutral-950 px-4 py-2.5 text-sm text-white transition hover:bg-neutral-800"
+            >
+              Centrum niespodzianek
+            </Link>
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/admin/logs"
-            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm"
-          >
-            Zobacz logi cronów
-          </Link>
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <MetricCard
+            label="Użytkownicy"
+            value={users.length}
+            hint={usersLoading ? "Trwa synchronizacja listy users" : "Konta dostępne w panelu"}
+            tone="blue"
+          />
 
-          <Link
-            href="/admin/surprises"
-            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm"
+          <MetricCard
+            label="Wybrany użytkownik"
+            value={selectedUser ? formatVB(selectedUser.balance_vb) : "—"}
+            hint={
+              selectedUser
+                ? `${selectedUser.username ?? "Brak username"} • ${selectedUser.email ?? "brak email"}`
+                : "Wybierz użytkownika z tabeli"
+            }
+            tone={selectedUser ? "green" : "neutral"}
+          />
+
+          <MetricCard
+            label="System Health"
+            value={healthBad === 0 ? "HEALTHY" : `ALERT ${healthBad}`}
+            hint="Szybki stan spójności systemu"
+            tone={healthBad === 0 ? "green" : "yellow"}
+          />
+
+          <MetricCard
+            label="Rozliczenie meczów"
+            value={`${readyMatches}`}
+            hint={`Gotowe mecze: ${readyMatches} • pozycje: ${readyItems}`}
+            tone={readyMatches > 0 ? "yellow" : "neutral"}
+          />
+        </div>
+      </section>
+
+      <div className="grid gap-6 xl:grid-cols-[1.6fr_1fr]">
+        <SectionCard
+          title="Użytkownicy i operacje na koncie"
+          description="Tabela operacyjna użytkowników z wyszukiwaniem, kartą szczegółów i szybkimi akcjami administracyjnymi."
+          action={
+            <button
+              onClick={loadUsers}
+              disabled={usersLoading}
+              className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
+            >
+              {usersLoading ? "Synchronizuję..." : "Odśwież użytkowników"}
+            </button>
+          }
+        >
+          <div className="grid gap-5 2xl:grid-cols-[1.3fr_0.95fr]">
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-white">Wyszukiwarka users</div>
+                    <div className="mt-1 text-xs text-neutral-400">
+                      Szukaj po username, emailu, ID lub statusie maila.
+                    </div>
+                  </div>
+
+                  <div className="w-full sm:w-80">
+                    <input
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Szukaj użytkownika..."
+                      className="w-full rounded-2xl border border-neutral-800 bg-black/30 px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-neutral-600"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-neutral-800">
+                <div className="max-h-[560px] overflow-auto">
+                  <table className="w-full min-w-[980px] text-sm">
+                    <thead className="sticky top-0 z-10 bg-neutral-950 text-neutral-400">
+                      <tr className="border-b border-neutral-800">
+                        <th className="px-4 py-3 text-left font-medium">User</th>
+                        <th className="px-4 py-3 text-left font-medium">Email</th>
+                        <th className="px-4 py-3 text-right font-medium">Saldo</th>
+                        <th className="px-4 py-3 text-left font-medium">Mail</th>
+                        <th className="px-4 py-3 text-left font-medium">Ban</th>
+                        <th className="px-4 py-3 text-right font-medium">Kupony</th>
+                        <th className="px-4 py-3 text-right font-medium">ROI</th>
+                        <th className="px-4 py-3 text-right font-medium">Winrate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredUsers.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={8}
+                            className="px-4 py-10 text-center text-sm text-neutral-500"
+                          >
+                            Brak użytkowników pasujących do filtra.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredUsers.map((u) => (
+                          <tr
+                            key={u.id}
+                            onClick={() => {
+                              setSelectedUserId(u.id);
+                              setSurpriseEmail(u.email ?? "");
+                            }}
+                            className={cn(
+                              "cursor-pointer border-b border-neutral-800/70 transition hover:bg-neutral-950/40",
+                              selectedUserId === u.id && "bg-neutral-950/60"
+                            )}
+                          >
+                            <td className="px-4 py-3">
+                              <div className="font-medium text-white">
+                                {u.username ?? "—"}
+                              </div>
+                              <div className="mt-1 text-xs text-neutral-500">{u.id}</div>
+                            </td>
+
+                            <td className="px-4 py-3 text-neutral-200">{u.email ?? "—"}</td>
+
+                            <td className="px-4 py-3 text-right font-semibold text-white">
+                              {formatVB(u.balance_vb)}
+                            </td>
+
+                            <td className="px-4 py-3">
+                              {u.email_confirmed_at ? (
+                                <StatusPill tone="green">mail confirmed</StatusPill>
+                              ) : (
+                                <StatusPill tone="yellow">confirmation sent</StatusPill>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3">
+                              {u.is_banned ? (
+                                <StatusPill tone="red">banned</StatusPill>
+                              ) : (
+                                <StatusPill>active</StatusPill>
+                              )}
+                            </td>
+
+                            <td className="px-4 py-3 text-right text-white">{u.bets_count}</td>
+                            <td className="px-4 py-3 text-right text-white">
+                              {fmtPct(u.roi)}
+                            </td>
+                            <td className="px-4 py-3 text-right text-white">
+                              {fmtPct(u.winrate)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white">
+                      Karta wybranego użytkownika
+                    </div>
+                    <div className="mt-1 text-xs text-neutral-400">
+                      Szybkie informacje i operacje kontekstowe.
+                    </div>
+                  </div>
+
+                  {selectedUser ? (
+                    selectedUser.is_banned ? (
+                      <StatusPill tone="red">konto zbanowane</StatusPill>
+                    ) : (
+                      <StatusPill tone="green">konto aktywne</StatusPill>
+                    )
+                  ) : (
+                    <StatusPill>brak wyboru</StatusPill>
+                  )}
+                </div>
+
+                {!selectedUser ? (
+                  <div className="mt-4 rounded-2xl border border-dashed border-neutral-800 bg-black/20 p-6 text-sm text-neutral-500">
+                    Wybierz użytkownika z tabeli po lewej stronie.
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <SmallInfoCard
+                        label="Username"
+                        value={selectedUser.username ?? "—"}
+                      />
+                      <SmallInfoCard label="Email" value={selectedUser.email ?? "—"} />
+                      <SmallInfoCard
+                        label="Saldo"
+                        value={`${formatVB(selectedUser.balance_vb)} VB`}
+                      />
+                      <SmallInfoCard
+                        label="Mail status"
+                        value={selectedUser.email_status}
+                      />
+                      <SmallInfoCard
+                        label="Email sent"
+                        value={fmtDate(selectedUser.email_confirmation_sent_at)}
+                      />
+                      <SmallInfoCard
+                        label="Email confirmed"
+                        value={fmtDate(selectedUser.email_confirmed_at)}
+                      />
+                      <SmallInfoCard
+                        label="Created at"
+                        value={fmtDate(selectedUser.created_at)}
+                      />
+                      <SmallInfoCard
+                        label="Last sign in"
+                        value={fmtDate(selectedUser.last_sign_in_at)}
+                      />
+                    </div>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <MetricCard
+                        label="Kupony"
+                        value={selectedUser.bets_count}
+                        hint={`Won: ${selectedUser.won_bets} • Lost: ${selectedUser.lost_bets} • Void: ${selectedUser.void_bets}`}
+                        tone="blue"
+                      />
+                      <MetricCard
+                        label="Profit"
+                        value={`${selectedUser.profit > 0 ? "+" : ""}${selectedUser.profit.toFixed(2)} VB`}
+                        hint={`ROI: ${fmtPct(selectedUser.roi)}`}
+                        tone={selectedUserProfitTone}
+                      />
+                      <MetricCard
+                        label="Winrate"
+                        value={fmtPct(selectedUser.winrate)}
+                        hint={`ID: ${selectedUser.id.slice(0, 8)}...`}
+                        tone="neutral"
+                      />
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-neutral-800 bg-black/20 p-4">
+                      <div className="text-sm font-medium text-white">Akcje konta</div>
+                      <div className="mt-1 text-xs text-neutral-400">
+                        Operacje finansowe i statusowe na wybranym użytkowniku.
+                      </div>
+
+                      <div className="mt-4 grid gap-3 lg:grid-cols-[190px_1fr]">
+                        <div>
+                          <div className="mb-1.5 text-xs text-neutral-400">Kwota VB</div>
+                          <input
+                            value={manualAmount}
+                            onChange={(e) =>
+                              setManualAmount(e.target.value.replace(/[^\d.,-]/g, ""))
+                            }
+                            placeholder="np. 500"
+                            className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-neutral-600"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => runUserAction("add_vb")}
+                            disabled={actionLoading === "add_vb"}
+                            className="rounded-2xl border border-green-700/40 bg-green-700 px-4 py-2.5 text-sm text-white transition hover:bg-green-600 disabled:opacity-50"
+                          >
+                            {actionLoading === "add_vb" ? "Trwa..." : "Dodaj VB"}
+                          </button>
+
+                          <button
+                            onClick={() => runUserAction("reset_balance")}
+                            disabled={actionLoading === "reset_balance"}
+                            className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                          >
+                            {actionLoading === "reset_balance" ? "Trwa..." : "Reset salda"}
+                          </button>
+
+                          <button
+                            onClick={() =>
+                              runUserAction(
+                                selectedUser.is_banned ? "unban_user" : "ban_user"
+                              )
+                            }
+                            disabled={
+                              actionLoading === "ban_user" ||
+                              actionLoading === "unban_user"
+                            }
+                            className="rounded-2xl border border-yellow-700/40 bg-yellow-700 px-4 py-2.5 text-sm text-white transition hover:bg-yellow-600 disabled:opacity-50"
+                          >
+                            {actionLoading === "ban_user" ||
+                            actionLoading === "unban_user"
+                              ? "Trwa..."
+                              : selectedUser.is_banned
+                                ? "Unban user"
+                                : "Ban user"}
+                          </button>
+
+                          <button
+                            disabled
+                            title="Hard delete tymczasowo wyłączony do czasu wdrożenia bezpiecznego RPC"
+                            className="cursor-not-allowed rounded-2xl border border-red-900/30 bg-red-900/10 px-4 py-2.5 text-sm text-red-300/70 opacity-60"
+                          >
+                            Delete disabled
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-neutral-800 bg-black/20 p-4">
+                      <div className="text-sm font-medium text-white">Szybka niespodzianka</div>
+                      <div className="mt-1 text-xs text-neutral-400">
+                        Szybka wysyłka do aktualnie wybranego użytkownika.
+                      </div>
+
+                      <div className="mt-4 grid gap-3">
+                        <input
+                          value={surpriseEmail}
+                          onChange={(e) => setSurpriseEmail(e.target.value)}
+                          placeholder="Email użytkownika"
+                          className="rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-neutral-600"
+                        />
+
+                        <textarea
+                          value={surpriseMessage}
+                          onChange={(e) => setSurpriseMessage(e.target.value)}
+                          placeholder="Treść niespodzianki"
+                          className="min-h-[120px] rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-neutral-600"
+                        />
+
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={sendSurprise}
+                            disabled={sendingSurprise}
+                            className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                          >
+                            {sendingSurprise ? "Wysyłanie..." : "Wyślij niespodziankę"}
+                          </button>
+
+                          <Link
+                            href="/admin/surprises"
+                            className="rounded-2xl border border-neutral-800 bg-black/20 px-4 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
+                          >
+                            Otwórz pełny moduł
+                          </Link>
+                        </div>
+
+                        {surpriseResult ? (
+                          <details className="text-xs">
+                            <summary className="cursor-pointer text-neutral-400 hover:text-white">
+                              Pokaż wynik requestu
+                            </summary>
+                            <pre className="mt-2 overflow-auto rounded-xl border border-neutral-800 bg-black/30 p-3">
+                              {JSON.stringify(surpriseResult, null, 2)}
+                            </pre>
+                          </details>
+                        ) : null}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+
+        <div className="space-y-6">
+          <SectionCard
+            title="Centrum operacyjne"
+            description="Najważniejsze akcje diagnostyczne i rozliczeniowe zebrane w jednym miejscu."
           >
-            Wyślij niespodziankę
-          </Link>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white">System Health</div>
+                    <div className="mt-1 text-xs text-neutral-400">
+                      Monitoring spójności: mecze utkwione, nierozliczone pozycje,
+                      pominięte kupony, brak payout w ledger.
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={refreshHealth}
+                    disabled={healthLoading}
+                    className="rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                  >
+                    {healthLoading ? "..." : "Odśwież"}
+                  </button>
+                </div>
+
+                {!health ? (
+                  <div className="mt-4 text-sm text-neutral-500">
+                    Brak danych / nie udało się pobrać.
+                  </div>
+                ) : !health.ok ? (
+                  <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-sm text-red-300">
+                    Błąd: {health.error ?? "unknown"}
+                  </div>
+                ) : (
+                  <>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <StatusPill tone={healthBad === 0 ? "green" : "yellow"}>
+                        {healthBad === 0 ? "HEALTHY" : "ATTENTION"}
+                      </StatusPill>
+                      <StatusPill>stuck: {hm?.stuckMatches ?? 0}</StatusPill>
+                      <StatusPill>
+                        finished+unsettled: {hm?.finishedMatchesWithUnsettledItems ?? 0}
+                      </StatusPill>
+                      <StatusPill>
+                        pending-ready: {hm?.pendingButAllItemsSettled ?? 0}
+                      </StatusPill>
+                      <StatusPill tone={(hm?.missingPayoutLedger ?? 0) > 0 ? "red" : "neutral"}>
+                        missing payout: {hm?.missingPayoutLedger ?? 0}
+                      </StatusPill>
+                    </div>
+
+                    <details className="mt-4 text-xs">
+                      <summary className="cursor-pointer text-neutral-400 hover:text-white">
+                        Pokaż sample (debug)
+                      </summary>
+                      <pre className="mt-2 overflow-auto rounded-xl border border-neutral-800 bg-black/30 p-3">
+                        {JSON.stringify(health.samples, null, 2)}
+                      </pre>
+                    </details>
+                  </>
+                )}
+              </div>
+
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white">
+                      Auto-rozliczanie zaległych meczów
+                    </div>
+                    <div className="mt-1 text-xs text-neutral-400">
+                      Pobiera wyniki z football-data, zapisuje do match_results i rozlicza
+                      kupony bez edge/cron.
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={refreshStats}
+                      disabled={statsLoading}
+                      className="rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                    >
+                      {statsLoading ? "..." : "Sprawdź"}
+                    </button>
+
+                    <button
+                      onClick={runAutoSettle}
+                      disabled={autoLoading || readyMatches <= 0}
+                      title={
+                        readyMatches <= 0
+                          ? "Brak meczów do rozliczenia"
+                          : "Uruchom auto-rozliczanie"
+                      }
+                      className="rounded-2xl border border-green-700/40 bg-green-700 px-3 py-2 text-sm text-white transition hover:bg-green-600 disabled:opacity-50"
+                    >
+                      {autoLoading ? "Rozliczanie..." : "Uruchom"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <MetricCard
+                    label="Do rozliczenia"
+                    value={readyMatches}
+                    hint="Liczba meczów gotowych do settle"
+                    tone={readyMatches > 0 ? "yellow" : "neutral"}
+                  />
+                  <MetricCard
+                    label="Pozycje"
+                    value={readyItems}
+                    hint="Łączna liczba pozycji kuponów"
+                    tone="blue"
+                  />
+                  <MetricCard
+                    label="Buffer"
+                    value={`${settleStats?.bufferMinutes ?? 10} min`}
+                    hint={settleStats?.cutoffIso ? `cutoff: ${fmtDate(settleStats.cutoffIso)}` : "Brak cutoff"}
+                    tone="neutral"
+                  />
+                </div>
+
+                {autoResult ? (
+                  <details className="mt-4 text-xs">
+                    <summary className="cursor-pointer text-neutral-400 hover:text-white">
+                      Pokaż wynik auto-rozliczania
+                    </summary>
+                    <pre className="mt-2 overflow-auto rounded-xl border border-neutral-800 bg-black/30 p-3">
+                      {JSON.stringify(autoResult, null, 2)}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Link
+                  href="/admin/logs"
+                  className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
+                >
+                  <div className="text-sm font-semibold text-white">Pełne logi</div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    Otwórz dedykowaną stronę z logami systemowymi.
+                  </div>
+                </Link>
+
+                <Link
+                  href="/admin/surprises"
+                  className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
+                >
+                  <div className="text-sm font-semibold text-white">Niespodzianki</div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    Osobny moduł do zarządzania wiadomościami i akcjami specjalnymi.
+                  </div>
+                </Link>
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Ostatnie działania admina"
+            description="Kompaktowy podgląd ostatnich wpisów. Pełna historia jest na osobnej stronie."
+            action={
+              <div className="flex gap-2">
+                <button
+                  onClick={loadAuditLogs}
+                  disabled={auditLoading}
+                  className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                >
+                  {auditLoading ? "..." : "Odśwież"}
+                </button>
+
+                <Link
+                  href="/admin/logs"
+                  className="rounded-2xl border border-neutral-800 bg-black/20 px-4 py-2 text-sm text-neutral-300 transition hover:bg-neutral-900"
+                >
+                  Zobacz wszystko
+                </Link>
+              </div>
+            }
+          >
+            {compactAuditLogs.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-neutral-800 bg-black/20 p-6 text-sm text-neutral-500">
+                Brak wpisów audit log.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {compactAuditLogs.map((log) => (
+                  <details
+                    key={log.id}
+                    className="group rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4"
+                  >
+                    <summary className="flex cursor-pointer list-none flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-white">{log.action}</span>
+                          <StatusPill>{fmtDate(log.created_at)}</StatusPill>
+                        </div>
+
+                        <div className="mt-2 text-xs text-neutral-500">
+                          admin: {log.admin_user_id}
+                        </div>
+                        <div className="text-xs text-neutral-500">
+                          target: {log.target_user_id ?? "—"}
+                        </div>
+                      </div>
+
+                      <span className="text-xs text-neutral-500 transition group-open:rotate-180">
+                        ▼
+                      </span>
+                    </summary>
+
+                    <pre className="mt-4 overflow-auto rounded-xl border border-neutral-800 bg-black/30 p-3 text-xs">
+                      {JSON.stringify(log.details ?? {}, null, 2)}
+                    </pre>
+                  </details>
+                ))}
+              </div>
+            )}
+          </SectionCard>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="font-semibold">Użytkownicy</div>
-            <div className="text-xs text-neutral-400 mt-1">
-              Saldo, status maila, statystyki, akcje admina i pełne usuwanie konta.
-            </div>
-          </div>
+      <SystemCheckPanel />
 
+      <SectionCard
+        title="Ostatnie kupony"
+        description="Skrócony stół operacyjny do szybkiej weryfikacji i ręcznego rozliczania kuponów."
+        action={
           <button
-            onClick={loadUsers}
-            disabled={usersLoading}
-            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
+            onClick={load}
+            className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800"
           >
-            {usersLoading ? "..." : "Odśwież users"}
+            Odśwież kupony
           </button>
-        </div>
-
-        {users.length === 0 ? (
-          <div className="text-sm text-neutral-400">
-            Brak użytkowników lub nie udało się pobrać listy.
+        }
+      >
+        {bets.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-neutral-800 bg-black/20 p-8 text-sm text-neutral-500">
+            Brak kuponów.
           </div>
         ) : (
-          <>
-            <div className="overflow-auto rounded-2xl border border-neutral-800">
-              <table className="w-full text-sm min-w-[1200px]">
-                <thead className="bg-neutral-950/70 text-neutral-400">
+          <div className="overflow-hidden rounded-2xl border border-neutral-800">
+            <div className="max-h-[560px] overflow-auto">
+              <table className="w-full min-w-[1040px] text-sm">
+                <thead className="sticky top-0 z-10 bg-neutral-950 text-neutral-400">
                   <tr className="border-b border-neutral-800">
-                    <th className="text-left px-4 py-3">User</th>
-                    <th className="text-left px-4 py-3">Email</th>
-                    <th className="text-right px-4 py-3">Saldo</th>
-                    <th className="text-left px-4 py-3">Mail status</th>
-                    <th className="text-left px-4 py-3">Sent at</th>
-                    <th className="text-left px-4 py-3">Confirmed at</th>
-                    <th className="text-left px-4 py-3">Ban</th>
-                    <th className="text-right px-4 py-3">Kupony</th>
-                    <th className="text-right px-4 py-3">Profit</th>
-                    <th className="text-right px-4 py-3">ROI</th>
-                    <th className="text-right px-4 py-3">Winrate</th>
+                    <th className="px-4 py-3 text-left font-medium">Czas</th>
+                    <th className="px-4 py-3 text-left font-medium">Bet ID</th>
+                    <th className="px-4 py-3 text-left font-medium">User</th>
+                    <th className="px-4 py-3 text-right font-medium">Stawka</th>
+                    <th className="px-4 py-3 text-right font-medium">Kurs</th>
+                    <th className="px-4 py-3 text-right font-medium">Wygrana</th>
+                    <th className="px-4 py-3 text-left font-medium">Status</th>
+                    <th className="px-4 py-3 text-left font-medium">Settled</th>
+                    <th className="px-4 py-3 text-right font-medium">Akcje</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u) => (
+                  {bets.map((b) => (
                     <tr
-                      key={u.id}
-                      onClick={() => {
-                        setSelectedUserId(u.id);
-                        setSurpriseEmail(u.email ?? "");
-                      }}
-                      className={[
-                        "border-b border-neutral-800/70 cursor-pointer hover:bg-neutral-950/40",
-                        selectedUserId === u.id ? "bg-neutral-950/50" : "",
-                      ].join(" ")}
+                      key={b.id}
+                      className="border-b border-neutral-800/70 hover:bg-neutral-950/40"
                     >
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-white">{u.username ?? "—"}</div>
-                        <div className="text-xs text-neutral-500 mt-1">{u.id}</div>
+                      <td className="px-4 py-3 text-neutral-300">
+                        {fmtDate(b.created_at)}
                       </td>
-                      <td className="px-4 py-3 text-neutral-200">{u.email ?? "—"}</td>
+
+                      <td className="px-4 py-3 text-neutral-300">{b.id}</td>
+
+                      <td className="px-4 py-3 text-neutral-300">{b.user_id}</td>
+
                       <td className="px-4 py-3 text-right font-semibold text-white">
-                        {formatVB(u.balance_vb)}
+                        {formatVB(b.stake)} VB
                       </td>
+
+                      <td className="px-4 py-3 text-right font-semibold text-white">
+                        {formatOdd(b.total_odds)}
+                      </td>
+
+                      <td className="px-4 py-3 text-right font-semibold text-white">
+                        {formatVB(b.potential_win)} VB
+                      </td>
+
                       <td className="px-4 py-3">
-                        <span
-                          className={[
-                            "inline-flex rounded-full px-2.5 py-1 text-xs border",
-                            u.email_confirmed_at
-                              ? "border-green-500/30 bg-green-500/10 text-green-300"
-                              : "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
-                          ].join(" ")}
+                        <StatusPill
+                          tone={
+                            b.status === "won"
+                              ? "green"
+                              : b.status === "lost"
+                                ? "red"
+                                : b.status === "void"
+                                  ? "yellow"
+                                  : "neutral"
+                          }
                         >
-                          {u.email_status}
-                        </span>
+                          {String(b.status).toUpperCase()}
+                        </StatusPill>
                       </td>
-                      <td className="px-4 py-3 text-neutral-300">
-                        {fmtDate(u.email_confirmation_sent_at)}
-                      </td>
-                      <td className="px-4 py-3 text-neutral-300">
-                        {fmtDate(u.email_confirmed_at)}
-                      </td>
+
                       <td className="px-4 py-3">
-                        <span
-                          className={[
-                            "inline-flex rounded-full px-2.5 py-1 text-xs border",
-                            u.is_banned
-                              ? "border-red-500/30 bg-red-500/10 text-red-300"
-                              : "border-neutral-700 bg-neutral-950 text-neutral-300",
-                          ].join(" ")}
-                        >
-                          {u.is_banned ? "banned" : "active"}
-                        </span>
+                        {b.settled ? (
+                          <StatusPill tone="green">TAK</StatusPill>
+                        ) : (
+                          <StatusPill>NIe</StatusPill>
+                        )}
                       </td>
-                      <td className="px-4 py-3 text-right text-white">{u.bets_count}</td>
-                      <td
-                        className={[
-                          "px-4 py-3 text-right font-semibold",
-                          u.profit > 0
-                            ? "text-green-400"
-                            : u.profit < 0
-                              ? "text-red-400"
-                              : "text-white",
-                        ].join(" ")}
-                      >
-                        {u.profit > 0 ? "+" : ""}
-                        {u.profit.toFixed(2)} VB
+
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            disabled={b.settled}
+                            onClick={() => settle(b.id, "won")}
+                            className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                          >
+                            WON
+                          </button>
+
+                          <button
+                            disabled={b.settled}
+                            onClick={() => settle(b.id, "lost")}
+                            className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                          >
+                            LOST
+                          </button>
+
+                          <button
+                            disabled={b.settled}
+                            onClick={() => settle(b.id, "void")}
+                            className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                          >
+                            VOID
+                          </button>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-right text-white">{fmtPct(u.roi)}</td>
-                      <td className="px-4 py-3 text-right text-white">{fmtPct(u.winrate)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-950/40 p-4 space-y-4">
-              <div className="font-semibold">Akcje na wybranym użytkowniku</div>
-
-              {!selectedUser ? (
-                <div className="text-sm text-neutral-400">Wybierz użytkownika z tabeli.</div>
-              ) : (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
-                      <div className="text-xs text-neutral-400">Username</div>
-                      <div className="mt-1 font-semibold text-white">
-                        {selectedUser.username ?? "—"}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
-                      <div className="text-xs text-neutral-400">Email</div>
-                      <div className="mt-1 font-semibold text-white">
-                        {selectedUser.email ?? "—"}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
-                      <div className="text-xs text-neutral-400">Saldo</div>
-                      <div className="mt-1 font-semibold text-white">
-                        {formatVB(selectedUser.balance_vb)}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3">
-                      <div className="text-xs text-neutral-400">Status maila</div>
-                      <div className="mt-1 font-semibold text-white">
-                        {selectedUser.email_status}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-3 items-start">
-                    <div className="space-y-1">
-                      <div className="text-xs text-neutral-400">Dodaj VB</div>
-                      <input
-                        value={manualAmount}
-                        onChange={(e) => setManualAmount(e.target.value.replace(/[^\d.,-]/g, ""))}
-                        placeholder="np. 500"
-                        className="w-full px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-950 text-sm"
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => runUserAction("add_vb")}
-                        disabled={actionLoading === "add_vb"}
-                        className="px-4 py-2 rounded-xl border border-neutral-800 bg-green-700 hover:bg-green-600 transition text-sm disabled:opacity-50"
-                      >
-                        {actionLoading === "add_vb" ? "..." : "Dodaj VB"}
-                      </button>
-
-                      <button
-                        onClick={() => runUserAction("reset_balance")}
-                        disabled={actionLoading === "reset_balance"}
-                        className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
-                      >
-                        {actionLoading === "reset_balance" ? "..." : "Reset balance"}
-                      </button>
-
-                      <button
-                        onClick={() =>
-                          runUserAction(selectedUser.is_banned ? "unban_user" : "ban_user")
-                        }
-                        disabled={actionLoading === "ban_user" || actionLoading === "unban_user"}
-                        className="px-4 py-2 rounded-xl border border-neutral-800 bg-yellow-700 hover:bg-yellow-600 transition text-sm disabled:opacity-50"
-                      >
-                        {actionLoading === "ban_user" || actionLoading === "unban_user"
-                          ? "..."
-                          : selectedUser.is_banned
-                            ? "Unban user"
-                            : "Ban user"}
-                      </button>
-
-                      <button
-                          disabled
-                          className="px-4 py-2 rounded-xl border border-red-900/30 bg-red-900/10 text-red-300/70 text-sm opacity-60 cursor-not-allowed"
-                          title="Hard delete tymczasowo wyłączony do czasu wdrożenia bezpiecznego RPC"
-                        >
-                          Delete disabled
-                      </button>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="font-semibold">Audit log admina</div>
-            <div className="text-xs text-neutral-400 mt-1">
-              Historia działań administracyjnych: podgląd users, dopisania VB, bany, usunięcia.
-            </div>
-          </div>
-
-          <button
-            onClick={loadAuditLogs}
-            disabled={auditLoading}
-            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
-          >
-            {auditLoading ? "..." : "Odśwież audit log"}
-          </button>
-        </div>
-
-        {auditLogs.length === 0 ? (
-          <div className="text-sm text-neutral-400">Brak wpisów audit log.</div>
-        ) : (
-          <div className="space-y-2">
-            {auditLogs.map((log) => (
-              <div
-                key={log.id}
-                className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-3"
-              >
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <div className="font-medium text-white">{log.action}</div>
-                    <div className="text-xs text-neutral-500 mt-1">
-                      admin: {log.admin_user_id}
-                    </div>
-                    <div className="text-xs text-neutral-500">
-                      target: {log.target_user_id ?? "—"}
-                    </div>
-                  </div>
-
-                  <div className="text-xs text-neutral-400">{fmtDate(log.created_at)}</div>
-                </div>
-
-                <pre className="mt-3 bg-black/30 border border-neutral-800 rounded-xl p-3 text-xs overflow-auto">
-                  {JSON.stringify(log.details ?? {}, null, 2)}
-                </pre>
-              </div>
-            ))}
           </div>
         )}
-      </div>
-
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="font-semibold">System Health</div>
-            <div className="text-xs text-neutral-400 mt-1">
-              Monitoring spójności: mecze utkwione, nierozliczone pozycje, pominięte kupony, brak
-              payout w ledger.
-            </div>
-          </div>
-
-          <button
-            onClick={refreshHealth}
-            disabled={healthLoading}
-            className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
-          >
-            {healthLoading ? "..." : "Odśwież health"}
-          </button>
-        </div>
-
-        {!health ? (
-          <div className="text-xs text-neutral-400">Brak danych / nie udało się pobrać.</div>
-        ) : !health.ok ? (
-          <div className="text-xs text-red-400">Błąd: {health.error ?? "unknown"}</div>
-        ) : (
-          <>
-            <div className="flex flex-wrap gap-3 text-sm">
-              <span>
-                Status:{" "}
-                <b className={healthBad === 0 ? "text-green-400" : "text-yellow-300"}>
-                  {healthBad === 0 ? "HEALTHY" : "ATTENTION"}
-                </b>
-              </span>
-
-              <span>
-                stuckMatches:{" "}
-                <b className={(hm?.stuckMatches ?? 0) > 0 ? "text-yellow-300" : "text-white"}>
-                  {hm?.stuckMatches ?? 0}
-                </b>
-              </span>
-
-              <span>
-                finished+unsettled:{" "}
-                <b
-                  className={
-                    (hm?.finishedMatchesWithUnsettledItems ?? 0) > 0
-                      ? "text-yellow-300"
-                      : "text-white"
-                  }
-                >
-                  {hm?.finishedMatchesWithUnsettledItems ?? 0}
-                </b>
-              </span>
-
-              <span>
-                pending-ready:{" "}
-                <b
-                  className={
-                    (hm?.pendingButAllItemsSettled ?? 0) > 0 ? "text-yellow-300" : "text-white"
-                  }
-                >
-                  {hm?.pendingButAllItemsSettled ?? 0}
-                </b>
-              </span>
-
-              <span>
-                missing payout:{" "}
-                <b className={(hm?.missingPayoutLedger ?? 0) > 0 ? "text-red-400" : "text-white"}>
-                  {hm?.missingPayoutLedger ?? 0}
-                </b>
-              </span>
-            </div>
-
-            <details className="text-xs">
-              <summary className="cursor-pointer text-neutral-300 hover:text-white">
-                Pokaż sample (debug)
-              </summary>
-              <pre className="mt-2 bg-neutral-950/60 border border-neutral-800 rounded-xl p-3 overflow-auto">
-                {JSON.stringify(health.samples, null, 2)}
-              </pre>
-            </details>
-          </>
-        )}
-      </div>
-
-      <SystemCheckPanel />
-
-
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="font-semibold">Auto-rozliczanie zaległych meczów</div>
-            <div className="text-xs text-neutral-400 mt-1">
-              Pobiera wyniki z football-data, zapisuje do match_results i rozlicza kupony (bez
-              Edge/cron).
-            </div>
-
-            <div className="mt-2 text-xs text-neutral-300">
-              {statsLoading ? (
-                <span className="text-neutral-400">Sprawdzam mecze do rozliczenia…</span>
-              ) : settleStats ? (
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  <span>
-                    Do rozliczenia:{" "}
-                    <b className={readyMatches > 0 ? "text-green-400" : "text-white"}>
-                      {readyMatches} mecz(e)
-                    </b>
-                  </span>
-                  <span>
-                    Pozycje: <b className="text-white">{readyItems}</b>
-                  </span>
-                  <span className="text-neutral-500">
-                    (buffer: {settleStats.bufferMinutes} min)
-                  </span>
-                </div>
-              ) : (
-                <span className="text-neutral-400">Nie udało się pobrać statystyk.</span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              onClick={refreshStats}
-              disabled={statsLoading}
-              className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
-            >
-              {statsLoading ? "..." : "Sprawdź"}
-            </button>
-
-            <button
-              onClick={runAutoSettle}
-              disabled={autoLoading || readyMatches <= 0}
-              className="px-4 py-2 rounded-xl border border-neutral-800 bg-green-700 hover:bg-green-600 transition text-sm disabled:opacity-50 disabled:hover:bg-green-700"
-              title={readyMatches <= 0 ? "Brak meczów do rozliczenia" : "Uruchom auto-rozliczanie"}
-            >
-              {autoLoading ? "Rozliczanie..." : "Rozlicz zaległe mecze (auto)"}
-            </button>
-          </div>
-        </div>
-
-        {autoResult && (
-          <pre className="bg-neutral-950/60 border border-neutral-800 rounded-xl p-3 text-xs overflow-auto">
-            {JSON.stringify(autoResult, null, 2)}
-          </pre>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
-        <div className="font-semibold">Wyślij niespodziankę</div>
-
-        <div className="grid grid-cols-1 gap-3">
-          <input
-            value={surpriseEmail}
-            onChange={(e) => setSurpriseEmail(e.target.value)}
-            placeholder="Email użytkownika"
-            className="px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-950 text-sm"
-          />
-
-          <textarea
-            value={surpriseMessage}
-            onChange={(e) => setSurpriseMessage(e.target.value)}
-            placeholder="Treść niespodzianki"
-            className="px-3 py-2 rounded-xl border border-neutral-800 bg-neutral-950 text-sm min-h-[110px]"
-          />
-
-          <div>
-            <button
-              onClick={sendSurprise}
-              disabled={sendingSurprise}
-              className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm disabled:opacity-50"
-            >
-              {sendingSurprise ? "Wysyłanie..." : "Wyślij niespodziankę"}
-            </button>
-          </div>
-        </div>
-
-        {surpriseResult && (
-          <pre className="bg-neutral-950/60 border border-neutral-800 rounded-xl p-3 text-xs overflow-auto">
-            {JSON.stringify(surpriseResult, null, 2)}
-          </pre>
-        )}
-      </div>
-
-      {bets.length === 0 ? (
-        <div className="text-neutral-400">Brak kuponów.</div>
-      ) : (
-        <div className="space-y-3">
-          {bets.map((b) => (
-            <div key={b.id} className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-xs text-neutral-400">
-                    {new Date(b.created_at).toLocaleString()}
-                  </div>
-                  <div className="mt-2 text-sm">
-                    <div>
-                      Bet ID: <span className="text-neutral-300">{b.id}</span>
-                    </div>
-                    <div>
-                      User: <span className="text-neutral-300">{b.user_id}</span>
-                    </div>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-3 text-sm">
-                    <div>
-                      <div className="text-xs text-neutral-400">Stawka</div>
-                      <div className="font-semibold">{formatVB(b.stake)} VB</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-neutral-400">Kurs</div>
-                      <div className="font-semibold">{formatOdd(b.total_odds)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-neutral-400">Wygrana</div>
-                      <div className="font-semibold">{formatVB(b.potential_win)} VB</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col items-end gap-2">
-                  <div className="text-xs text-neutral-400">
-                    Status: <b className="text-white">{String(b.status).toUpperCase()}</b>
-                  </div>
-                  <div className="text-xs text-neutral-400">
-                    Settled: <b className="text-white">{b.settled ? "TAK" : "NIE"}</b>
-                  </div>
-
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      disabled={b.settled}
-                      onClick={() => settle(b.id, "won")}
-                      className="px-3 py-2 rounded-xl text-sm border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 disabled:opacity-50"
-                    >
-                      WON
-                    </button>
-                    <button
-                      disabled={b.settled}
-                      onClick={() => settle(b.id, "lost")}
-                      className="px-3 py-2 rounded-xl text-sm border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 disabled:opacity-50"
-                    >
-                      LOST
-                    </button>
-                    <button
-                      disabled={b.settled}
-                      onClick={() => settle(b.id, "void")}
-                      className="px-3 py-2 rounded-xl text-sm border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 disabled:opacity-50"
-                    >
-                      VOID
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <button
-        onClick={async () => {
-          await load();
-          await refreshStats();
-          await refreshHealth();
-          await loadUsers();
-          await loadAuditLogs();
-        }}
-        className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm"
-      >
-        Odśwież wszystko
-      </button>
+      </SectionCard>
     </div>
   );
 }
