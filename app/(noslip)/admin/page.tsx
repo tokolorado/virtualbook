@@ -208,6 +208,20 @@ function fmtDate(v?: string | null) {
   return d.toLocaleString();
 }
 
+function fmtDateCompact(v?: string | null) {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+
+  return new Intl.DateTimeFormat("pl-PL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(d);
+}
+
 function fmtPct(v?: number | null) {
   return `${Number(v ?? 0).toFixed(2)}%`;
 }
@@ -249,11 +263,13 @@ function MetricCard({
   value,
   hint,
   tone = "neutral",
+  valueClassName = "",
 }: {
   label: string;
   value: ReactNode;
   hint?: ReactNode;
   tone?: MetricTone;
+  valueClassName?: string;
 }) {
   const toneClass =
     tone === "green"
@@ -271,7 +287,16 @@ function MetricCard({
       <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
         {label}
       </div>
-      <div className="mt-3 text-2xl font-semibold text-white">{value}</div>
+
+      <div
+        className={cn(
+          "mt-3 break-words text-2xl font-semibold leading-tight text-white",
+          valueClassName
+        )}
+      >
+        {value}
+      </div>
+
       {hint ? <div className="mt-2 text-xs text-neutral-400">{hint}</div> : null}
     </div>
   );
@@ -1678,29 +1703,35 @@ export default function AdminPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <MetricCard
                 label="Run status"
                 value={systemCheckRun.ok ? "OK" : "FAILED"}
                 hint={systemCheckRun.status}
                 tone={systemCheckRun.ok ? "green" : "red"}
               />
+
               <MetricCard
                 label="Start"
-                value={fmtDate(systemCheckRun.started_at)}
+                value={fmtDateCompact(systemCheckRun.started_at)}
                 tone="neutral"
+                valueClassName="text-base sm:text-lg"
               />
+
               <MetricCard
                 label="Koniec"
-                value={fmtDate(systemCheckRun.finished_at)}
+                value={fmtDateCompact(systemCheckRun.finished_at)}
                 tone="neutral"
+                valueClassName="text-base sm:text-lg"
               />
+
               <MetricCard
                 label="Passed"
                 value={systemCheckRun.checks_passed}
                 hint={`z ${systemCheckRun.checks_total}`}
                 tone="green"
               />
+
               <MetricCard
                 label="Failed"
                 value={systemCheckRun.checks_failed}
