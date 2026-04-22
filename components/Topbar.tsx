@@ -49,6 +49,7 @@ function isPathActive(pathname: string, href: string) {
   if (href === "/events") {
     return pathname === "/events" || pathname.startsWith("/events/");
   }
+
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -196,123 +197,127 @@ export default function Topbar() {
   }, [isLoggedIn, checkingAdmin, isAdmin]);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-neutral-800/90 bg-neutral-950/90 backdrop-blur-xl">
-      <div className="w-full px-3 py-3 sm:px-4 xl:px-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <Link
-              href="/events"
-              className="group flex items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 transition hover:bg-neutral-900"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-neutral-800 bg-white text-sm font-black text-black">
-                VB
-              </div>
-
-              <div className="min-w-0">
-                <div className="text-sm font-semibold tracking-wide text-white">
-                  VirtualBook
+    <>
+      <header className="fixed inset-x-0 top-0 z-[70] border-b border-neutral-800/90 bg-neutral-950/90 backdrop-blur-xl">
+        <div className="w-full px-3 py-3 sm:px-4 xl:px-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <Link
+                href="/events"
+                className="group flex items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 transition hover:bg-neutral-900"
+              >
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-neutral-800 bg-white text-sm font-black text-black">
+                  VB
                 </div>
-                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                  Football
-                </div>
-              </div>
-            </Link>
 
-            <nav className="hidden xl:flex items-center gap-2">
-              {visibleNav.map((item) => (
-                <NavLinkItem
-                  key={item.href}
-                  href={item.href}
-                  label={item.label}
-                  active={isPathActive(pathname, item.href)}
-                />
-              ))}
-            </nav>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {loading ? null : isLoggedIn ? (
-              <>
-                <div className="hidden md:flex items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-2.5">
-                  <div className="text-right">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                      Saldo
-                    </div>
-                    <div className="text-sm font-semibold text-white">
-                      {balanceVb === null ? "..." : `${formatVB(balanceVb)} VB`}
-                    </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold tracking-wide text-white">
+                    VirtualBook
+                  </div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Football
                   </div>
                 </div>
+              </Link>
 
-                <Link
-                  href="/account"
-                  className={cx(
-                    "rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
-                    isPathActive(pathname, "/account")
-                      ? "border-white/15 bg-white text-black"
-                      : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
-                  )}
-                >
-                  Moje konto
-                </Link>
+              <nav className="hidden lg:flex items-center gap-2">
+                {visibleNav.map((item) => (
+                  <NavLinkItem
+                    key={item.href}
+                    href={item.href}
+                    label={item.label}
+                    active={isPathActive(pathname, item.href)}
+                  />
+                ))}
+              </nav>
+            </div>
 
-                <button
-                  onClick={logout}
-                  className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-medium text-neutral-200 transition hover:bg-neutral-800"
-                >
-                  Wyloguj
-                </button>
-              </>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Link
-                  href="/login"
-                  className={cx(
-                    "rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
-                    isPathActive(pathname, "/login")
-                      ? "border-white/15 bg-white text-black"
-                      : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
-                  )}
-                >
-                  Logowanie
-                </Link>
+            <div className="flex shrink-0 items-center gap-2">
+              {loading ? null : session ? (
+                <>
+                  <div className="hidden md:flex items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-2.5">
+                    <div className="text-right">
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                        Saldo
+                      </div>
+                      <div className="text-sm font-semibold text-white">
+                        {balanceVb === null ? "..." : `${formatVB(balanceVb)} VB`}
+                      </div>
+                    </div>
+                  </div>
 
-                <Link
-                  href="/register"
-                  className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-neutral-200"
-                >
-                  Rejestracja
-                </Link>
-              </div>
-            )}
-          </div>
-        </div>
+                  <Link
+                    href="/account"
+                    className={cx(
+                      "rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
+                      isPathActive(pathname, "/account")
+                        ? "border-white/15 bg-white text-black"
+                        : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
+                    )}
+                  >
+                    Moje konto
+                  </Link>
 
-        <div className="mt-3 xl:hidden">
-          <div className="overflow-x-auto pb-1">
-            <div className="flex items-center gap-2">
-              {visibleNav.map((item) => (
-                <NavLinkItem
-                  key={item.href}
-                  href={item.href}
-                  label={item.label}
-                  active={isPathActive(pathname, item.href)}
-                  compact
-                />
-              ))}
+                  <button
+                    onClick={logout}
+                    className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-medium text-neutral-200 transition hover:bg-neutral-800"
+                  >
+                    Wyloguj
+                  </button>
+                </>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Link
+                    href="/login"
+                    className={cx(
+                      "rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
+                      isPathActive(pathname, "/login")
+                        ? "border-white/15 bg-white text-black"
+                        : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
+                    )}
+                  >
+                    Logowanie
+                  </Link>
 
-              {isLoggedIn ? (
-                <div className="ml-1 shrink-0 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-xs text-neutral-300 md:hidden">
-                  Saldo:{" "}
-                  <span className="font-semibold text-white">
-                    {balanceVb === null ? "..." : `${formatVB(balanceVb)} VB`}
-                  </span>
+                  <Link
+                    href="/register"
+                    className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-neutral-200"
+                  >
+                    Rejestracja
+                  </Link>
                 </div>
-              ) : null}
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 lg:hidden">
+            <div className="overflow-x-auto pb-1">
+              <div className="flex items-center gap-2">
+                {visibleNav.map((item) => (
+                  <NavLinkItem
+                    key={item.href}
+                    href={item.href}
+                    label={item.label}
+                    active={isPathActive(pathname, item.href)}
+                    compact
+                  />
+                ))}
+
+                {isLoggedIn ? (
+                  <div className="ml-1 shrink-0 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-xs text-neutral-300 md:hidden">
+                    Saldo:{" "}
+                    <span className="font-semibold text-white">
+                      {balanceVb === null ? "..." : `${formatVB(balanceVb)} VB`}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </header>
+      </header>
+
+      <div className="h-[120px] lg:h-[76px]" aria-hidden="true" />
+    </>
   );
 }
