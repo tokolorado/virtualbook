@@ -1263,7 +1263,11 @@ export default function MatchInsightsSection({
             ) : null}
 
             {lastRefreshedAt ? (
-              <StatusChip>Ostatnie odświeżenie: {formatDateTime(lastRefreshedAt)}</StatusChip>
+              <StatusChip>
+                <span className="whitespace-nowrap tabular-nums">
+                  Sprawdzono: {new Date(lastRefreshedAt).toLocaleTimeString()}
+                </span>
+              </StatusChip>
             ) : null}
 
             {isRefreshing ? (
