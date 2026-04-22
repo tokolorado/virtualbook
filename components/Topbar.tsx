@@ -142,7 +142,7 @@ export default function Topbar() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-neutral-800 bg-neutral-950/80 backdrop-blur">
-      <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between gap-3">
+      <div className="w-full px-4 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Link href="/events" className="font-bold tracking-wide text-white">
             VirtualBook
@@ -193,7 +193,7 @@ export default function Topbar() {
       </div>
 
       <div className="md:hidden border-t border-neutral-800">
-        <div className="mx-auto max-w-6xl px-2 py-2 flex items-center justify-around">
+        <div className="w-full px-2 py-2 flex items-center justify-around">
           <NavLink href="/events" label="Mecze" />
           <NavLink href="/leaderboard" label="Ranking" />
           {isLoggedIn ? <NavLink href="/bets" label="Kupony" /> : null}

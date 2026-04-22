@@ -215,6 +215,12 @@ select:focus {
 /* Reusable component classes */
 .vb-page {
   width: 100%;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.vb-page-contained {
+  width: 100%;
   max-width: 72rem;
   margin: 0 auto;
   padding-left: 1rem;

@@ -1,3 +1,4 @@
+//components/Clientproviders.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -52,13 +53,13 @@ export default function ClientProviders({
 
   return (
     <BetSlipProvider>
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      <div className="w-full min-w-0 px-4 py-6">
         {hideSlip ? (
-          <div>{children}</div>
+          <div className="min-w-0">{children}</div>
         ) : (
           <>
-            <div className="lg:grid lg:grid-cols-[1fr_360px] lg:gap-6">
-              <div>{children}</div>
+            <div className="min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6">
+              <div className="min-w-0">{children}</div>
 
               <div className="hidden lg:block">
                 <BetSlip variant="desktop" />
@@ -70,7 +71,7 @@ export default function ClientProviders({
             </div>
           </>
         )}
-      </main>
+      </div>
     </BetSlipProvider>
   );
 }
