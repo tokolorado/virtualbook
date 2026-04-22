@@ -1,24 +1,12 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseServer";
+import { getMappedSofascoreEventId } from "@/lib/sofascore/mapping";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type MappingRow = {
-  match_id: number;
-  sofascore_event_id: number;
-  mapping_method: string | null;
-  confidence: number | null;
-  notes: string | null;
-  updated_at: string | null;
-};
+const SOFASCORE_BASE = "https://api.sofascore.com/api/v1";
 
-type ApiCacheRow = {
-  payload: any;
-  updated_at: string | null;
-};
-
-function toPositiveInt(value: string | null): number | null {
+function toMatchId(value: string | null): number | null {
   if (!value) return null;
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : null;
@@ -33,223 +21,171 @@ function safeNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function firstFinite(...values: Array<number | null>): number | null {
-  for (const value of values) {
-    if (value !== null && Number.isFinite(value)) return value;
-  }
-  return null;
+function toIsoFromSeconds(value: unknown): string | null {
+  const seconds = safeNumber(value);
+  if (seconds === null) return null;
+  return new Date(seconds * 1000).toISOString();
 }
 
-function eventCacheKey(eventId: number) {
-  return `sofascore:event:${eventId}:summary`;
-}
+function normalizeStatus(status: any) {
+  const type = safeString(status?.type).toLowerCase();
+  const description = safeString(status?.description);
+  const code = safeNumber(status?.code);
 
-function scoreFromSide(side: any): number | null {
-  return firstFinite(
-    safeNumber(side?.current),
-    safeNumber(side?.display),
-    safeNumber(side?.normaltime),
-    safeNumber(side?.period1),
-    safeNumber(side?.extra1),
-    safeNumber(side?.extra2)
-  );
-}
-
-function normalizeStatus(event: any) {
-  const rawType = safeString(event?.status?.type).toUpperCase();
-  const rawDescription = safeString(event?.status?.description).toUpperCase();
-  const statusText = `${rawType} ${rawDescription}`.trim();
+  const descUpper = description.toUpperCase();
 
   const isFinished =
-    statusText.includes("FINISHED") ||
-    statusText.includes("ENDED") ||
-    statusText.includes("FT");
+    type === "finished" ||
+    descUpper === "FT" ||
+    descUpper === "AET" ||
+    descUpper === "PEN";
 
   const isLive =
-    !isFinished &&
-    (
-      statusText.includes("INPROGRESS") ||
-      statusText.includes("LIVE") ||
-      statusText.includes("1ST") ||
-      statusText.includes("2ND") ||
-      statusText.includes("HT") ||
-      statusText.includes("ET") ||
-      statusText.includes("PEN")
-    );
-
-  const label =
-    safeString(event?.status?.description) ||
-    safeString(event?.status?.type) ||
-    "UNKNOWN";
+    type === "inprogress" ||
+    type === "live" ||
+    descUpper === "LIVE" ||
+    descUpper === "HT" ||
+    descUpper === "1H" ||
+    descUpper === "2H" ||
+    descUpper === "ET";
 
   return {
-    rawType: rawType || null,
-    rawDescription: rawDescription || null,
-    label,
+    type: type || null,
+    description: description || null,
+    code,
     isLive,
     isFinished,
   };
 }
 
-function cacheTtlMs(payload: any): number {
-  if (payload?.isFinished) return 5 * 60 * 1000;
-  if (payload?.isLive) return 15 * 1000;
-  return 60 * 1000;
+function pickScore(sideScore: any): number | null {
+  return (
+    safeNumber(sideScore?.current) ??
+    safeNumber(sideScore?.display) ??
+    safeNumber(sideScore?.normaltime) ??
+    safeNumber(sideScore)
+  );
 }
 
-async function fetchJson(url: string) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+async function fetchSofascoreJson(path: string) {
+  const response = await fetch(`${SOFASCORE_BASE}${path}`, {
+    method: "GET",
+    cache: "no-store",
+    headers: {
+      accept: "application/json, text/plain, */*",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+      referer: "https://www.sofascore.com/",
+    },
+  });
 
+  const text = await response.text();
+
+  let json: any = null;
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      signal: controller.signal,
-      headers: {
-        accept: "application/json",
-        "user-agent": "VirtualBook/1.0",
-      },
-    });
-
-    const text = await response.text();
-    let json: any = null;
-
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      json = { raw: text };
-    }
-
-    if (!response.ok) {
-      const message =
-        safeString(json?.error) ||
-        safeString(json?.message) ||
-        `SofaScore HTTP ${response.status}`;
-      throw new Error(message);
-    }
-
-    return json;
-  } finally {
-    clearTimeout(timeout);
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = { raw: text };
   }
+
+  if (!response.ok) {
+    throw new Error(
+      `Sofascore fetch failed (${response.status}): ${
+        typeof json?.error === "string"
+          ? json.error
+          : typeof json?.message === "string"
+            ? json.message
+            : typeof json?.raw === "string"
+              ? json.raw.slice(0, 300)
+              : "unknown error"
+      }`
+    );
+  }
+
+  return json;
+}
+
+function normalizeEvent(payload: any, sofascoreEventId: number) {
+  const event = payload?.event && typeof payload.event === "object"
+    ? payload.event
+    : payload;
+
+  const status = normalizeStatus(event?.status);
+
+  return {
+    sofascoreEventId,
+    homeTeam: {
+      id: safeNumber(event?.homeTeam?.id),
+      name: safeString(event?.homeTeam?.name, "Home"),
+      shortName: safeString(event?.homeTeam?.shortName),
+      score: pickScore(event?.homeScore),
+    },
+    awayTeam: {
+      id: safeNumber(event?.awayTeam?.id),
+      name: safeString(event?.awayTeam?.name, "Away"),
+      shortName: safeString(event?.awayTeam?.shortName),
+      score: pickScore(event?.awayScore),
+    },
+    tournament: {
+      id: safeNumber(event?.tournament?.id),
+      name: safeString(event?.tournament?.name),
+      slug: safeString(event?.tournament?.slug),
+      category: safeString(event?.tournament?.category?.name),
+    },
+    season: {
+      id: safeNumber(event?.season?.id),
+      name: safeString(event?.season?.name),
+    },
+    roundInfo: {
+      round: safeNumber(event?.roundInfo?.round),
+      name: safeString(event?.roundInfo?.name),
+    },
+    startTimestamp: safeNumber(event?.startTimestamp),
+    kickoffUtc: toIsoFromSeconds(event?.startTimestamp),
+    status,
+    winnerCode: safeNumber(event?.winnerCode),
+  };
 }
 
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
-    const matchId = toPositiveInt(url.searchParams.get("matchId"));
-    const eventIdFromQuery = toPositiveInt(url.searchParams.get("eventId"));
+    const matchId = toMatchId(url.searchParams.get("matchId"));
 
-    if (!matchId && !eventIdFromQuery) {
+    if (!matchId) {
       return NextResponse.json(
-        { error: "Podaj matchId albo eventId." },
+        { error: "Missing or invalid matchId" },
         { status: 400 }
       );
     }
 
-    const sb = supabaseAdmin();
+    const sofascoreEventId = await getMappedSofascoreEventId(matchId);
 
-    let mapping: MappingRow | null = null;
-    let eventId = eventIdFromQuery;
-
-    if (!eventId && matchId) {
-      const { data, error } = await sb
-        .from("match_sofascore_map")
-        .select(
-          "match_id, sofascore_event_id, mapping_method, confidence, notes, updated_at"
-        )
-        .eq("match_id", matchId)
-        .maybeSingle<MappingRow>();
-
-      if (error) {
-        return NextResponse.json(
-          { error: `Błąd mapowania SofaScore: ${error.message}` },
-          { status: 500 }
-        );
-      }
-
-      mapping = data ?? null;
-      eventId = data?.sofascore_event_id ?? null;
-    }
-
-    if (!eventId) {
+    if (!sofascoreEventId) {
       return NextResponse.json(
         {
-          error:
-            "Brak mapowania match_id -> sofascore_event_id. Dodaj rekord do match_sofascore_map.",
+          error: "No SofaScore mapping for this match",
           matchId,
+          mapped: false,
         },
         { status: 404 }
       );
     }
 
-    const cacheKey = eventCacheKey(eventId);
+    const payload = await fetchSofascoreJson(`/event/${sofascoreEventId}`);
+    const normalized = normalizeEvent(payload, sofascoreEventId);
 
-    const { data: cacheRow, error: cacheReadError } = await sb
-      .from("api_cache")
-      .select("payload, updated_at")
-      .eq("key", cacheKey)
-      .maybeSingle<ApiCacheRow>();
-
-    if (!cacheReadError && cacheRow?.updated_at) {
-      const ageMs = Date.now() - new Date(cacheRow.updated_at).getTime();
-      const ttl = cacheTtlMs(cacheRow.payload);
-
-      if (ageMs >= 0 && ageMs < ttl) {
-        return NextResponse.json({
-          ...cacheRow.payload,
-          cached: true,
-          cacheAgeMs: ageMs,
-        });
-      }
-    }
-
-    const json = await fetchJson(`https://api.sofascore.com/api/v1/event/${eventId}`);
-    const event = typeof json?.event === "object" && json?.event !== null ? json.event : json;
-
-    const status = normalizeStatus(event);
-
-    const startTimestamp = safeNumber(event?.startTimestamp);
-    const kickoffUtc =
-      startTimestamp !== null
-        ? new Date(startTimestamp * 1000).toISOString()
-        : null;
-
-    const payload = {
-      provider: "sofascore",
-      matchId: matchId ?? null,
-      sofascoreEventId: eventId,
-      homeTeam: safeString(event?.homeTeam?.name, ""),
-      awayTeam: safeString(event?.awayTeam?.name, ""),
-      homeScore: scoreFromSide(event?.homeScore),
-      awayScore: scoreFromSide(event?.awayScore),
-      status: status.label,
-      statusType: status.rawType,
-      statusDescription: status.rawDescription,
-      isLive: status.isLive,
-      isFinished: status.isFinished,
-      startTimestamp,
-      kickoffUtc,
-      winnerCode: safeNumber(event?.winnerCode),
-      slug: safeString(event?.slug, ""),
-      customId: safeString(event?.customId, ""),
-      cached: false,
-      mappedBy: mapping?.mapping_method ?? null,
-      mappingConfidence: mapping?.confidence ?? null,
-      fetchedAt: new Date().toISOString(),
-    };
-
-    await sb.from("api_cache").upsert({
-      key: cacheKey,
-      payload,
-      updated_at: new Date().toISOString(),
-    });
-
-    return NextResponse.json(payload);
+    return NextResponse.json(
+      {
+        matchId,
+        mapped: true,
+        liveScore: normalized,
+      },
+      { status: 200 }
+    );
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Nieznany błąd live-score route";
+      error instanceof Error ? error.message : "Unknown live-score error";
 
     return NextResponse.json({ error: message }, { status: 500 });
   }
