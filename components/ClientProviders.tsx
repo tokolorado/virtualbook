@@ -1,3 +1,4 @@
+// components/ClientProviders.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -51,27 +52,25 @@ export default function ClientProviders({
 
   return (
     <BetSlipProvider>
-      <main className="w-full min-w-0 px-3 py-4 md:px-4 md:py-6 xl:px-6">
+      <main className="w-full min-w-0 px-4 py-6">
         {hideSlip ? (
-          <div className="mx-auto w-full max-w-[1680px] min-w-0">
-            {children}
-          </div>
+          <div className="mx-auto w-full max-w-[1600px] min-w-0">{children}</div>
         ) : (
-          <div className="mx-auto w-full max-w-[1680px] min-w-0 xl:grid xl:grid-cols-[minmax(0,1fr)_380px] xl:gap-6">
-            <div className="min-w-0">{children}</div>
+          <>
+            <div className="mx-auto w-full max-w-[1600px] min-w-0">
+              <div className="min-w-0 lg:pr-[392px]">{children}</div>
+            </div>
 
-            <aside className="hidden xl:block">
-              <div className="vb-sticky-rail">
-                <div className="h-full overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900/40">
-                  <BetSlip variant="desktop" />
-                </div>
+            <div className="hidden lg:block">
+              <div className="fixed right-4 top-[88px] z-40 h-[calc(100dvh-104px)] w-[360px]">
+                <BetSlip variant="desktop" />
               </div>
-            </aside>
+            </div>
 
-            <div className="xl:hidden">
+            <div className="lg:hidden">
               <BetSlip variant="mobile" />
             </div>
-          </div>
+          </>
         )}
       </main>
     </BetSlipProvider>

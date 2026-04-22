@@ -1,15 +1,14 @@
-//components/match/MatchInsightsSection.tsx
+// components/match/MatchInsightsSection.tsx
 "use client";
 
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-
 import {
   getTableLegendZones,
   getTableZone,
   zoneLegendLabel,
   type TableZone,
 } from "@/lib/matchCenter/tableZones";
-
 
 type MatchInsightsSectionProps = {
   matchId: string | number;
@@ -105,6 +104,9 @@ type TableResponse = {
   updatedAt: string | null;
 };
 
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
 function safeString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
@@ -138,8 +140,6 @@ function formatDateTime(value: string | null): string {
   if (!Number.isFinite(ts)) return value;
   return new Date(ts).toLocaleString();
 }
-
-
 
 function zonePalette(zone: TableZone) {
   if (zone === "champions") {
@@ -200,7 +200,7 @@ function zonePalette(zone: TableZone) {
   return null;
 }
 
-function zoneLegendStyle(zone: TableZone): React.CSSProperties {
+function zoneLegendStyle(zone: TableZone): CSSProperties {
   const palette = zonePalette(zone);
 
   if (!palette) {
@@ -218,7 +218,7 @@ function zoneLegendStyle(zone: TableZone): React.CSSProperties {
   };
 }
 
-function zonePositionStyle(zone: TableZone): React.CSSProperties {
+function zonePositionStyle(zone: TableZone): CSSProperties {
   const palette = zonePalette(zone);
 
   if (!palette) {
@@ -236,12 +236,10 @@ function zonePositionStyle(zone: TableZone): React.CSSProperties {
   };
 }
 
-function zoneRowStyle(zone: TableZone): React.CSSProperties {
+function zoneRowStyle(zone: TableZone): CSSProperties {
   const palette = zonePalette(zone);
 
-  if (!palette) {
-    return {};
-  }
+  if (!palette) return {};
 
   return {
     backgroundColor: palette.rowBg,
@@ -463,6 +461,76 @@ function numberDisplay(value: number | null): string {
   return value === null ? "—" : String(value);
 }
 
+function Surface({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-3xl border border-neutral-800 bg-neutral-900/40",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function StatusChip({
+  children,
+  tone = "neutral",
+}: {
+  children: ReactNode;
+  tone?: "neutral" | "blue" | "red" | "green" | "yellow";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium",
+        tone === "neutral" && "border-neutral-800 bg-neutral-950 text-neutral-300",
+        tone === "blue" && "border-sky-500/30 bg-sky-500/10 text-sky-300",
+        tone === "red" && "border-red-500/30 bg-red-500/10 text-red-300",
+        tone === "green" && "border-green-500/30 bg-green-500/10 text-green-300",
+        tone === "yellow" &&
+          "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function StateBox({
+  title,
+  description,
+  tone = "neutral",
+  action,
+}: {
+  title: string;
+  description: string;
+  tone?: "neutral" | "error";
+  action?: ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border px-6 py-8 text-sm",
+        tone === "error"
+          ? "border-red-500/20 bg-red-500/10 text-red-200"
+          : "border-neutral-800 bg-neutral-950 text-neutral-400"
+      )}
+    >
+      <div className="font-medium">{title}</div>
+      <div className="mt-2">{description}</div>
+      {action ? <div className="mt-4">{action}</div> : null}
+    </div>
+  );
+}
+
 function TabButton({
   label,
   active,
@@ -476,12 +544,12 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={[
-        "rounded-xl border px-4 py-2 text-sm font-semibold transition",
+      className={cn(
+        "rounded-2xl border px-4 py-2.5 text-sm font-semibold transition",
         active
           ? "border-sky-500 bg-sky-500/15 text-sky-300"
-          : "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-900",
-      ].join(" ")}
+          : "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-900"
+      )}
     >
       {label}
     </button>
@@ -490,7 +558,7 @@ function TabButton({
 
 function PlayerRow({ player }: { player: LineupPlayer }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-3">
       <div className="min-w-0">
         <div className="truncate text-sm font-medium text-white">
           {player.name}
@@ -522,7 +590,7 @@ function PlayersBlock({
   emptyLabel: string;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       <div className="text-sm font-semibold text-white">{title}</div>
 
       {players.length > 0 ? (
@@ -532,7 +600,7 @@ function PlayersBlock({
           ))}
         </div>
       ) : (
-        <div className="rounded-xl border border-dashed border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-500">
+        <div className="rounded-2xl border border-dashed border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-500">
           {emptyLabel}
         </div>
       )}
@@ -550,37 +618,37 @@ function SideCard({
   const teamName = side?.teamName ?? fallbackTeamName;
 
   return (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+    <Surface className="p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-lg font-semibold text-white">{teamName}</div>
+          <div className="text-xl font-semibold text-white">{teamName}</div>
 
-          <div className="mt-2 flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <StatusChip>
               Ustawienie:{" "}
-              <span className="font-semibold text-white">
+              <span className="ml-1 font-semibold text-white">
                 {side?.formation ?? "—"}
               </span>
-            </span>
+            </StatusChip>
 
-            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+            <StatusChip>
               Status:{" "}
-              <span className="font-semibold text-white">
+              <span className="ml-1 font-semibold text-white">
                 {statusLabel(side?.status ?? null)}
               </span>
-            </span>
+            </StatusChip>
 
-            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+            <StatusChip>
               Trener:{" "}
-              <span className="font-semibold text-white">
+              <span className="ml-1 font-semibold text-white">
                 {side?.coach ?? "—"}
               </span>
-            </span>
+            </StatusChip>
           </div>
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <PlayersBlock
           title="Wyjściowa jedenastka"
           players={side?.starters ?? []}
@@ -593,7 +661,7 @@ function SideCard({
           emptyLabel="Brak zapisanych zawodników na ławce."
         />
       </div>
-    </div>
+    </Surface>
   );
 }
 
@@ -620,7 +688,7 @@ function StatBarRow({ item }: { item: StatsItem }) {
   }
 
   return (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3">
+    <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
       <div className="flex items-center justify-between gap-3">
         <div className="text-base font-semibold text-white">{item.homeValue}</div>
         <div className="text-center text-xs font-medium uppercase tracking-wide text-neutral-400">
@@ -629,7 +697,7 @@ function StatBarRow({ item }: { item: StatsItem }) {
         <div className="text-base font-semibold text-white">{item.awayValue}</div>
       </div>
 
-      <div className="mt-3 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+      <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
         <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
           <div
             className="h-full rounded-full bg-sky-500"
@@ -833,36 +901,39 @@ export default function MatchInsightsSection({
     return new Set(table?.highlightTeamIds ?? []);
   }, [table]);
 
-const tableLegendZones = useMemo(() => {
-  return getTableLegendZones(
-    table?.competition?.id ?? null,
-    table?.competition?.season ?? null
-  );
-}, [table]);
-
+  const tableLegendZones = useMemo(() => {
+    return getTableLegendZones(
+      table?.competition?.id ?? null,
+      table?.competition?.season ?? null
+    );
+  }, [table]);
 
   const renderLineups = () => {
     if (lineupsLoading) {
       return (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-6 py-8 text-lg text-neutral-400">
-          Ładowanie składów...
-        </div>
+        <StateBox
+          title="Ładowanie składów..."
+          description="Pobieramy aktualne informacje o wyjściowych składach i ławkach rezerwowych."
+        />
       );
     }
 
     if (lineupsError) {
       return (
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-6 py-8 text-sm text-red-200">
-          Nie udało się załadować składów. {lineupsError}
-        </div>
+        <StateBox
+          title="Nie udało się załadować składów"
+          description={lineupsError}
+          tone="error"
+        />
       );
     }
 
     if (!lineups?.home && !lineups?.away) {
       return (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-6 py-8 text-sm text-neutral-400">
-          Brak danych o składach dla tego meczu.
-        </div>
+        <StateBox
+          title="Brak danych o składach"
+          description="Dla tego meczu nie ma jeszcze dostępnych lub zapisanych składów."
+        />
       );
     }
 
@@ -877,31 +948,35 @@ const tableLegendZones = useMemo(() => {
   const renderStats = () => {
     if (statsLoading) {
       return (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-6 py-8 text-lg text-neutral-400">
-          Ładowanie statystyk...
-        </div>
+        <StateBox
+          title="Ładowanie statystyk..."
+          description="Pobieramy najważniejsze liczby meczowe dla obu drużyn."
+        />
       );
     }
 
     if (statsError) {
       return (
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-6 py-8 text-sm text-red-200">
-          Nie udało się załadować statystyk. {statsError}
-        </div>
+        <StateBox
+          title="Nie udało się załadować statystyk"
+          description={statsError}
+          tone="error"
+        />
       );
     }
 
     if (!stats || stats.items.length === 0) {
       return (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-6 py-8 text-sm text-neutral-400">
-          Brak statystyk dla tego meczu.
-        </div>
+        <StateBox
+          title="Brak statystyk"
+          description="Dla tego meczu nie ma obecnie dostępnych statystyk."
+        />
       );
     }
 
     return (
       <div className="space-y-4">
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
+        <Surface className="px-4 py-4">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="text-sm text-neutral-400">
               Statystyki:{" "}
@@ -918,7 +993,7 @@ const tableLegendZones = useMemo(() => {
               {formatDateTime(stats.updatedAt)}
             </div>
           </div>
-        </div>
+        </Surface>
 
         <div className="space-y-3">
           {stats.items.map((item) => (
@@ -932,58 +1007,62 @@ const tableLegendZones = useMemo(() => {
   const renderTable = () => {
     if (tableLoading) {
       return (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-6 py-8 text-lg text-neutral-400">
-          Ładowanie tabeli...
-        </div>
+        <StateBox
+          title="Ładowanie tabeli..."
+          description="Pobieramy aktualną tabelę ligi i strefy kwalifikacyjne / spadkowe."
+        />
       );
     }
 
     if (tableError) {
       return (
-        <div className="rounded-2xl border border-red-500/20 bg-red-500/10 px-6 py-8 text-sm text-red-200">
-          Nie udało się załadować tabeli. {tableError}
-        </div>
+        <StateBox
+          title="Nie udało się załadować tabeli"
+          description={tableError}
+          tone="error"
+        />
       );
     }
 
     if (!table) {
       return (
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-6 py-8 text-sm text-neutral-400">
-          Brak danych tabeli.
-        </div>
+        <StateBox
+          title="Brak danych tabeli"
+          description="Nie udało się pobrać danych tabeli dla tego meczu."
+        />
       );
     }
 
     return (
       <div className="space-y-4">
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6">
+        <Surface className="p-6">
           <div className="text-lg font-semibold text-white">Tabela ligowa</div>
 
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+            <StatusChip>
               Liga:{" "}
-              <span className="font-semibold text-white">
+              <span className="ml-1 font-semibold text-white">
                 {table.competition?.name ?? table.competition?.id ?? "—"}
               </span>
-            </span>
+            </StatusChip>
 
-            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+            <StatusChip>
               Sezon:{" "}
-              <span className="font-semibold text-white">
+              <span className="ml-1 font-semibold text-white">
                 {table.competition?.season ?? "—"}
               </span>
-            </span>
+            </StatusChip>
 
-            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
+            <StatusChip>
               Kolejka:{" "}
-              <span className="font-semibold text-white">
+              <span className="ml-1 font-semibold text-white">
                 {table.competition?.matchday ?? "—"}
               </span>
-            </span>
+            </StatusChip>
 
-            <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-500">
+            <StatusChip>
               Aktualizacja: {formatDateTime(table.updatedAt)}
-            </span>
+            </StatusChip>
           </div>
 
           {tableLegendZones.length > 0 ? (
@@ -1018,12 +1097,11 @@ const tableLegendZones = useMemo(() => {
                 <tbody>
                   {sortedTableRows.map((row) => {
                     const zone = getTableZone(
-                    table.competition?.id,
-                    table.competition?.season,
-                    row.position,
-                    sortedTableRows.length
+                      table.competition?.id,
+                      table.competition?.season,
+                      row.position,
+                      sortedTableRows.length
                     );
-
 
                     const isHighlighted =
                       row.teamId !== null && highlightSet.has(row.teamId);
@@ -1035,10 +1113,10 @@ const tableLegendZones = useMemo(() => {
                     return (
                       <tr
                         key={`${row.position}-${row.teamId ?? row.teamName}`}
-                        className={[
+                        className={cn(
                           "border-b border-neutral-800/70 transition",
-                          isHighlighted ? "ring-1 ring-inset ring-white/10" : "",
-                        ].join(" ")}
+                          isHighlighted && "ring-1 ring-inset ring-white/10"
+                        )}
                         style={zoneRowStyle(zone)}
                       >
                         <td className="px-3 py-3">
@@ -1077,7 +1155,8 @@ const tableLegendZones = useMemo(() => {
                           {numberDisplay(row.lost)}
                         </td>
                         <td className="px-3 py-3 text-right text-neutral-300">
-                          {numberDisplay(row.goalsFor)}:{numberDisplay(row.goalsAgainst)}
+                          {numberDisplay(row.goalsFor)}:
+                          {numberDisplay(row.goalsAgainst)}
                         </td>
                         <td className="px-3 py-3 text-right text-neutral-300">
                           {numberDisplay(row.goalDiff)}
@@ -1092,19 +1171,30 @@ const tableLegendZones = useMemo(() => {
               </table>
             </div>
           )}
-        </div>
+        </Surface>
       </div>
     );
   };
 
   return (
-    <section className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold text-white">Centrum meczu</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-neutral-400">
+    <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+            Match Center
+          </div>
+          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">
+            Centrum meczu
+          </h2>
+          <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
             {subtitle}
           </p>
+
+          {competitionCode ? (
+            <div className="mt-3">
+              <StatusChip tone="blue">{competitionCode}</StatusChip>
+            </div>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-2">

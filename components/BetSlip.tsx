@@ -1,6 +1,7 @@
 // components/BetSlip.tsx
 "use client";
 
+import type { ReactNode } from "react";
 import { formatOdd, formatVB } from "@/lib/format";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -22,8 +23,13 @@ function isStarted(kickoffUtc?: string | null) {
 }
 
 function parseStake(raw: string): number | null {
-  const s = (raw ?? "").trim().replace(",", ".");
+  const s = String(raw ?? "")
+    .trim()
+    .replace(/[\s\u00A0]/g, "")
+    .replace(",", ".");
+
   if (!s) return null;
+
   const n = Number(s);
   if (!Number.isFinite(n)) return null;
   return n;
@@ -74,7 +80,7 @@ type SuccessModalData = {
 function formatStakeInput(v: string) {
   if (!v) return v;
 
-  const normalized = v.replace(",", ".");
+  const normalized = String(v).replace(/[\s\u00A0]/g, "").replace(",", ".");
   const parts = normalized.split(".");
 
   const int = parts[0].replace(/\D/g, "");
@@ -94,7 +100,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
   const isDesktop = variant === "desktop";
 
   const [open, setOpen] = useState(false);
-  const [stakeInput, setStakeInput] = useState(stake);
+  const [stakeInput, setStakeInput] = useState(formatStakeInput(stake || ""));
 
   const prevSlipRef = useRef<SlipItem[]>([]);
   const [flashKey, setFlashKey] = useState<string | null>(null);
@@ -115,7 +121,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
   const attemptFingerprintRef = useRef<string>("");
 
   useEffect(() => {
-    setStakeInput(stake);
+    setStakeInput(formatStakeInput(stake || ""));
   }, [stake]);
 
   useEffect(() => {
@@ -207,11 +213,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
   const totalOdds = useMemo(() => {
     if (!slip.length) return 0;
     let prod = 1;
+
     for (const it of slip) {
       const o = Number(it.odd);
       if (!Number.isFinite(o) || o <= 1e-9) continue;
       prod *= o;
     }
+
     return prod;
   }, [slip]);
 
@@ -418,7 +426,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
   };
 
   const errorModalNode = errorModal ? (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
+    <div
+      className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
       <div
         className="absolute inset-0 bg-black/70"
         onClick={() => setErrorModal(null)}
@@ -454,7 +466,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
   ) : null;
 
   const successModalNode = successModal ? (
-    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4">
+    <div
+      className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
       <div
         className="absolute inset-0 bg-black/70"
         onClick={() => setSuccessModal(null)}
@@ -637,7 +653,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         }
       `}</style>
 
-      <div className={cx("shrink-0", isDesktop ? "space-y-4" : "")}>
+      <div className={cx("shrink-0", isDesktop && "space-y-4")}>
         <div className="flex items-center justify-between">
           <h3 className="text-xl font-semibold">Kupon</h3>
           <div className="text-sm text-neutral-400">{slip.length} zdarzeń</div>
@@ -654,7 +670,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
       <div
         className={cx(
           "space-y-3",
-          isDesktop ? "mt-4 min-h-0 flex-1 overflow-y-auto pr-1" : ""
+          isDesktop && "mt-4 min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1"
         )}
       >
         {slip.length === 0 ? (
@@ -664,7 +680,6 @@ export default function BetSlip({ variant }: { variant?: string }) {
         ) : (
           slip.map((it) => {
             const k = keyOf(it);
-
             const flash = flashKey === k;
             const started = isStarted(it.kickoffUtc);
 
@@ -714,7 +729,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                       <div className="text-sm text-neutral-300">
                         Kurs:{" "}
                         <span className="font-semibold text-neutral-100">
-                          {Number(it.odd).toFixed(2)}
+                          {formatOdd(it.odd)}
                         </span>
                       </div>
                     ) : (
@@ -744,7 +759,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
       <div
         className={cx(
           "shrink-0 space-y-4",
-          isDesktop ? "border-t border-neutral-800 pt-4" : ""
+          isDesktop && "border-t border-neutral-800 pt-4"
         )}
       >
         <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
@@ -771,11 +786,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
               <input
                 value={stakeInput}
                 onChange={(e) => {
-                  const raw = e.target.value.replace(/[^\d.,]/g, "");
+                  const raw = e.target.value.replace(/[^\d.,\s\u00A0]/g, "");
+                  const canonical = raw.replace(/[\s\u00A0]/g, "").replace(",", ".");
                   const formatted = formatStakeInput(raw);
 
                   setStakeInput(formatted);
-                  setStake(raw);
+                  setStake(canonical);
                 }}
                 disabled={submitting}
                 inputMode="decimal"
@@ -862,7 +878,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
     </div>
   );
 
-  const cardWrap = (content: React.ReactNode, className?: string) => (
+  const cardWrap = (content: ReactNode, className?: string) => (
     <div
       className={cx(
         "rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4",
@@ -879,7 +895,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
         {successModalNode}
         {errorModalNode}
         <div className="h-full min-h-0">
-          {cardWrap(slipContent, "flex h-full min-h-0 flex-col overflow-hidden")}
+          {cardWrap(
+            slipContent,
+            "flex h-full min-h-0 flex-col overflow-hidden"
+          )}
         </div>
       </>
     );
@@ -891,7 +910,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         {successModalNode}
         {errorModalNode}
 
-        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-neutral-800 bg-neutral-950/95 backdrop-blur">
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-neutral-800 bg-neutral-950/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
               <div className="text-sm font-semibold text-neutral-100">
@@ -920,7 +939,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
               className="absolute inset-0 bg-black/60"
               onClick={() => setOpen(false)}
             />
-            <div className="absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-hidden rounded-t-3xl border border-neutral-800 bg-neutral-950">
+            <div className="absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-hidden rounded-t-3xl border border-neutral-800 bg-neutral-950 pb-[env(safe-area-inset-bottom)]">
               <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
                 <div className="text-sm font-semibold">Kupon</div>
                 <button
@@ -931,7 +950,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 </button>
               </div>
 
-              <div className="max-h-[calc(85vh-58px)] overflow-y-auto p-4">
+              <div className="max-h-[calc(85vh-58px)] overflow-y-auto overscroll-contain p-4">
                 {slipContent}
               </div>
             </div>
