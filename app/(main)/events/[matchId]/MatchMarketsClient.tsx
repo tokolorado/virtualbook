@@ -23,6 +23,10 @@ type MatchUI = {
   leagueName: string;
   kickoffLocal: string;
   status: string;
+  isLive: boolean;
+  isFinished: boolean;
+  homeScore: number | null;
+  awayScore: number | null;
 };
 
 type MarketCatalogRow = {
@@ -451,22 +455,13 @@ const FALLBACK_SELECTIONS: Record<
   },
 };
 
-function cx(...classes: Array<string | false | null | undefined>) {
+function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
 function safeNum(v: unknown): number | null {
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
-}
-
-function isLiveStatus(status?: string | null) {
-  const s = String(status || "").toUpperCase();
-  return s === "LIVE" || s === "IN_PLAY" || s === "PAUSED";
-}
-
-function isFinishedStatus(status?: string | null) {
-  return String(status || "").toUpperCase() === "FINISHED";
 }
 
 function isBettingClosed(kickoffUtc: string, nowMs: number) {
@@ -507,49 +502,14 @@ function selectionSortOrder(
 }
 
 function selectionGridClass(count: number) {
-  if (count <= 2) return "grid grid-cols-1 sm:grid-cols-2 gap-2";
-  if (count === 3) return "grid grid-cols-1 sm:grid-cols-3 gap-2";
-  if (count === 4) return "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2";
-  return "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-2";
+  if (count <= 2) return "grid grid-cols-2 gap-2";
+  if (count === 3) return "grid grid-cols-3 gap-2";
+  if (count === 4) return "grid grid-cols-2 sm:grid-cols-4 gap-2";
+  return "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2";
 }
 
-function dedupeOddsRows(rows: OddsRow[]) {
-  const map = new Map<string, OddsRow>();
-
-  for (const row of rows) {
-    const key = `${row.market_id}__${row.selection}`;
-    const current = map.get(key);
-
-    if (!current) {
-      map.set(key, row);
-      continue;
-    }
-
-    const nextTs = Date.parse(row.updated_at || "");
-    const currTs = Date.parse(current.updated_at || "");
-
-    if (!Number.isFinite(currTs) && Number.isFinite(nextTs)) {
-      map.set(key, row);
-      continue;
-    }
-
-    if (Number.isFinite(nextTs) && Number.isFinite(currTs) && nextTs > currTs) {
-      map.set(key, row);
-      continue;
-    }
-
-    if (
-      nextTs === currTs &&
-      String(row.engine_version || "") > String(current.engine_version || "")
-    ) {
-      map.set(key, row);
-    }
-  }
-
-  return Array.from(map.values()).sort((a, b) => {
-    if (a.market_id !== b.market_id) return a.market_id.localeCompare(b.market_id);
-    return a.selection.localeCompare(b.selection);
-  });
+function hasVisibleScore(match: MatchUI) {
+  return match.homeScore !== null || match.awayScore !== null;
 }
 
 function groupMarkets(
@@ -635,6 +595,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const [matchUI, setMatchUI] = useState<MatchUI>({
     home: homeNameQS || "Home",
@@ -642,6 +603,10 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     leagueName: competitionCode || "Liga",
     kickoffLocal: kickoffUtcQS ? new Date(kickoffUtcQS).toLocaleString() : "",
     status: "SCHEDULED",
+    isLive: false,
+    isFinished: false,
+    homeScore: null,
+    awayScore: null,
   });
 
   const [kickoffIso, setKickoffIso] = useState<string>(kickoffUtcQS || "");
@@ -658,23 +623,39 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     return () => window.clearInterval(id);
   }, []);
 
-  const live = useMemo(() => isLiveStatus(matchUI.status), [matchUI.status]);
-  const finished = useMemo(
-    () => isFinishedStatus(matchUI.status),
-    [matchUI.status]
-  );
-
-  const closedByTime = useMemo(() => {
+  const closed = useMemo(() => {
+    if (matchUI.isLive || matchUI.isFinished) return true;
     return kickoffIso ? isBettingClosed(kickoffIso, nowMs) : false;
-  }, [kickoffIso, nowMs]);
+  }, [kickoffIso, nowMs, matchUI.isFinished, matchUI.isLive]);
 
-  const bettingUnavailable = live || finished || closedByTime;
+  const shouldAutoRefreshMatch = useMemo(() => {
+    const status = String(matchUI.status || "").toUpperCase();
+    if (status === "FINISHED") return false;
+    if (!kickoffIso) return false;
+
+    const kickoffTs = Date.parse(kickoffIso);
+    if (!Number.isFinite(kickoffTs)) return true;
+
+    return nowMs >= kickoffTs - 2 * 60 * 60 * 1000;
+  }, [matchUI.status, kickoffIso, nowMs]);
+
+  useEffect(() => {
+    if (!shouldAutoRefreshMatch) return;
+
+    const id = window.setInterval(() => {
+      setRefreshKey((v) => v + 1);
+    }, 20_000);
+
+    return () => window.clearInterval(id);
+  }, [shouldAutoRefreshMatch]);
 
   useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
-      setLoading(true);
+      if (refreshKey === 0) {
+        setLoading(true);
+      }
       setErr(null);
 
       const matchIdNum = safeNum(matchId);
@@ -693,7 +674,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         ] = await Promise.all([
           supabase
             .from("matches")
-            .select("home_team, away_team, competition_name, utc_date, status")
+            .select(
+              "home_team, away_team, competition_name, utc_date, status, home_score, away_score"
+            )
             .eq("id", matchIdNum)
             .maybeSingle(),
 
@@ -744,45 +727,65 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           );
         }
 
-        const home = (mRow as any)?.home_team
-          ? String((mRow as any).home_team)
-          : homeNameQS || "Home";
+        const row = (mRow ?? null) as
+          | {
+              home_team?: string | null;
+              away_team?: string | null;
+              competition_name?: string | null;
+              utc_date?: string | null;
+              status?: string | null;
+              home_score?: number | null;
+              away_score?: number | null;
+            }
+          | null;
 
-        const away = (mRow as any)?.away_team
-          ? String((mRow as any).away_team)
-          : awayNameQS || "Away";
-
-        const leagueName = (mRow as any)?.competition_name
-          ? String((mRow as any).competition_name)
+        const home = row?.home_team ? String(row.home_team) : homeNameQS || "Home";
+        const away = row?.away_team ? String(row.away_team) : awayNameQS || "Away";
+        const leagueName = row?.competition_name
+          ? String(row.competition_name)
           : competitionCode || "Liga";
+        const kickoff = row?.utc_date ? String(row.utc_date) : kickoffUtcQS || "";
+        const status = row?.status ? String(row.status) : "SCHEDULED";
 
-        const kickoff = (mRow as any)?.utc_date
-          ? String((mRow as any).utc_date)
-          : kickoffUtcQS || "";
-
-        const status = (mRow as any)?.status
-          ? String((mRow as any).status)
-          : "SCHEDULED";
+        const normalizedStatus = status.toUpperCase();
+        const isLive =
+          normalizedStatus === "LIVE" ||
+          normalizedStatus === "IN_PLAY" ||
+          normalizedStatus === "PAUSED";
+        const isFinished = normalizedStatus === "FINISHED";
 
         const kickoffLocal = kickoff ? new Date(kickoff).toLocaleString() : "";
-        const nextOddsRows = dedupeOddsRows((oRows ?? []) as OddsRow[]);
 
         if (!cancelled) {
-          setMatchUI({ home, away, leagueName, kickoffLocal, status });
+          setMatchUI({
+            home,
+            away,
+            leagueName,
+            kickoffLocal,
+            status,
+            isLive,
+            isFinished,
+            homeScore:
+              typeof row?.home_score === "number" ? row.home_score : null,
+            awayScore:
+              typeof row?.away_score === "number" ? row.away_score : null,
+          });
           setKickoffIso(kickoff);
-          setOddsRows(nextOddsRows);
+          setOddsRows((oRows ?? []) as OddsRow[]);
           setMarketCatalog((marketData ?? []) as MarketCatalogRow[]);
           setSelectionCatalog(
             (selectionData ?? []) as MarketSelectionCatalogRow[]
           );
         }
 
-        if (!nextOddsRows.length && !cancelled) {
-          setErr("Brak kursów w bazie dla tego meczu.");
+        if (!oRows || oRows.length === 0) {
+          if (!cancelled) {
+            setErr("Brak kursów w bazie dla tego meczu.");
+          }
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setErr(e?.message || "Błąd pobierania kursów.");
+          setErr(e instanceof Error ? e.message : "Błąd pobierania kursów.");
         }
       } finally {
         if (!cancelled) {
@@ -796,7 +799,14 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [matchId, competitionCode, kickoffUtcQS, homeNameQS, awayNameQS]);
+  }, [
+    matchId,
+    competitionCode,
+    kickoffUtcQS,
+    homeNameQS,
+    awayNameQS,
+    refreshKey,
+  ]);
 
   const markets = useMemo(() => {
     return groupMarkets(
@@ -863,284 +873,234 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     return versions.join(", ");
   }, [oddsRows]);
 
-  const totalSelections = useMemo(() => {
-    return groupedSections.reduce(
-      (acc, section) =>
-        acc +
-        section.markets.reduce(
-          (inner, market) => inner + market.selections.length,
-          0
-        ),
-      0
+  const statusPill = useMemo(() => {
+    if (matchUI.isLive) {
+      return (
+        <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-300">
+          LIVE
+        </span>
+      );
+    }
+
+    if (matchUI.isFinished) {
+      return (
+        <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs font-semibold text-neutral-300">
+          Zakończony
+        </span>
+      );
+    }
+
+    if (closed) {
+      return (
+        <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs font-semibold text-yellow-300">
+          Zakłady zamknięte
+        </span>
+      );
+    }
+
+    return (
+      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs font-semibold text-neutral-300">
+        Pre-match
+      </span>
     );
-  }, [groupedSections]);
-
-  const statusPillClass = live
-    ? "border-red-500/30 bg-red-500/10 text-red-300"
-    : finished
-      ? "border-neutral-700 bg-neutral-950 text-neutral-300"
-      : bettingUnavailable
-        ? "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
-        : "border-green-500/30 bg-green-500/10 text-green-300";
-
-  const statusLabel = live
-    ? "LIVE"
-    : finished
-      ? "Zakończony"
-      : bettingUnavailable
-        ? "Zakłady zamknięte"
-        : "Pre-match";
+  }, [closed, matchUI.isFinished, matchUI.isLive]);
 
   return (
     <div className="space-y-5">
       <section className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
         {loading ? (
-          <div className="space-y-4">
-            <div className="h-4 w-44 animate-pulse rounded bg-neutral-800" />
-            <div className="h-8 w-80 max-w-full animate-pulse rounded bg-neutral-800" />
-            <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="h-16 animate-pulse rounded-2xl border border-neutral-800 bg-neutral-950"
-                />
-              ))}
-            </div>
-          </div>
+          <div className="text-neutral-400">Ładowanie…</div>
         ) : (
           <>
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
                   {matchUI.leagueName}
-                  {matchUI.kickoffLocal ? ` • ${matchUI.kickoffLocal}` : ""}
                 </div>
 
-                <h1 className="mt-3 break-words text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-                  {matchUI.home}{" "}
-                  <span className="font-normal text-neutral-500">vs</span>{" "}
-                  {matchUI.away}
-                </h1>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {statusPill}
 
-                <div className="mt-4 flex flex-wrap gap-2 text-xs">
-                  <span
-                    className={cx(
-                      "rounded-full border px-3 py-1 font-semibold",
-                      statusPillClass
-                    )}
-                  >
-                    {statusLabel}
-                  </span>
-
-                  <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
-                    Rynki:{" "}
-                    <span className="font-semibold text-white">
-                      {markets.length}
-                    </span>
-                  </span>
-
-                  <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
-                    Selekcje:{" "}
-                    <span className="font-semibold text-white">
-                      {totalSelections}
-                    </span>
-                  </span>
-
-                  {engineVersionLabel ? (
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-300">
-                      Silnik:{" "}
-                      <span className="font-semibold text-white">
-                        {engineVersionLabel}
-                      </span>
+                  {matchUI.kickoffLocal ? (
+                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-300">
+                      {matchUI.kickoffLocal}
                     </span>
                   ) : null}
 
                   {oddsUpdatedAt ? (
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-neutral-500">
-                      Aktualizacja kursów: {oddsUpdatedAt}
+                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-500">
+                      Kursy: {oddsUpdatedAt}
                     </span>
                   ) : null}
                 </div>
+
+                <div className="mt-4 text-2xl font-semibold leading-tight text-white sm:text-3xl">
+                  {matchUI.home}{" "}
+                  <span className="font-normal text-neutral-500">vs</span>{" "}
+                  {matchUI.away}
+                </div>
+
+                {hasVisibleScore(matchUI) ? (
+                  <div className="mt-4 inline-flex items-center rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-lg font-semibold text-white">
+                    {matchUI.homeScore ?? 0} : {matchUI.awayScore ?? 0}
+                  </div>
+                ) : null}
               </div>
 
-              <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[360px] xl:shrink-0">
-                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:w-[340px]">
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
                   <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                    Status zakładów
+                    Rynki
                   </div>
-                  <div className="mt-2 text-lg font-semibold text-white">
-                    {bettingUnavailable ? "Niedostępne" : "Aktywne"}
-                  </div>
-                  <div className="mt-1 text-xs text-neutral-400">
-                    {bettingUnavailable
-                      ? "Ten mecz nie przyjmuje już nowych typów."
-                      : "Możesz dodać selekcje do kuponu."}
+                  <div className="mt-2 text-2xl font-semibold text-white">
+                    {markets.length}
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
                   <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                    Moduły meczu
+                    Selekcje
                   </div>
-                  <div className="mt-2 text-lg font-semibold text-white">
-                    Insights + rynki
+                  <div className="mt-2 text-2xl font-semibold text-white">
+                    {oddsRows.length}
                   </div>
-                  <div className="mt-1 text-xs text-neutral-400">
-                    Składy, statystyki, tabela i pełna lista rynków.
+                </div>
+
+                <div className="col-span-2 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4 sm:col-span-1">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                    Silnik
+                  </div>
+                  <div className="mt-2 break-words text-sm font-semibold text-white">
+                    {engineVersionLabel ?? "—"}
                   </div>
                 </div>
               </div>
             </div>
-
-            {err ? (
-              <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
-                {err}
-              </div>
-            ) : null}
           </>
         )}
       </section>
 
-      {!loading ? (
-        <MatchInsightsSection
-          matchId={matchId}
-          competitionCode={competitionCode}
-          homeTeam={matchUI.home}
-          awayTeam={matchUI.away}
-        />
+      <MatchInsightsSection
+        matchId={matchId}
+        competitionCode={competitionCode}
+        homeTeam={matchUI.home}
+        awayTeam={matchUI.away}
+      />
+
+      {err ? (
+        <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
+          {err}
+        </div>
       ) : null}
 
       {loading ? (
-        <div className="space-y-4">
+        <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, index) => (
             <div
               key={index}
               className="animate-pulse rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4"
             >
               <div className="h-4 w-40 rounded bg-neutral-800" />
-              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                <div className="h-14 rounded-2xl bg-neutral-800" />
-                <div className="h-14 rounded-2xl bg-neutral-800" />
-                <div className="h-14 rounded-2xl bg-neutral-800" />
+              <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
+                <div className="h-12 rounded-xl bg-neutral-800" />
+                <div className="h-12 rounded-xl bg-neutral-800" />
+                <div className="h-12 rounded-xl bg-neutral-800" />
               </div>
             </div>
           ))}
         </div>
       ) : groupedSections.length > 0 ? (
-        <div className="space-y-5">
-          {groupedSections.map((section) => (
-            <section key={section.key} className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-semibold text-neutral-100">
-                    {section.label}
-                  </h2>
-                  <span className="rounded-full border border-neutral-800 bg-neutral-950 px-2 py-0.5 text-[11px] font-semibold text-neutral-300">
-                    {section.markets.length}
-                  </span>
+        groupedSections.map((section) => (
+          <div key={section.key} className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold text-neutral-100">
+                {section.label}
+              </h3>
+              <span className="rounded-full border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-[11px] font-semibold text-neutral-300">
+                {section.markets.length}
+              </span>
+            </div>
+
+            {section.markets.map((market) => (
+              <div
+                key={market.marketId}
+                className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4"
+              >
+                <div className="text-sm font-semibold text-white">
+                  {market.marketLabel}
+                </div>
+
+                <div className={`mt-3 ${selectionGridClass(market.selections.length)}`}>
+                  {market.selections.map((item) => {
+                    const hasOdd =
+                      typeof item.odd === "number" &&
+                      Number.isFinite(item.odd) &&
+                      item.odd > 0;
+
+                    const active = isActivePick(
+                      matchId,
+                      market.marketId,
+                      item.selection
+                    );
+
+                    return (
+                      <button
+                        key={`${market.marketId}__${item.selection}`}
+                        disabled={!hasOdd || closed}
+                        onClick={() => {
+                          if (!hasOdd || closed) return;
+
+                          if (active) {
+                            removeFromSlip(matchId, market.marketId);
+                            return;
+                          }
+
+                          addToSlip({
+                            matchId,
+                            competitionCode,
+                            league: matchUI.leagueName,
+                            home: matchUI.home,
+                            away: matchUI.away,
+                            market: market.marketId,
+                            pick: item.selection,
+                            odd: item.odd!,
+                            kickoffUtc: kickoffIso || null,
+                          });
+                        }}
+                        className={cn(
+                          "rounded-2xl border px-3 py-3 text-left transition",
+                          !hasOdd || closed
+                            ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+                            : active
+                              ? "border-neutral-200 bg-white text-black"
+                              : "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-800"
+                        )}
+                        title={
+                          !hasOdd
+                            ? "Brak kursu w bazie"
+                            : closed
+                              ? "Zakłady zamknięte"
+                              : active
+                                ? "Kliknij ponownie, aby usunąć z kuponu"
+                                : `Kurs: ${formatOdd(item.odd!)}`
+                        }
+                      >
+                        <div className="truncate text-sm font-medium">
+                          {item.label}
+                        </div>
+                        <div className="mt-1 text-sm font-semibold">
+                          {hasOdd ? formatOdd(item.odd!) : "—"}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
-
-              <div className="space-y-3">
-                {section.markets.map((market) => (
-                  <div
-                    key={market.marketId}
-                    className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 sm:p-5"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <div className="text-base font-semibold text-white">
-                          {market.marketLabel}
-                        </div>
-                        <div className="mt-1 text-xs text-neutral-500">
-                          Rynek: {market.marketId}
-                        </div>
-                      </div>
-
-                      {bettingUnavailable ? (
-                        <span className="inline-flex rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-[11px] font-semibold text-yellow-300">
-                          Zakłady zamknięte
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[11px] font-semibold text-neutral-400">
-                          Kliknij kurs, aby dodać do kuponu
-                        </span>
-                      )}
-                    </div>
-
-                    <div className={`mt-4 ${selectionGridClass(market.selections.length)}`}>
-                      {market.selections.map((item) => {
-                        const hasOdd =
-                          typeof item.odd === "number" &&
-                          Number.isFinite(item.odd) &&
-                          item.odd > 0;
-
-                        const active = isActivePick(
-                          matchId,
-                          market.marketId,
-                          item.selection
-                        );
-
-                        return (
-                          <button
-                            key={`${market.marketId}__${item.selection}`}
-                            disabled={!hasOdd || bettingUnavailable}
-                            onClick={() => {
-                              if (!hasOdd || bettingUnavailable) return;
-
-                              if (active) {
-                                removeFromSlip(matchId, market.marketId);
-                                return;
-                              }
-
-                              addToSlip({
-                                matchId,
-                                competitionCode,
-                                league: matchUI.leagueName,
-                                home: matchUI.home,
-                                away: matchUI.away,
-                                market: market.marketId,
-                                pick: item.selection,
-                                odd: item.odd!,
-                                kickoffUtc: kickoffIso || null,
-                              });
-                            }}
-                            className={cx(
-                              "rounded-2xl border px-4 py-3 text-left transition",
-                              !hasOdd || bettingUnavailable
-                                ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
-                                : active
-                                  ? "border-neutral-200 bg-white text-black shadow-[0_0_0_1px_rgba(255,255,255,0.3)]"
-                                  : "border-neutral-800 bg-neutral-950 hover:border-neutral-700 hover:bg-neutral-900"
-                            )}
-                            title={
-                              !hasOdd
-                                ? "Brak kursu w bazie"
-                                : bettingUnavailable
-                                  ? "Zakłady zamknięte"
-                                  : active
-                                    ? "Kliknij ponownie, aby usunąć z kuponu"
-                                    : `Kurs: ${formatOdd(item.odd!)}`
-                            }
-                          >
-                            <div className="truncate text-sm font-medium">
-                              {item.label}
-                            </div>
-                            <div className="mt-2 text-lg font-semibold">
-                              {hasOdd ? formatOdd(item.odd!) : "—"}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+            ))}
+          </div>
+        ))
       ) : (
-        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 text-sm text-neutral-300">
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 text-sm text-neutral-300">
           Brak aktywnych rynków w bazie dla tego meczu.
         </div>
       )}

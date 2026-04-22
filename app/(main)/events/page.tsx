@@ -24,6 +24,10 @@ type Match = {
   time: string;
   kickoffUtc: string;
   status: string;
+  isLive: boolean;
+  isFinished: boolean;
+  homeScore: number | null;
+  awayScore: number | null;
   odds: { "1": number | null; X: number | null; "2": number | null };
 };
 
@@ -111,6 +115,10 @@ function isFinishedStatus(status?: string | null) {
   return s === "FINISHED";
 }
 
+function hasVisibleScore(m: Match) {
+  return m.homeScore !== null || m.awayScore !== null;
+}
+
 function ymdToUtcMs(ymd: string) {
   const t = Date.parse(`${ymd}T00:00:00.000Z`);
   return Number.isFinite(t) ? t : NaN;
@@ -125,14 +133,14 @@ function isBeyondHorizonDay(selectedYmd: string, horizonYmd: string | null) {
 }
 
 function matchSortWeight(m: Match, nowMs: number) {
-  if (isLiveStatus(m.status)) return 0;
+  if (m.isLive || isLiveStatus(m.status)) return 0;
 
   const kickoff = Date.parse(m.kickoffUtc);
   if (!Number.isFinite(kickoff)) return 3;
 
   if (kickoff > nowMs) return 1;
 
-  if (isFinishedStatus(m.status)) return 3;
+  if (m.isFinished || isFinishedStatus(m.status)) return 3;
 
   return 2;
 }
@@ -194,6 +202,16 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
         time,
         kickoffUtc: utc,
         status: String(m?.status ?? "SCHEDULED"),
+        isLive: Boolean(m?.live?.isLive),
+        isFinished: Boolean(m?.live?.isFinished),
+        homeScore:
+          typeof m?.score?.fullTime?.home === "number"
+            ? m.score.fullTime.home
+            : null,
+        awayScore:
+          typeof m?.score?.fullTime?.away === "number"
+            ? m.score.fullTime.away
+            : null,
         odds: {
           "1": m?.odds?.["1"] ?? null,
           X: m?.odds?.X ?? null,
@@ -439,6 +457,24 @@ export default function EventsPage() {
   const matchesLoadedAtCacheRef = useRef<Record<string, string | null>>({});
   const horizonCacheRef = useRef<Record<string, string | null>>({});
   const beyondCacheRef = useRef<Record<string, boolean>>({});
+
+    useEffect(() => {
+    const isToday = selectedDate === todayLocalYYYYMMDD();
+    if (!isToday) return;
+
+    const hasLiveNow = matches.some((m) => m.isLive || isLiveStatus(m.status));
+    if (!hasLiveNow) return;
+
+    const id = window.setInterval(() => {
+      delete matchesCacheRef.current[selectedDate];
+      delete matchesLoadedAtCacheRef.current[selectedDate];
+      delete horizonCacheRef.current[selectedDate];
+      delete beyondCacheRef.current[selectedDate];
+      setReloadKey((v) => v + 1);
+    }, 30_000);
+
+    return () => window.clearInterval(id);
+  }, [selectedDate, matches]);
 
   const selectedLeagueLabel = useMemo(() => {
     if (selectedLeague === "ALL") return "Wszystkie ligi";
@@ -880,22 +916,22 @@ export default function EventsPage() {
   }, [matches, selectedLeague, nowMs]);
 
   const liveMatches = useMemo(
-    () => filteredMatches.filter((m) => isLiveStatus(m.status)),
+    () => filteredMatches.filter((m) => m.isLive || isLiveStatus(m.status)),
     [filteredMatches]
   );
 
   const openMatches = useMemo(
     () =>
       filteredMatches.filter((m) => {
-        if (isLiveStatus(m.status)) return false;
-        if (isFinishedStatus(m.status)) return false;
+        if (m.isLive || isLiveStatus(m.status)) return false;
+        if (m.isFinished || isFinishedStatus(m.status)) return false;
         return true;
       }),
     [filteredMatches]
   );
 
   const finishedMatches = useMemo(
-    () => filteredMatches.filter((m) => isFinishedStatus(m.status)),
+    () => filteredMatches.filter((m) => m.isFinished || isFinishedStatus(m.status)),
     [filteredMatches]
   );
 
@@ -987,8 +1023,8 @@ export default function EventsPage() {
   }, [selectedTeam, matches]);
 
   const renderMarketButtons = (m: Match) => {
-    const live = isLiveStatus(m.status);
-    const finished = isFinishedStatus(m.status);
+    const live = m.isLive || isLiveStatus(m.status);
+    const finished = m.isFinished || isFinishedStatus(m.status);
     const closed = live || finished || isBettingClosed(m.kickoffUtc, nowMs);
 
     return (
@@ -1053,8 +1089,8 @@ export default function EventsPage() {
   };
 
   const renderStatusPill = (m: Match) => {
-    const live = isLiveStatus(m.status);
-    const finished = isFinishedStatus(m.status);
+    const live = m.isLive || isLiveStatus(m.status);
+    const finished = m.isFinished || isFinishedStatus(m.status);
     const closed = isBettingClosed(m.kickoffUtc, nowMs);
 
     if (live) {
@@ -1083,10 +1119,19 @@ export default function EventsPage() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs text-neutral-400">{m.leagueLine}</div>
-            <div className="mt-3 text-[1.05rem] font-semibold leading-8 text-white">
-              {m.home}
-              <br />
-              {m.away}
+                        <div className="mt-3">
+              <div className="text-[1.05rem] font-semibold leading-8 text-white">
+                {m.home}
+              </div>
+              <div className="text-[1.05rem] font-semibold leading-8 text-white">
+                {m.away}
+              </div>
+
+              {hasVisibleScore(m) ? (
+                <div className="mt-3 inline-flex items-center rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm font-semibold text-white">
+                  {m.homeScore ?? 0} : {m.awayScore ?? 0}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1116,10 +1161,18 @@ export default function EventsPage() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs text-neutral-400">{m.leagueLine}</div>
-            <div className="mt-2 text-lg font-semibold leading-8 text-white">
-              {m.home}{" "}
-              <span className="font-normal text-neutral-500">vs</span>{" "}
-              {m.away}
+                        <div className="mt-2">
+              <div className="text-lg font-semibold leading-8 text-white">
+                {m.home}{" "}
+                <span className="font-normal text-neutral-500">vs</span>{" "}
+                {m.away}
+              </div>
+
+              {hasVisibleScore(m) ? (
+                <div className="mt-3 inline-flex items-center rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm font-semibold text-white">
+                  Wynik: {m.homeScore ?? 0} : {m.awayScore ?? 0}
+                </div>
+              ) : null}
             </div>
           </div>
 

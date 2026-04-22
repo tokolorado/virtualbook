@@ -104,6 +104,8 @@ type TableResponse = {
   updatedAt: string | null;
 };
 
+const AUTO_REFRESH_MS = 20_000;
+
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
@@ -531,6 +533,14 @@ function StateBox({
   );
 }
 
+function InlineWarning({ message }: { message: string }) {
+  return (
+    <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+      {message}
+    </div>
+  );
+}
+
 function TabButton({
   label,
   active,
@@ -746,6 +756,8 @@ export default function MatchInsightsSection({
   competitionCode,
 }: MatchInsightsSectionProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("lineups");
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
 
   const [lineupsLoading, setLineupsLoading] = useState(true);
   const [lineupsError, setLineupsError] = useState<string | null>(null);
@@ -765,12 +777,28 @@ export default function MatchInsightsSection({
   }, [competitionCode, homeTeam, awayTeam]);
 
   useEffect(() => {
+    const id = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      setRefreshTick((v) => v + 1);
+    }, AUTO_REFRESH_MS);
+
+    return () => window.clearInterval(id);
+  }, [matchId]);
+
+  useEffect(() => {
     const controller = new AbortController();
+    const isBackgroundRefresh = refreshTick > 0;
 
     const loadLineups = async () => {
-      setLineupsLoading(true);
+      if (!isBackgroundRefresh || !lineups) {
+        setLineupsLoading(true);
+      }
+
       setLineupsError(null);
-      setLineups(null);
+
+      if (!isBackgroundRefresh) {
+        setLineups(null);
+      }
 
       try {
         const response = await fetch(
@@ -807,9 +835,15 @@ export default function MatchInsightsSection({
     };
 
     const loadStats = async () => {
-      setStatsLoading(true);
+      if (!isBackgroundRefresh || !stats) {
+        setStatsLoading(true);
+      }
+
       setStatsError(null);
-      setStats(null);
+
+      if (!isBackgroundRefresh) {
+        setStats(null);
+      }
 
       try {
         const response = await fetch(
@@ -846,9 +880,15 @@ export default function MatchInsightsSection({
     };
 
     const loadTable = async () => {
-      setTableLoading(true);
+      if (!isBackgroundRefresh || !table) {
+        setTableLoading(true);
+      }
+
       setTableError(null);
-      setTable(null);
+
+      if (!isBackgroundRefresh) {
+        setTable(null);
+      }
 
       try {
         const response = await fetch(
@@ -884,14 +924,16 @@ export default function MatchInsightsSection({
       }
     };
 
-    void loadLineups();
-    void loadStats();
-    void loadTable();
+    void Promise.all([loadLineups(), loadStats(), loadTable()]).then(() => {
+      if (!controller.signal.aborted) {
+        setLastRefreshedAt(new Date().toISOString());
+      }
+    });
 
     return () => {
       controller.abort();
     };
-  }, [matchId, homeTeam, awayTeam]);
+  }, [matchId, homeTeam, awayTeam, refreshTick]);
 
   const sortedTableRows = useMemo(() => {
     return [...(table?.rows ?? [])].sort((a, b) => a.position - b.position);
@@ -908,8 +950,15 @@ export default function MatchInsightsSection({
     );
   }, [table]);
 
+  const isRefreshing =
+    (lineupsLoading && !!lineups) ||
+    (statsLoading && !!stats) ||
+    (tableLoading && !!table);
+
   const renderLineups = () => {
-    if (lineupsLoading) {
+    const hasData = !!lineups?.home || !!lineups?.away;
+
+    if (lineupsLoading && !hasData) {
       return (
         <StateBox
           title="Ładowanie składów..."
@@ -918,7 +967,7 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (lineupsError) {
+    if (!hasData && lineupsError) {
       return (
         <StateBox
           title="Nie udało się załadować składów"
@@ -928,7 +977,7 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (!lineups?.home && !lineups?.away) {
+    if (!hasData) {
       return (
         <StateBox
           title="Brak danych o składach"
@@ -938,15 +987,23 @@ export default function MatchInsightsSection({
     }
 
     return (
-      <div className="grid gap-4 xl:grid-cols-2">
-        <SideCard side={lineups?.home ?? null} fallbackTeamName={homeTeam} />
-        <SideCard side={lineups?.away ?? null} fallbackTeamName={awayTeam} />
+      <div className="space-y-4">
+        {lineupsError ? (
+          <InlineWarning message="Nie udało się odświeżyć składów. Pokazujemy ostatnio pobrane dane." />
+        ) : null}
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <SideCard side={lineups?.home ?? null} fallbackTeamName={homeTeam} />
+          <SideCard side={lineups?.away ?? null} fallbackTeamName={awayTeam} />
+        </div>
       </div>
     );
   };
 
   const renderStats = () => {
-    if (statsLoading) {
+    const hasData = !!stats && stats.items.length > 0;
+
+    if (statsLoading && !hasData) {
       return (
         <StateBox
           title="Ładowanie statystyk..."
@@ -955,7 +1012,7 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (statsError) {
+    if (!hasData && statsError) {
       return (
         <StateBox
           title="Nie udało się załadować statystyk"
@@ -965,7 +1022,7 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (!stats || stats.items.length === 0) {
+    if (!hasData) {
       return (
         <StateBox
           title="Brak statystyk"
@@ -976,27 +1033,31 @@ export default function MatchInsightsSection({
 
     return (
       <div className="space-y-4">
+        {statsError ? (
+          <InlineWarning message="Nie udało się odświeżyć statystyk. Pokazujemy ostatnio pobrane dane." />
+        ) : null}
+
         <Surface className="px-4 py-4">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="text-sm text-neutral-400">
               Statystyki:{" "}
               <span className="font-semibold text-white">
-                {stats.home?.teamName ?? homeTeam}
+                {stats?.home?.teamName ?? homeTeam}
               </span>{" "}
               vs{" "}
               <span className="font-semibold text-white">
-                {stats.away?.teamName ?? awayTeam}
+                {stats?.away?.teamName ?? awayTeam}
               </span>
             </div>
 
             <div className="text-xs text-neutral-500">
-              {formatDateTime(stats.updatedAt)}
+              {formatDateTime(stats?.updatedAt ?? null)}
             </div>
           </div>
         </Surface>
 
         <div className="space-y-3">
-          {stats.items.map((item) => (
+          {stats?.items.map((item) => (
             <StatBarRow key={item.key} item={item} />
           ))}
         </div>
@@ -1005,7 +1066,9 @@ export default function MatchInsightsSection({
   };
 
   const renderTable = () => {
-    if (tableLoading) {
+    const hasData = !!table;
+
+    if (tableLoading && !hasData) {
       return (
         <StateBox
           title="Ładowanie tabeli..."
@@ -1014,7 +1077,7 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (tableError) {
+    if (!hasData && tableError) {
       return (
         <StateBox
           title="Nie udało się załadować tabeli"
@@ -1024,7 +1087,7 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (!table) {
+    if (!hasData) {
       return (
         <StateBox
           title="Brak danych tabeli"
@@ -1035,6 +1098,10 @@ export default function MatchInsightsSection({
 
     return (
       <div className="space-y-4">
+        {tableError ? (
+          <InlineWarning message="Nie udało się odświeżyć tabeli. Pokazujemy ostatnio pobrane dane." />
+        ) : null}
+
         <Surface className="p-6">
           <div className="text-lg font-semibold text-white">Tabela ligowa</div>
 
@@ -1042,26 +1109,26 @@ export default function MatchInsightsSection({
             <StatusChip>
               Liga:{" "}
               <span className="ml-1 font-semibold text-white">
-                {table.competition?.name ?? table.competition?.id ?? "—"}
+                {table?.competition?.name ?? table?.competition?.id ?? "—"}
               </span>
             </StatusChip>
 
             <StatusChip>
               Sezon:{" "}
               <span className="ml-1 font-semibold text-white">
-                {table.competition?.season ?? "—"}
+                {table?.competition?.season ?? "—"}
               </span>
             </StatusChip>
 
             <StatusChip>
               Kolejka:{" "}
               <span className="ml-1 font-semibold text-white">
-                {table.competition?.matchday ?? "—"}
+                {table?.competition?.matchday ?? "—"}
               </span>
             </StatusChip>
 
             <StatusChip>
-              Aktualizacja: {formatDateTime(table.updatedAt)}
+              Aktualizacja: {formatDateTime(table?.updatedAt ?? null)}
             </StatusChip>
           </div>
 
@@ -1073,9 +1140,9 @@ export default function MatchInsightsSection({
             </div>
           ) : null}
 
-          {!table.available || sortedTableRows.length === 0 ? (
+          {!table?.available || sortedTableRows.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-dashed border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-400">
-              {table.message ?? "Brak tabeli dla tego meczu."}
+              {table?.message ?? "Brak tabeli dla tego meczu."}
             </div>
           ) : (
             <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-800">
@@ -1097,8 +1164,8 @@ export default function MatchInsightsSection({
                 <tbody>
                   {sortedTableRows.map((row) => {
                     const zone = getTableZone(
-                      table.competition?.id,
-                      table.competition?.season,
+                      table?.competition?.id,
+                      table?.competition?.season,
                       row.position,
                       sortedTableRows.length
                     );
@@ -1106,9 +1173,9 @@ export default function MatchInsightsSection({
                     const isHighlighted =
                       row.teamId !== null && highlightSet.has(row.teamId);
                     const isHome =
-                      row.teamId !== null && row.teamId === table.home?.teamId;
+                      row.teamId !== null && row.teamId === table?.home?.teamId;
                     const isAway =
-                      row.teamId !== null && row.teamId === table.away?.teamId;
+                      row.teamId !== null && row.teamId === table?.away?.teamId;
 
                     return (
                       <tr
@@ -1190,11 +1257,19 @@ export default function MatchInsightsSection({
             {subtitle}
           </p>
 
-          {competitionCode ? (
-            <div className="mt-3">
+          <div className="mt-3 flex flex-wrap gap-2">
+            {competitionCode ? (
               <StatusChip tone="blue">{competitionCode}</StatusChip>
-            </div>
-          ) : null}
+            ) : null}
+
+            {lastRefreshedAt ? (
+              <StatusChip>Ostatnie odświeżenie: {formatDateTime(lastRefreshedAt)}</StatusChip>
+            ) : null}
+
+            {isRefreshing ? (
+              <StatusChip tone="green">Odświeżanie…</StatusChip>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -1213,6 +1288,13 @@ export default function MatchInsightsSection({
             active={activeTab === "table"}
             onClick={() => setActiveTab("table")}
           />
+          <button
+            type="button"
+            onClick={() => setRefreshTick((v) => v + 1)}
+            className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-neutral-900"
+          >
+            Odśwież
+          </button>
         </div>
       </div>
 

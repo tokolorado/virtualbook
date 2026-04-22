@@ -29,6 +29,36 @@ function safeJson(text: string) {
   }
 }
 
+function safeScore(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function pickMatchScore(
+  match: any,
+  side: "home" | "away"
+): number | null {
+  const fullTime = safeScore(match?.score?.fullTime?.[side]);
+  if (fullTime !== null) return fullTime;
+
+  const regularTime = safeScore(match?.score?.regularTime?.[side]);
+  if (regularTime !== null) return regularTime;
+
+  const halfTime = safeScore(match?.score?.halfTime?.[side]);
+  if (halfTime !== null) return halfTime;
+
+  return null;
+}
+
+function isLiveStatus(status: string | null | undefined) {
+  const s = String(status ?? "").toUpperCase();
+  return s === "LIVE" || s === "IN_PLAY" || s === "PAUSED";
+}
+
+function isFinishedStatus(status: string | null | undefined) {
+  return String(status ?? "").toUpperCase() === "FINISHED";
+}
+
 async function fetchFD(url: string, apiKey: string) {
   const r = await fetch(url, {
     headers: { "X-Auth-Token": apiKey },
@@ -248,19 +278,10 @@ export async function GET(req: Request) {
           ? Number(m.awayTeam.id)
           : null;
 
-        const isFinal = status === "FINISHED";
+        const hs = pickMatchScore(m, "home");
+        const as = pickMatchScore(m, "away");
 
-        const hs =
-          isFinal && Number.isFinite(Number(m?.score?.fullTime?.home))
-            ? Number(m.score.fullTime.home)
-            : null;
-
-        const as =
-          isFinal && Number.isFinite(Number(m?.score?.fullTime?.away))
-            ? Number(m.score.fullTime.away)
-            : null;
-
-        return {
+        const row: Record<string, any> = {
           id,
           competition_id: String(leagueCode),
           competition_name: String(leagueName),
@@ -272,10 +293,14 @@ export async function GET(req: Request) {
           away_team: away,
           home_team_id: homeTeamId,
           away_team_id: awayTeamId,
-          home_score: hs,
-          away_score: as,
           last_sync_at: nowIso,
         };
+
+        // Nie nadpisujemy istniejącego score nullem.
+        if (hs !== null) row.home_score = hs;
+        if (as !== null) row.away_score = as;
+
+        return row;
       })
       .filter(Boolean) as any[];
 
@@ -404,6 +429,10 @@ export async function GET(req: Request) {
           id: m.id,
           utcDate: m.utc_date,
           status: m.status,
+          live: {
+            isLive: isLiveStatus(m.status),
+            isFinished: isFinishedStatus(m.status),
+          },
           matchday: m.matchday,
           season: m.season ? { startDate: `${m.season}-01-01` } : null,
           homeTeam: { id: m.home_team_id ?? null, name: m.home_team },
