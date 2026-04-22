@@ -1,5 +1,7 @@
+//app/(noslip)/admin/page.tsx
 "use client";
 
+import SystemCheckPanel from "@/components/admin/SystemCheckPanel";
 import Link from "next/link";
 import { formatOdd, formatVB } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
@@ -863,6 +865,9 @@ const getAccessToken = async (): Promise<string> => {
           </>
         )}
       </div>
+
+      <SystemCheckPanel />
+
 
       <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4 space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
