@@ -1,6 +1,6 @@
-// components/match/MatchInsightsSection.tsx
 "use client";
 
+import SofaScoreEventWidget from "@/components/sofascore/SofaScoreEventWidget";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -17,7 +17,7 @@ type MatchInsightsSectionProps = {
   competitionCode?: string | null;
 };
 
-type TabKey = "lineups" | "stats" | "table";
+type TabKey = "lineups" | "stats" | "table" | "momentum";
 
 type LineupPlayer = {
   id: string;
@@ -967,22 +967,25 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (!hasData && lineupsError) {
-      return (
-        <StateBox
-          title="Nie udało się załadować składów"
-          description={lineupsError}
-          tone="error"
-        />
-      );
-    }
-
     if (!hasData) {
       return (
-        <StateBox
-          title="Brak danych o składach"
-          description="Dla tego meczu nie ma jeszcze dostępnych lub zapisanych składów."
-        />
+        <div className="space-y-4">
+          {lineupsError ? (
+            <InlineWarning message="Nie udało się pobrać składów z naszej bazy. Próbujemy załadować widget SofaScore." />
+          ) : (
+            <StateBox
+              title="Brak danych o składach w naszej bazie"
+              description="Poniżej próbujemy załadować skład bezpośrednio z widgetu SofaScore."
+            />
+          )}
+
+          <SofaScoreEventWidget
+            matchId={matchId}
+            mode="lineups"
+            height={786}
+            theme="light"
+          />
+        </div>
       );
     }
 
@@ -1243,6 +1246,24 @@ export default function MatchInsightsSection({
     );
   };
 
+  const renderMomentum = () => {
+    return (
+      <div className="space-y-4">
+        <StateBox
+          title="Attack Momentum"
+          description="Widżet SofaScore pokazujący przebieg naporu i presji obu drużyn podczas meczu."
+        />
+
+        <SofaScoreEventWidget
+          matchId={matchId}
+          mode="attackMomentum"
+          height={286}
+          theme="light"
+        />
+      </div>
+    );
+  };
+
   return (
     <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -1292,6 +1313,11 @@ export default function MatchInsightsSection({
             active={activeTab === "table"}
             onClick={() => setActiveTab("table")}
           />
+          <TabButton
+            label="Momentum"
+            active={activeTab === "momentum"}
+            onClick={() => setActiveTab("momentum")}
+          />
           <button
             type="button"
             onClick={() => setRefreshTick((v) => v + 1)}
@@ -1307,7 +1333,9 @@ export default function MatchInsightsSection({
           ? renderLineups()
           : activeTab === "stats"
             ? renderStats()
-            : renderTable()}
+            : activeTab === "table"
+              ? renderTable()
+              : renderMomentum()}
       </div>
     </section>
   );
