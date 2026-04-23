@@ -140,6 +140,7 @@ function normalizeText(value: string | null | undefined): string {
 
 function tokenize(value: string | null | undefined): string[] {
   const stop = new Set(["fc", "cf", "sc", "afc", "club", "de", "the"]);
+
   return normalizeText(value)
     .split(" ")
     .map((item) => item.trim())
@@ -155,7 +156,6 @@ function similarityScore(
 
   if (!na || !nb) return 0;
   if (na === nb) return 1;
-
   if (na.includes(nb) || nb.includes(na)) return 0.9;
 
   const aTokens = new Set(tokenize(a));
@@ -231,6 +231,10 @@ function shiftDate(dateOnly: string, offsetDays: number) {
   const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(dt.getUTCDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+function isSofaScore403Error(message: string | null | undefined) {
+  return String(message ?? "").includes("SofaScore schedule fetch failed: 403");
 }
 
 async function fetchScheduledEvents(
@@ -402,8 +406,35 @@ async function markMapped(matchId: number) {
     .eq("match_id", matchId);
 
   if (error) {
-    throw new Error(`Nie udało się oznaczyć mapped dla ${matchId}: ${error.message}`);
+    throw new Error(
+      `Nie udało się oznaczyć mapped dla ${matchId}: ${error.message}`
+    );
   }
+}
+
+async function markNeedsReview(row: QueueRow, errorMessage: string) {
+  const nowIso = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("match_mapping_queue")
+    .update({
+      status: "needs_review",
+      attempts: row.attempts + 1,
+      last_error: "SofaScore schedule fetch blocked: 403",
+      locked_at: null,
+      locked_by: null,
+      last_attempt_at: nowIso,
+      updated_at: nowIso,
+    })
+    .eq("match_id", row.match_id);
+
+  if (error) {
+    throw new Error(
+      `Nie udało się ustawić needs_review dla ${row.match_id}: ${error.message}`
+    );
+  }
+
+  console.log(`[review] ${row.match_id} -> ${errorMessage}`);
 }
 
 async function markRetry(
@@ -424,6 +455,7 @@ async function markRetry(
       next_retry_at: nextRetryAtIso(attempts),
       locked_at: null,
       locked_by: null,
+      last_attempt_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq("match_id", row.match_id);
@@ -457,15 +489,20 @@ async function upsertMapping(
   );
 
   if (error) {
-    throw new Error(`Nie udało się zapisać mapowania ${matchId}: ${error.message}`);
+    throw new Error(
+      `Nie udało się zapisać mapowania ${matchId}: ${error.message}`
+    );
   }
 }
 
 async function processRow(row: QueueRow) {
   const existing = await loadExistingMapping(row.match_id);
+
   if (existing) {
     await markMapped(row.match_id);
-    console.log(`[mapped-existing] ${row.match_id} -> ${existing.sofascore_event_id}`);
+    console.log(
+      `[mapped-existing] ${row.match_id} -> ${existing.sofascore_event_id}`
+    );
     return;
   }
 
@@ -547,6 +584,12 @@ async function main() {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unknown mapping worker error";
+
+      if (isSofaScore403Error(message)) {
+        await markNeedsReview(row, message);
+        continue;
+      }
+
       await markRetry(row, message);
       console.error(`[retry] ${row.match_id} -> ${message}`);
     }

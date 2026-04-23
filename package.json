@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "cron:local": "tsx --env-file=.env.local scripts/cron-local.ts",
-    "sofascore:worker": "tsx scripts/sofascoreMappingWorker.ts"
+    "sofascore:worker": "tsx --env-file=.env.local scripts/sofascoreMappingWorker.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",
