@@ -514,6 +514,22 @@ function numberDisplay(value: number | null): string {
   return value === null ? "—" : String(value);
 }
 
+function isPlaceholderStatValue(value: string | null | undefined): boolean {
+  if (typeof value !== "string") return true;
+
+  const normalized = value.trim().toLowerCase();
+
+  return (
+    normalized === "" ||
+    normalized === "-" ||
+    normalized === "—" ||
+    normalized === "–" ||
+    normalized === "null" ||
+    normalized === "undefined" ||
+    normalized === "n/a"
+  );
+}
+
 function Surface({
   children,
   className,
@@ -770,8 +786,8 @@ function StatBarRow({ item }: { item: StatsItem }) {
   const homeNum = item.homeNumeric ?? 0;
   const awayNum = item.awayNumeric ?? 0;
 
-  let homePercent = 50;
-  let awayPercent = 50;
+  let homePercent = 0;
+  let awayPercent = 0;
 
   if (hasNumeric) {
     const total = homeNum + awayNum;
@@ -792,25 +808,27 @@ function StatBarRow({ item }: { item: StatsItem }) {
         <div className="text-base font-semibold text-white">{item.awayValue}</div>
       </div>
 
-      <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-        <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
-          <div
-            className="h-full rounded-full bg-sky-500"
-            style={{ width: `${homePercent}%` }}
-          />
-        </div>
+      {hasNumeric ? (
+        <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+          <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
+            <div
+              className="h-full rounded-full bg-sky-500"
+              style={{ width: `${homePercent}%` }}
+            />
+          </div>
 
-        <div className="text-xs font-semibold text-neutral-500">
-          {Math.round(homePercent)}% / {Math.round(awayPercent)}%
-        </div>
+          <div className="text-xs font-semibold text-neutral-500">
+            {Math.round(homePercent)}% / {Math.round(awayPercent)}%
+          </div>
 
-        <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
-          <div
-            className="ml-auto h-full rounded-full bg-neutral-200"
-            style={{ width: `${awayPercent}%` }}
-          />
+          <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
+            <div
+              className="ml-auto h-full rounded-full bg-neutral-200"
+              style={{ width: `${awayPercent}%` }}
+            />
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -1067,7 +1085,8 @@ export default function MatchInsightsSection({
         item.homeNumeric !== null || item.awayNumeric !== null;
 
       const hasDisplayValue =
-        item.homeValue !== "—" || item.awayValue !== "—";
+        !isPlaceholderStatValue(item.homeValue) ||
+        !isPlaceholderStatValue(item.awayValue);
 
       return hasNumeric || hasDisplayValue;
     });
