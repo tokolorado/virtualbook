@@ -1524,74 +1524,93 @@ export default function MatchInsightsSection({
   };
 
   const renderH2H = () => {
-    const hasData = (h2h?.matches?.length ?? 0) > 0 || !!h2h?.summary;
+  const hasData =
+    (h2h?.matches?.length ?? 0) > 0 || (h2h?.summary?.totalMatches ?? 0) > 0;
 
-    if (h2hLoading && !hasData) {
-      return (
-        <StateBox
-          title="Ładowanie H2H..."
-          description="Pobieramy ostatnie bezpośrednie mecze i bilans obu drużyn."
-        />
-      );
-    }
-
-    if (!hasData && h2hError) {
-      return (
-        <StateBox
-          title="Nie udało się załadować H2H"
-          description={h2hError}
-          tone="error"
-        />
-      );
-    }
-
-    if (!hasData) {
-      return (
-        <StateBox
-          title="Brak danych H2H"
-          description="Dla tego meczu nie ma obecnie dostępnych danych head-to-head."
-        />
-      );
-    }
-
+  if (h2hLoading && !hasData) {
     return (
-      <div className="space-y-4">
-        {h2hError ? (
-          <InlineWarning message="Nie udało się odświeżyć H2H. Pokazujemy ostatnio pobrane dane." />
-        ) : null}
-
-        {!!h2h?.summary ? (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <H2HSummaryCard label={`${homeTeam} wygrane`} value={h2h.summary.homeWins} />
-            <H2HSummaryCard label="Remisy" value={h2h.summary.draws} />
-            <H2HSummaryCard label={`${awayTeam} wygrane`} value={h2h.summary.awayWins} />
-            <H2HSummaryCard label="Liczba meczów" value={h2h.summary.totalMatches} />
-            <H2HSummaryCard
-              label="Bramki łącznie"
-              value={`${h2h.summary.homeGoals}:${h2h.summary.awayGoals}`}
-            />
-            <H2HSummaryCard label="BTTS" value={h2h.summary.bttsCount} />
-            <H2HSummaryCard label="Over 2.5" value={h2h.summary.over25Count} />
-            <H2HSummaryCard
-              label="Aktualizacja"
-              value={formatDateTime(h2h.updatedAt ?? null)}
-            />
-          </div>
-        ) : null}
-
-        {(h2h?.matches?.length ?? 0) > 0 ? (
-          <Surface className="p-4">
-            <div className="text-lg font-semibold text-white">Ostatnie mecze H2H</div>
-            <div className="mt-4 space-y-3">
-              {h2h?.matches.map((match) => (
-                <H2HMatchRow key={match.id} match={match} />
-              ))}
-            </div>
-          </Surface>
-        ) : null}
-      </div>
+      <StateBox
+        title="Ładowanie H2H..."
+        description="Pobieramy ostatnie bezpośrednie mecze i bilans obu drużyn."
+      />
     );
-  };
+  }
+
+  if (!hasData && h2hError) {
+    return (
+      <StateBox
+        title="Nie udało się załadować H2H"
+        description={h2hError}
+        tone="error"
+      />
+    );
+  }
+
+  if (!hasData) {
+    return (
+      <StateBox
+        title="Brak danych H2H"
+        description="Dla tego meczu nie ma obecnie dostępnych danych head-to-head."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {h2hError ? (
+        <InlineWarning message="Nie udało się odświeżyć H2H. Pokazujemy ostatnio pobrane dane." />
+      ) : null}
+
+      {(h2h?.summary?.totalMatches ?? 0) > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <H2HSummaryCard
+            label={`${homeTeam} wygrane`}
+            value={h2h?.summary?.homeWins ?? 0}
+          />
+          <H2HSummaryCard
+            label="Remisy"
+            value={h2h?.summary?.draws ?? 0}
+          />
+          <H2HSummaryCard
+            label={`${awayTeam} wygrane`}
+            value={h2h?.summary?.awayWins ?? 0}
+          />
+          <H2HSummaryCard
+            label="Liczba meczów"
+            value={h2h?.summary?.totalMatches ?? 0}
+          />
+          <H2HSummaryCard
+            label="Bramki łącznie"
+            value={`${h2h?.summary?.homeGoals ?? 0}:${h2h?.summary?.awayGoals ?? 0}`}
+          />
+          <H2HSummaryCard
+            label="BTTS"
+            value={h2h?.summary?.bttsCount ?? 0}
+          />
+          <H2HSummaryCard
+            label="Over 2.5"
+            value={h2h?.summary?.over25Count ?? 0}
+          />
+          <H2HSummaryCard
+            label="Aktualizacja"
+            value={formatDateTime(h2h?.updatedAt ?? null)}
+          />
+        </div>
+      ) : null}
+
+      {(h2h?.matches?.length ?? 0) > 0 ? (
+        <Surface className="p-4">
+          <div className="text-lg font-semibold text-white">Ostatnie mecze H2H</div>
+          <div className="mt-4 space-y-3">
+            {h2h?.matches.map((match) => (
+              <H2HMatchRow key={match.id} match={match} />
+            ))}
+          </div>
+        </Surface>
+      ) : null}
+    </div>
+  );
+};
 
   const renderLiveStats = () => {
     const hasData = meaningfulLiveStatsItems.length > 0;
