@@ -35,32 +35,20 @@ type ComparisonResponse = {
   updatedAt: string | null;
 };
 
-type TeamFormMetrics = {
-  teamId: number | null;
-  teamName: string;
-  matchesCount: number;
+type TeamRecentSummary = {
+  played: number;
   points: number;
   wins: number;
   draws: number;
   losses: number;
-  goalsScored: number;
-  goalsConceded: number;
-  avgGoalsScored: number;
-  avgGoalsConceded: number;
-  winRate: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDiff: number;
+  cleanSheets: number;
+  failedToScore: number;
   bttsCount: number;
   over25Count: number;
-  cleanSheets: number;
-  form: string;
-};
-
-type TableSnapshot = {
-  totalRows: number;
-  updatedAt: string | null;
-  homePosition: number | null;
-  awayPosition: number | null;
-  homePoints: number | null;
-  awayPoints: number | null;
+  form: Array<"W" | "D" | "L">;
 };
 
 function getSupabaseAdmin() {
@@ -79,6 +67,13 @@ function getSupabaseAdmin() {
   });
 }
 
+type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>;
+
+function safeNumber(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function safeString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
@@ -89,16 +84,14 @@ function safeNullableString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function safeNumber(value: unknown): number | null {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function emptyResponse(matchId: number | null): ComparisonResponse {
+function emptyResponse(
+  matchId: number | null,
+  updatedAt: string | null = null
+): ComparisonResponse {
   return {
     matchId,
     items: [],
-    updatedAt: null,
+    updatedAt,
   };
 }
 
@@ -123,136 +116,30 @@ function normalizeMatchRow(input: unknown): MatchRow {
   };
 }
 
-function formatAvg(value: number): string {
-  return value.toFixed(1);
-}
+function byUtcDateDesc(a: MatchRow, b: MatchRow) {
+  const aTs = Date.parse(a.utc_date);
+  const bTs = Date.parse(b.utc_date);
 
-function formatPercent(value: number): string {
-  return `${Math.round(value)}%`;
-}
-
-function loadResultSymbol(teamGoals: number, opponentGoals: number): "W" | "D" | "L" {
-  if (teamGoals > opponentGoals) return "W";
-  if (teamGoals < opponentGoals) return "L";
-  return "D";
-}
-
-function buildTeamFormMetrics(
-  teamId: number | null,
-  teamName: string,
-  matches: MatchRow[]
-): TeamFormMetrics {
-  if (teamId === null || matches.length === 0) {
-    return {
-      teamId,
-      teamName,
-      matchesCount: 0,
-      points: 0,
-      wins: 0,
-      draws: 0,
-      losses: 0,
-      goalsScored: 0,
-      goalsConceded: 0,
-      avgGoalsScored: 0,
-      avgGoalsConceded: 0,
-      winRate: 0,
-      bttsCount: 0,
-      over25Count: 0,
-      cleanSheets: 0,
-      form: "—",
-    };
+  if (Number.isFinite(aTs) && Number.isFinite(bTs)) {
+    return bTs - aTs;
   }
 
-  const chronological = [...matches].reverse();
-
-  let points = 0;
-  let wins = 0;
-  let draws = 0;
-  let losses = 0;
-  let goalsScored = 0;
-  let goalsConceded = 0;
-  let bttsCount = 0;
-  let over25Count = 0;
-  let cleanSheets = 0;
-
-  const symbols: string[] = [];
-
-  for (const match of chronological) {
-    const isHome = match.home_team_id === teamId;
-    const isAway = match.away_team_id === teamId;
-
-    if (!isHome && !isAway) continue;
-    if (match.home_score === null || match.away_score === null) continue;
-
-    const teamGoals = isHome ? match.home_score : match.away_score;
-    const opponentGoals = isHome ? match.away_score : match.home_score;
-
-    goalsScored += teamGoals;
-    goalsConceded += opponentGoals;
-
-    if (opponentGoals === 0) {
-      cleanSheets += 1;
-    }
-
-    if (teamGoals > 0 && opponentGoals > 0) {
-      bttsCount += 1;
-    }
-
-    if (teamGoals + opponentGoals > 2) {
-      over25Count += 1;
-    }
-
-    const symbol = loadResultSymbol(teamGoals, opponentGoals);
-    symbols.push(symbol);
-
-    if (symbol === "W") {
-      wins += 1;
-      points += 3;
-    } else if (symbol === "D") {
-      draws += 1;
-      points += 1;
-    } else {
-      losses += 1;
-    }
-  }
-
-  const matchesCount = symbols.length;
-
-  return {
-    teamId,
-    teamName,
-    matchesCount,
-    points,
-    wins,
-    draws,
-    losses,
-    goalsScored,
-    goalsConceded,
-    avgGoalsScored: matchesCount > 0 ? goalsScored / matchesCount : 0,
-    avgGoalsConceded: matchesCount > 0 ? goalsConceded / matchesCount : 0,
-    winRate: matchesCount > 0 ? (wins / matchesCount) * 100 : 0,
-    bttsCount,
-    over25Count,
-    cleanSheets,
-    form: matchesCount > 0 ? symbols.join("-") : "—",
-  };
+  return String(b.utc_date).localeCompare(String(a.utc_date));
 }
 
-type SupabaseAdminClient = ReturnType<typeof getSupabaseAdmin>;
-
-async function loadRecentTeamMatches(
+async function loadRecentTeamMatchesById(
   supabase: SupabaseAdminClient,
-  teamId: number | null,
+  teamId: number,
+  currentMatchId: number,
   beforeUtcDate: string | null
 ): Promise<MatchRow[]> {
-  if (teamId === null) return [];
-
   let query = supabase
     .from("matches")
     .select(
       "id, utc_date, status, competition_name, home_team, away_team, home_team_id, away_team_id, home_score, away_score, last_sync_at"
     )
     .eq("status", "FINISHED")
+    .neq("id", currentMatchId)
     .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
     .order("utc_date", { ascending: false })
     .limit(5);
@@ -270,215 +157,337 @@ async function loadRecentTeamMatches(
   return ((data ?? []) as unknown[]).map(normalizeMatchRow);
 }
 
-function normalizeTableSnapshot(input: unknown): TableSnapshot | null {
-  if (typeof input !== "object" || input === null) return null;
+async function loadRecentTeamMatchesByName(
+  supabase: SupabaseAdminClient,
+  teamName: string,
+  currentMatchId: number,
+  beforeUtcDate: string | null
+): Promise<MatchRow[]> {
+  let homeQuery = supabase
+    .from("matches")
+    .select(
+      "id, utc_date, status, competition_name, home_team, away_team, home_team_id, away_team_id, home_score, away_score, last_sync_at"
+    )
+    .eq("status", "FINISHED")
+    .neq("id", currentMatchId)
+    .eq("home_team", teamName)
+    .order("utc_date", { ascending: false })
+    .limit(5);
 
-  const row = input as Record<string, unknown>;
+  let awayQuery = supabase
+    .from("matches")
+    .select(
+      "id, utc_date, status, competition_name, home_team, away_team, home_team_id, away_team_id, home_score, away_score, last_sync_at"
+    )
+    .eq("status", "FINISHED")
+    .neq("id", currentMatchId)
+    .eq("away_team", teamName)
+    .order("utc_date", { ascending: false })
+    .limit(5);
 
-  const homeRaw =
-    typeof row.home === "object" && row.home !== null
-      ? (row.home as Record<string, unknown>)
-      : {};
+  if (beforeUtcDate) {
+    homeQuery = homeQuery.lt("utc_date", beforeUtcDate);
+    awayQuery = awayQuery.lt("utc_date", beforeUtcDate);
+  }
 
-  const awayRaw =
-    typeof row.away === "object" && row.away !== null
-      ? (row.away as Record<string, unknown>)
-      : {};
+  const [
+    { data: homeData, error: homeError },
+    { data: awayData, error: awayError },
+  ] = await Promise.all([homeQuery, awayQuery]);
 
-  const homeTeamId = safeNumber(homeRaw.teamId);
-  const awayTeamId = safeNumber(awayRaw.teamId);
+  if (homeError) {
+    throw new Error(`Nie udało się pobrać formy drużyny (home): ${homeError.message}`);
+  }
 
-  const rows = Array.isArray(row.rows) ? row.rows : [];
+  if (awayError) {
+    throw new Error(`Nie udało się pobrać formy drużyny (away): ${awayError.message}`);
+  }
 
-  let homePosition: number | null = null;
-  let awayPosition: number | null = null;
-  let homePoints: number | null = null;
-  let awayPoints: number | null = null;
+  const merged = [...(homeData ?? []), ...(awayData ?? [])]
+    .map(normalizeMatchRow)
+    .sort(byUtcDateDesc);
 
-  for (const entry of rows) {
-    if (typeof entry !== "object" || entry === null) continue;
+  const deduped = new Map<number, MatchRow>();
 
-    const tableRow = entry as Record<string, unknown>;
-    const teamId = safeNumber(tableRow.teamId);
-    const position = safeNumber(tableRow.position);
-    const points = safeNumber(tableRow.points);
-
-    if (teamId !== null && homeTeamId !== null && teamId === homeTeamId) {
-      homePosition = position;
-      homePoints = points;
+  for (const match of merged) {
+    if (!deduped.has(match.id)) {
+      deduped.set(match.id, match);
     }
+  }
 
-    if (teamId !== null && awayTeamId !== null && teamId === awayTeamId) {
-      awayPosition = position;
-      awayPoints = points;
+  return Array.from(deduped.values()).slice(0, 5);
+}
+
+async function loadRecentTeamMatches(
+  supabase: SupabaseAdminClient,
+  teamId: number | null,
+  teamName: string,
+  currentMatchId: number,
+  beforeUtcDate: string | null
+): Promise<MatchRow[]> {
+  if (teamId !== null) {
+    return loadRecentTeamMatchesById(
+      supabase,
+      teamId,
+      currentMatchId,
+      beforeUtcDate
+    );
+  }
+
+  if (!teamName.trim()) {
+    return [];
+  }
+
+  return loadRecentTeamMatchesByName(
+    supabase,
+    teamName,
+    currentMatchId,
+    beforeUtcDate
+  );
+}
+
+function getPerspectiveScores(
+  match: MatchRow,
+  teamId: number | null,
+  teamName: string
+): { goalsFor: number; goalsAgainst: number; result: "W" | "D" | "L" } | null {
+  if (match.home_score === null || match.away_score === null) {
+    return null;
+  }
+
+  let isHomeSide: boolean | null = null;
+
+  if (teamId !== null) {
+    if (match.home_team_id === teamId) {
+      isHomeSide = true;
+    } else if (match.away_team_id === teamId) {
+      isHomeSide = false;
     }
+  } else {
+    if (match.home_team === teamName) {
+      isHomeSide = true;
+    } else if (match.away_team === teamName) {
+      isHomeSide = false;
+    }
+  }
+
+  if (isHomeSide === null) {
+    return null;
+  }
+
+  const goalsFor = isHomeSide ? match.home_score : match.away_score;
+  const goalsAgainst = isHomeSide ? match.away_score : match.home_score;
+
+  let result: "W" | "D" | "L" = "D";
+
+  if (goalsFor > goalsAgainst) {
+    result = "W";
+  } else if (goalsFor < goalsAgainst) {
+    result = "L";
   }
 
   return {
-    totalRows: rows.length,
-    updatedAt: safeNullableString(row.updatedAt),
-    homePosition,
-    awayPosition,
-    homePoints,
-    awayPoints,
+    goalsFor,
+    goalsAgainst,
+    result,
   };
 }
 
-async function loadTableSnapshot(
-  request: NextRequest,
-  matchId: number
-): Promise<TableSnapshot | null> {
-  try {
-    const url = new URL("/api/match-center/table", request.nextUrl.origin);
-    url.searchParams.set("matchId", String(matchId));
+function buildTeamRecentSummary(
+  matches: MatchRow[],
+  teamId: number | null,
+  teamName: string
+): TeamRecentSummary {
+  const summary: TeamRecentSummary = {
+    played: 0,
+    points: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    goalsFor: 0,
+    goalsAgainst: 0,
+    goalDiff: 0,
+    cleanSheets: 0,
+    failedToScore: 0,
+    bttsCount: 0,
+    over25Count: 0,
+    form: [],
+  };
 
-    const response = await fetch(url.toString(), {
-      method: "GET",
-      cache: "no-store",
-    });
+  for (const match of matches) {
+    const perspective = getPerspectiveScores(match, teamId, teamName);
+    if (!perspective) continue;
 
-    if (!response.ok) {
-      return null;
+    summary.played += 1;
+    summary.goalsFor += perspective.goalsFor;
+    summary.goalsAgainst += perspective.goalsAgainst;
+    summary.form.push(perspective.result);
+
+    if (perspective.result === "W") {
+      summary.wins += 1;
+      summary.points += 3;
+    } else if (perspective.result === "D") {
+      summary.draws += 1;
+      summary.points += 1;
+    } else {
+      summary.losses += 1;
     }
 
-    const json: unknown = await response.json();
-    return normalizeTableSnapshot(json);
-  } catch {
-    return null;
+    if (perspective.goalsAgainst === 0) {
+      summary.cleanSheets += 1;
+    }
+
+    if (perspective.goalsFor === 0) {
+      summary.failedToScore += 1;
+    }
+
+    if (perspective.goalsFor > 0 && perspective.goalsAgainst > 0) {
+      summary.bttsCount += 1;
+    }
+
+    if (perspective.goalsFor + perspective.goalsAgainst > 2.5) {
+      summary.over25Count += 1;
+    }
   }
+
+  summary.goalDiff = summary.goalsFor - summary.goalsAgainst;
+
+  return summary;
 }
 
 function buildComparisonItems(
-  homeMetrics: TeamFormMetrics,
-  awayMetrics: TeamFormMetrics,
-  tableSnapshot: TableSnapshot | null
+  home: TeamRecentSummary,
+  away: TeamRecentSummary
 ): ComparisonItem[] {
-  const items: ComparisonItem[] = [];
+  const formHome = home.form.length > 0 ? home.form.join(" ") : "—";
+  const formAway = away.form.length > 0 ? away.form.join(" ") : "—";
 
-  if (
-    tableSnapshot &&
-    tableSnapshot.homePosition !== null &&
-    tableSnapshot.awayPosition !== null
-  ) {
-    const totalTeams =
-      tableSnapshot.totalRows > 0
-        ? tableSnapshot.totalRows
-        : Math.max(tableSnapshot.homePosition, tableSnapshot.awayPosition);
-
-    items.push({
-      key: "table_position",
-      label: "Pozycja ligowa",
-      homeValue: `#${tableSnapshot.homePosition}`,
-      awayValue: `#${tableSnapshot.awayPosition}`,
-      homeNumeric: totalTeams + 1 - tableSnapshot.homePosition,
-      awayNumeric: totalTeams + 1 - tableSnapshot.awayPosition,
+  return [
+    {
+      key: "recent_form",
+      label: "Forma (ostatnie 5)",
+      homeValue: formHome,
+      awayValue: formAway,
+      homeNumeric: null,
+      awayNumeric: null,
       suffix: "",
-    });
-  }
-
-  if (
-    tableSnapshot &&
-    tableSnapshot.homePoints !== null &&
-    tableSnapshot.awayPoints !== null
-  ) {
-    items.push({
-      key: "table_points",
-      label: "Punkty w tabeli",
-      homeValue: String(tableSnapshot.homePoints),
-      awayValue: String(tableSnapshot.awayPoints),
-      homeNumeric: tableSnapshot.homePoints,
-      awayNumeric: tableSnapshot.awayPoints,
+    },
+    {
+      key: "points",
+      label: "Punkty",
+      homeValue: String(home.points),
+      awayValue: String(away.points),
+      homeNumeric: home.points,
+      awayNumeric: away.points,
       suffix: "",
-    });
-  }
+    },
+    {
+      key: "wins",
+      label: "Wygrane",
+      homeValue: String(home.wins),
+      awayValue: String(away.wins),
+      homeNumeric: home.wins,
+      awayNumeric: away.wins,
+      suffix: "",
+    },
+    {
+      key: "draws",
+      label: "Remisy",
+      homeValue: String(home.draws),
+      awayValue: String(away.draws),
+      homeNumeric: home.draws,
+      awayNumeric: away.draws,
+      suffix: "",
+    },
+    {
+      key: "losses",
+      label: "Porażki",
+      homeValue: String(home.losses),
+      awayValue: String(away.losses),
+      homeNumeric: home.losses,
+      awayNumeric: away.losses,
+      suffix: "",
+    },
+    {
+      key: "goals_for",
+      label: "Gole strzelone",
+      homeValue: String(home.goalsFor),
+      awayValue: String(away.goalsFor),
+      homeNumeric: home.goalsFor,
+      awayNumeric: away.goalsFor,
+      suffix: "",
+    },
+    {
+      key: "goals_against",
+      label: "Gole stracone",
+      homeValue: String(home.goalsAgainst),
+      awayValue: String(away.goalsAgainst),
+      homeNumeric: home.goalsAgainst,
+      awayNumeric: away.goalsAgainst,
+      suffix: "",
+    },
+    {
+      key: "goal_diff",
+      label: "Bilans bramkowy",
+      homeValue: String(home.goalDiff),
+      awayValue: String(away.goalDiff),
+      homeNumeric: home.goalDiff,
+      awayNumeric: away.goalDiff,
+      suffix: "",
+    },
+    {
+      key: "clean_sheets",
+      label: "Czyste konta",
+      homeValue: String(home.cleanSheets),
+      awayValue: String(away.cleanSheets),
+      homeNumeric: home.cleanSheets,
+      awayNumeric: away.cleanSheets,
+      suffix: "",
+    },
+    {
+      key: "failed_to_score",
+      label: "Mecze bez gola",
+      homeValue: String(home.failedToScore),
+      awayValue: String(away.failedToScore),
+      homeNumeric: home.failedToScore,
+      awayNumeric: away.failedToScore,
+      suffix: "",
+    },
+    {
+      key: "btts",
+      label: "BTTS",
+      homeValue: String(home.bttsCount),
+      awayValue: String(away.bttsCount),
+      homeNumeric: home.bttsCount,
+      awayNumeric: away.bttsCount,
+      suffix: "",
+    },
+    {
+      key: "over_2_5",
+      label: "Over 2.5",
+      homeValue: String(home.over25Count),
+      awayValue: String(away.over25Count),
+      homeNumeric: home.over25Count,
+      awayNumeric: away.over25Count,
+      suffix: "",
+    },
+  ];
+}
 
-  items.push({
-    key: "form_last5",
-    label: "Forma (5)",
-    homeValue:
-      homeMetrics.matchesCount > 0
-        ? `${homeMetrics.form} • ${homeMetrics.points} pkt`
-        : "—",
-    awayValue:
-      awayMetrics.matchesCount > 0
-        ? `${awayMetrics.form} • ${awayMetrics.points} pkt`
-        : "—",
-    homeNumeric: homeMetrics.points,
-    awayNumeric: awayMetrics.points,
-    suffix: "",
-  });
-
-  items.push({
-    key: "wins_last5",
-    label: "Wygrane (5)",
-    homeValue: String(homeMetrics.wins),
-    awayValue: String(awayMetrics.wins),
-    homeNumeric: homeMetrics.wins,
-    awayNumeric: awayMetrics.wins,
-    suffix: "",
-  });
-
-  items.push({
-    key: "win_rate_last5",
-    label: "Win rate",
-    homeValue: formatPercent(homeMetrics.winRate),
-    awayValue: formatPercent(awayMetrics.winRate),
-    homeNumeric: homeMetrics.winRate,
-    awayNumeric: awayMetrics.winRate,
-    suffix: "%",
-  });
-
-  items.push({
-    key: "avg_goals_scored_last5",
-    label: "Śr. gole strzelone",
-    homeValue: formatAvg(homeMetrics.avgGoalsScored),
-    awayValue: formatAvg(awayMetrics.avgGoalsScored),
-    homeNumeric: homeMetrics.avgGoalsScored,
-    awayNumeric: awayMetrics.avgGoalsScored,
-    suffix: "",
-  });
-
-  items.push({
-    key: "avg_goals_conceded_last5",
-    label: "Śr. gole stracone",
-    homeValue: formatAvg(homeMetrics.avgGoalsConceded),
-    awayValue: formatAvg(awayMetrics.avgGoalsConceded),
-    homeNumeric: homeMetrics.avgGoalsConceded,
-    awayNumeric: awayMetrics.avgGoalsConceded,
-    suffix: "",
-  });
-
-  items.push({
-    key: "btts_last5",
-    label: "BTTS (5)",
-    homeValue: String(homeMetrics.bttsCount),
-    awayValue: String(awayMetrics.bttsCount),
-    homeNumeric: homeMetrics.bttsCount,
-    awayNumeric: awayMetrics.bttsCount,
-    suffix: "",
-  });
-
-  items.push({
-    key: "over25_last5",
-    label: "Over 2.5 (5)",
-    homeValue: String(homeMetrics.over25Count),
-    awayValue: String(awayMetrics.over25Count),
-    homeNumeric: homeMetrics.over25Count,
-    awayNumeric: awayMetrics.over25Count,
-    suffix: "",
-  });
-
-  items.push({
-    key: "clean_sheets_last5",
-    label: "Czyste konta (5)",
-    homeValue: String(homeMetrics.cleanSheets),
-    awayValue: String(awayMetrics.cleanSheets),
-    homeNumeric: homeMetrics.cleanSheets,
-    awayNumeric: awayMetrics.cleanSheets,
-    suffix: "",
-  });
-
-  return items;
+function resolveUpdatedAt(
+  currentMatch: MatchRow,
+  homeMatches: MatchRow[],
+  awayMatches: MatchRow[]
+) {
+  return (
+    currentMatch.last_sync_at ??
+    homeMatches.find((match) => match.last_sync_at)?.last_sync_at ??
+    awayMatches.find((match) => match.last_sync_at)?.last_sync_at ??
+    homeMatches[0]?.utc_date ??
+    awayMatches[0]?.utc_date ??
+    currentMatch.utc_date ??
+    new Date().toISOString()
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -519,42 +528,54 @@ export async function GET(request: NextRequest) {
 
     const currentMatch = normalizeMatchRow(currentMatchRaw);
 
-    const [homeRecentMatches, awayRecentMatches, tableSnapshot] =
-      await Promise.all([
-        loadRecentTeamMatches(
-          supabase,
-          currentMatch.home_team_id,
-          safeNullableString(currentMatch.utc_date)
-        ),
-        loadRecentTeamMatches(
-          supabase,
-          currentMatch.away_team_id,
-          safeNullableString(currentMatch.utc_date)
-        ),
-        loadTableSnapshot(request, matchId),
-      ]);
+    const [homeRecentMatches, awayRecentMatches] = await Promise.all([
+      loadRecentTeamMatches(
+        supabase,
+        currentMatch.home_team_id,
+        currentMatch.home_team,
+        currentMatch.id,
+        currentMatch.utc_date || null
+      ),
+      loadRecentTeamMatches(
+        supabase,
+        currentMatch.away_team_id,
+        currentMatch.away_team,
+        currentMatch.id,
+        currentMatch.utc_date || null
+      ),
+    ]);
 
-    const homeMetrics = buildTeamFormMetrics(
+    const homeSummary = buildTeamRecentSummary(
+      homeRecentMatches,
       currentMatch.home_team_id,
-      currentMatch.home_team,
-      homeRecentMatches
+      currentMatch.home_team
     );
 
-    const awayMetrics = buildTeamFormMetrics(
+    const awaySummary = buildTeamRecentSummary(
+      awayRecentMatches,
       currentMatch.away_team_id,
-      currentMatch.away_team,
+      currentMatch.away_team
+    );
+
+    const items = buildComparisonItems(homeSummary, awaySummary);
+    const updatedAt = resolveUpdatedAt(
+      currentMatch,
+      homeRecentMatches,
       awayRecentMatches
     );
 
-    const items = buildComparisonItems(homeMetrics, awayMetrics, tableSnapshot);
+    const hasAnyData =
+      homeSummary.played > 0 ||
+      awaySummary.played > 0 ||
+      homeRecentMatches.length > 0 ||
+      awayRecentMatches.length > 0;
 
-    const updatedAt =
-      currentMatch.last_sync_at ??
-      tableSnapshot?.updatedAt ??
-      homeRecentMatches[0]?.last_sync_at ??
-      awayRecentMatches[0]?.last_sync_at ??
-      currentMatch.utc_date ??
-      new Date().toISOString();
+    if (!hasAnyData) {
+      return NextResponse.json(
+        emptyResponse(matchId, updatedAt),
+        { status: 200 }
+      );
+    }
 
     return NextResponse.json(
       {
