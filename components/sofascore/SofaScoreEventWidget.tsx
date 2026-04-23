@@ -1,29 +1,43 @@
+// components/sofascore/SofaScoreEventWidget.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
 
-type SofaScoreWidgetMode = "lineups" | "attackMomentum";
-
-type MappingResponse = {
-  matchId?: number | string;
-  sofascoreEventId?: number | string | null;
-  mapped?: boolean;
-};
+type SofaScoreEventWidgetMode = "lineups" | "attackMomentum" | "incidents";
 
 type SofaScoreEventWidgetProps = {
   matchId: string | number;
-  mode: SofaScoreWidgetMode;
+  mode: SofaScoreEventWidgetMode;
   height?: number;
-  locale?: string;
   theme?: "light" | "dark";
+  locale?: string;
   className?: string;
+};
+
+type MappingResponse = {
+  matchId?: string | number;
+  sofascoreEventId?: string | number | null;
+  mapped?: boolean;
+  error?: string;
 };
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function toEventId(value: unknown): string | null {
+function buildWidgetPath(mode: SofaScoreEventWidgetMode) {
+  if (mode === "lineups") return "lineups";
+  if (mode === "attackMomentum") return "attackMomentum";
+  return "incidents";
+}
+
+function buildDefaultHeight(mode: SofaScoreEventWidgetMode) {
+  if (mode === "lineups") return 786;
+  if (mode === "attackMomentum") return 286;
+  return 620;
+}
+
+function safeEventId(value: unknown): string | null {
   if (typeof value === "number" && Number.isFinite(value)) {
     return String(value);
   }
@@ -39,21 +53,21 @@ export default function SofaScoreEventWidget({
   matchId,
   mode,
   height,
-  locale = "pl",
   theme = "light",
+  locale = "pl",
   className,
 }: SofaScoreEventWidgetProps) {
   const [loading, setLoading] = useState(true);
-  const [eventId, setEventId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sofascoreEventId, setSofascoreEventId] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
 
     const run = async () => {
       setLoading(true);
       setError(null);
-      setEventId(null);
+      setSofascoreEventId(null);
 
       try {
         const response = await fetch(
@@ -61,35 +75,41 @@ export default function SofaScoreEventWidget({
           {
             method: "GET",
             cache: "no-store",
+            signal: controller.signal,
           }
         );
 
-        const text = await response.text();
         let json: MappingResponse | null = null;
 
         try {
-          json = JSON.parse(text);
+          json = (await response.json()) as MappingResponse;
         } catch {
           json = null;
         }
 
         if (!response.ok) {
-          throw new Error(
-            (json as any)?.error || `Mapping fetch failed (${response.status})`
-          );
+          throw new Error(json?.error || `Mapping fetch failed: ${response.status}`);
         }
 
-        const nextEventId = toEventId(json?.sofascoreEventId);
+        const mappedId = safeEventId(json?.sofascoreEventId);
 
-        if (!cancelled) {
-          setEventId(nextEventId);
+        if (!json?.mapped || !mappedId) {
+          throw new Error("Brak mapowania SofaScore dla tego meczu.");
+        }
+
+        if (!controller.signal.aborted) {
+          setSofascoreEventId(mappedId);
         }
       } catch (e: unknown) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Błąd ładowania widgetu.");
-        }
+        if (controller.signal.aborted) return;
+
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Nie udało się pobrać mapowania SofaScore."
+        );
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoading(false);
         }
       }
@@ -98,86 +118,82 @@ export default function SofaScoreEventWidget({
     void run();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [matchId]);
 
-  const resolvedHeight = useMemo(() => {
-    if (typeof height === "number" && height > 0) return height;
-    if (mode === "lineups") return 786;
-    return 286;
-  }, [height, mode]);
+  const widgetPath = buildWidgetPath(mode);
+  const iframeHeight = height ?? buildDefaultHeight(mode);
 
   const src = useMemo(() => {
-    if (!eventId) return null;
+    if (!sofascoreEventId) return null;
 
-    return `https://widgets.sofascore.com/${locale}/embed/${mode}?id=${encodeURIComponent(
-      eventId
+    return `https://widgets.sofascore.com/${encodeURIComponent(
+      locale
+    )}/embed/${widgetPath}?id=${encodeURIComponent(
+      sofascoreEventId
     )}&widgetTheme=${encodeURIComponent(theme)}`;
-  }, [eventId, locale, mode, theme]);
+  }, [locale, sofascoreEventId, theme, widgetPath]);
+
+  const matchUrl = useMemo(() => {
+    if (!sofascoreEventId) return null;
+
+    return `https://www.sofascore.com/${encodeURIComponent(
+      locale
+    )}/football/match/_/_#id:${encodeURIComponent(sofascoreEventId)}`;
+  }, [locale, sofascoreEventId]);
 
   if (loading) {
     return (
-      <div
-        className={cn(
-          "rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-400",
-          className
-        )}
-      >
-        Ładowanie widgetu SofaScore...
+      <div className={cn("space-y-2", className)}>
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-950 px-4 py-6 text-sm text-neutral-400">
+          Ładowanie widgetu SofaScore…
+        </div>
       </div>
     );
   }
 
-  if (error) {
+  if (error || !src || !matchUrl) {
     return (
-      <div
-        className={cn(
-          "rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-4 text-sm text-yellow-200",
-          className
-        )}
-      >
-        Nie udało się załadować widgetu SofaScore: {error}
-      </div>
-    );
-  }
-
-  if (!src) {
-    return (
-      <div
-        className={cn(
-          "rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-500",
-          className
-        )}
-      >
-        Brak mapowania SofaScore dla tego meczu.
+      <div className={cn("space-y-2", className)}>
+        <div className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-6 text-sm text-yellow-200">
+          {error ?? "Widget SofaScore jest obecnie niedostępny."}
+        </div>
       </div>
     );
   }
 
   return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-2xl border border-neutral-800 bg-white",
-        className
-      )}
-    >
-      <iframe
-        title={`SofaScore ${mode} ${eventId}`}
-        src={src}
-        width="100%"
-        height={resolvedHeight}
-        frameBorder="0"
-        scrolling="no"
-        loading="lazy"
-        style={{
-          border: 0,
-          width: "100%",
-          height: `${resolvedHeight}px`,
-          display: "block",
-          background: "#ffffff",
-        }}
-      />
+    <div className={cn("space-y-2", className)}>
+      <div
+        className={cn(
+          "overflow-hidden rounded-3xl border border-neutral-800",
+          theme === "light" ? "bg-white" : "bg-neutral-950"
+        )}
+      >
+        <iframe
+          title={`SofaScore ${mode} ${sofascoreEventId}`}
+          src={src}
+          width="100%"
+          height={iframeHeight}
+          frameBorder="0"
+          scrolling="no"
+          loading="lazy"
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+      </div>
+
+      <div className="text-xs text-neutral-500">
+        Dane osadzone z SofaScore.{" "}
+        <a
+          href={matchUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="text-neutral-300 underline underline-offset-4 hover:text-white"
+        >
+          Otwórz mecz w SofaScore
+        </a>
+      </div>
     </div>
   );
 }

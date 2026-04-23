@@ -985,6 +985,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         competitionCode={competitionCode}
         homeTeam={matchUI.home}
         awayTeam={matchUI.away}
+        matchStatus={matchUI.status}
+        isLive={matchUI.isLive}
+        isFinished={matchUI.isFinished}
       />
 
       {err ? (

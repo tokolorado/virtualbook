@@ -1,3 +1,4 @@
+//components/match/MatchInsightsSection.tsx
 "use client";
 
 import SofaScoreEventWidget from "@/components/sofascore/SofaScoreEventWidget";
@@ -15,9 +16,12 @@ type MatchInsightsSectionProps = {
   homeTeam: string;
   awayTeam: string;
   competitionCode?: string | null;
+  matchStatus?: string | null;
+  isLive?: boolean;
+  isFinished?: boolean;
 };
 
-type TabKey = "lineups" | "stats" | "table" | "momentum";
+type TabKey = "lineups" | "stats" | "table" | "momentum" | "timeline";
 
 type LineupPlayer = {
   id: string;
@@ -105,6 +109,53 @@ type TableResponse = {
 };
 
 const AUTO_REFRESH_MS = 20_000;
+
+function normalizeMatchStatus(status?: string | null) {
+  return String(status ?? "").toUpperCase();
+}
+
+function isPreMatchState(
+  status?: string | null,
+  isLive?: boolean,
+  isFinished?: boolean
+) {
+  if (isLive) return false;
+  if (isFinished) return false;
+
+  const s = normalizeMatchStatus(status);
+
+  if (!s) return true;
+
+  return (
+    s === "SCHEDULED" ||
+    s === "TIMED" ||
+    s === "NOT_STARTED" ||
+    s === "PRE_MATCH"
+  );
+}
+
+function canRenderLiveWidgets(
+  status?: string | null,
+  isLive?: boolean,
+  isFinished?: boolean
+) {
+  if (isLive) return true;
+  if (isFinished) return true;
+
+  const s = normalizeMatchStatus(status);
+
+  return (
+    s === "LIVE" ||
+    s === "IN_PLAY" ||
+    s === "PAUSED" ||
+    s === "HT" ||
+    s === "2H" ||
+    s === "EXTRA_TIME" ||
+    s === "AET" ||
+    s === "PENALTIES" ||
+    s === "FINISHED"
+  );
+}
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -754,6 +805,9 @@ export default function MatchInsightsSection({
   homeTeam,
   awayTeam,
   competitionCode,
+  matchStatus,
+  isLive,
+  isFinished,
 }: MatchInsightsSectionProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("lineups");
   const [refreshTick, setRefreshTick] = useState(0);
@@ -775,6 +829,14 @@ export default function MatchInsightsSection({
     const league = competitionCode?.trim() ? ` • ${competitionCode}` : "";
     return `Sekcja informacyjna dla meczu ${homeTeam} vs ${awayTeam}${league}.`;
   }, [competitionCode, homeTeam, awayTeam]);
+
+  const isPreMatch = useMemo(() => {
+    return isPreMatchState(matchStatus, isLive, isFinished);
+  }, [matchStatus, isLive, isFinished]);
+
+  const liveWidgetsAvailable = useMemo(() => {
+    return canRenderLiveWidgets(matchStatus, isLive, isFinished);
+  }, [matchStatus, isLive, isFinished]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -975,7 +1037,11 @@ export default function MatchInsightsSection({
           ) : (
             <StateBox
               title="Brak danych o składach w naszej bazie"
-              description="Poniżej próbujemy załadować skład bezpośrednio z widgetu SofaScore."
+              description={
+                isPreMatch
+                  ? "Przed meczem próbujemy załadować przewidywane albo oficjalne składy bezpośrednio z widgetu SofaScore."
+                  : "Poniżej próbujemy załadować skład bezpośrednio z widgetu SofaScore."
+              }
             />
           )}
 
@@ -1247,17 +1313,60 @@ export default function MatchInsightsSection({
   };
 
   const renderMomentum = () => {
+    if (!liveWidgetsAvailable) {
+      return (
+        <StateBox
+          title="Attack Momentum niedostępne przed meczem"
+          description="Wykres naporu pojawi się automatycznie po rozpoczęciu spotkania. Przed pierwszym gwizdkiem SofaScore zwykle nie zwraca jeszcze danych momentum."
+        />
+      );
+    }
+
     return (
       <div className="space-y-4">
-        <StateBox
-          title="Attack Momentum"
-          description="Widżet SofaScore pokazujący przebieg naporu i presji obu drużyn podczas meczu."
-        />
+        <Surface className="p-4">
+          <div className="text-sm font-semibold text-white">
+            Attack Momentum
+          </div>
+          <div className="mt-2 text-sm text-neutral-400">
+            Widżet SofaScore pokazujący przebieg naporu i presji obu drużyn
+            podczas meczu.
+          </div>
+        </Surface>
 
         <SofaScoreEventWidget
           matchId={matchId}
           mode="attackMomentum"
           height={286}
+          theme="light"
+        />
+      </div>
+    );
+  };
+
+  const renderTimeline = () => {
+    if (!liveWidgetsAvailable) {
+      return (
+        <StateBox
+          title="Timeline niedostępny przed meczem"
+          description="Oś zdarzeń pojawi się automatycznie po rozpoczęciu spotkania. Przed meczem SofaScore zwykle nie zwraca jeszcze incydentów."
+        />
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <Surface className="p-4">
+          <div className="text-sm font-semibold text-white">Timeline</div>
+          <div className="mt-2 text-sm text-neutral-400">
+            Oś zdarzeń meczu z SofaScore: gole, kartki, zmiany i kluczowe incydenty.
+          </div>
+        </Surface>
+
+        <SofaScoreEventWidget
+          matchId={matchId}
+          mode="incidents"
+          height={620}
           theme="light"
         />
       </div>
@@ -1318,6 +1427,11 @@ export default function MatchInsightsSection({
             active={activeTab === "momentum"}
             onClick={() => setActiveTab("momentum")}
           />
+          <TabButton
+            label="Timeline"
+            active={activeTab === "timeline"}
+            onClick={() => setActiveTab("timeline")}
+          />
           <button
             type="button"
             onClick={() => setRefreshTick((v) => v + 1)}
@@ -1333,9 +1447,11 @@ export default function MatchInsightsSection({
           ? renderLineups()
           : activeTab === "stats"
             ? renderStats()
-            : activeTab === "table"
-              ? renderTable()
-              : renderMomentum()}
+            : activeTab === "momentum"
+              ? renderMomentum()
+              : activeTab === "timeline"
+                ? renderTimeline()
+                : renderTable()}
       </div>
     </section>
   );
