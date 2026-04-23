@@ -1061,6 +1061,18 @@ export default function MatchInsightsSection({
     (statsLoading && !!stats) ||
     (tableLoading && !!table);
 
+  const meaningfulStatsItems = useMemo(() => {
+    return (stats?.items ?? []).filter((item) => {
+      const hasNumeric =
+        item.homeNumeric !== null || item.awayNumeric !== null;
+
+      const hasDisplayValue =
+        item.homeValue !== "—" || item.awayValue !== "—";
+
+      return hasNumeric || hasDisplayValue;
+    });
+  }, [stats]);
+
   const renderLineups = () => {
     const hasData = !!lineups?.home || !!lineups?.away;
     const showWidgetFallback = !hasData;
@@ -1130,7 +1142,7 @@ export default function MatchInsightsSection({
   };
 
   const renderStats = () => {
-    const hasData = !!stats && stats.items.length > 0;
+    const hasData = meaningfulStatsItems.length > 0;
 
     if (statsLoading && !hasData) {
       return (
@@ -1186,7 +1198,7 @@ export default function MatchInsightsSection({
         </Surface>
 
         <div className="space-y-3">
-          {stats?.items.map((item) => (
+          {meaningfulStatsItems.map((item) => (
             <StatBarRow key={item.key} item={item} />
           ))}
         </div>
