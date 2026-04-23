@@ -1,4 +1,4 @@
-//components/match/MatchInsightsSection.tsx
+// components/match/MatchInsightsSection.tsx
 "use client";
 
 import SofaScoreEventWidget from "@/components/sofascore/SofaScoreEventWidget";
@@ -544,10 +544,12 @@ function StatusChip({
     <span
       className={cn(
         "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium",
-        tone === "neutral" && "border-neutral-800 bg-neutral-950 text-neutral-300",
+        tone === "neutral" &&
+          "border-neutral-800 bg-neutral-950 text-neutral-300",
         tone === "blue" && "border-sky-500/30 bg-sky-500/10 text-sky-300",
         tone === "red" && "border-red-500/30 bg-red-500/10 text-red-300",
-        tone === "green" && "border-green-500/30 bg-green-500/10 text-green-300",
+        tone === "green" &&
+          "border-green-500/30 bg-green-500/10 text-green-300",
         tone === "yellow" &&
           "border-yellow-500/30 bg-yellow-500/10 text-yellow-300"
       )}
@@ -589,6 +591,33 @@ function InlineWarning({ message }: { message: string }) {
     <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
       {message}
     </div>
+  );
+}
+
+function WidgetTroubleshooting({
+  title = "Jeśli widget się nie wyświetla",
+}: {
+  title?: string;
+}) {
+  return (
+    <details className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-300">
+      <summary className="cursor-pointer list-none font-medium text-white [&::-webkit-details-marker]:hidden">
+        {title}
+      </summary>
+
+      <div className="mt-3 space-y-2 text-neutral-400">
+        <div>Najczęstsze przyczyny:</div>
+        <ul className="list-disc space-y-1 pl-5">
+          <li>SofaScore nie opublikował jeszcze składu albo widżetu dla tego meczu.</li>
+          <li>Masz włączony VPN, proxy, AdBlock albo restrykcyjną ochronę prywatności.</li>
+          <li>Widżet został chwilowo ograniczony lub nie załadował się po stronie zewnętrznej.</li>
+        </ul>
+        <div>
+          Spróbuj wyłączyć VPN lub proxy, odświeżyć stronę, sprawdzić inną sieć
+          albo wrócić bliżej rozpoczęcia meczu.
+        </div>
+      </div>
+    </details>
   );
 }
 
@@ -812,6 +841,9 @@ export default function MatchInsightsSection({
   const [activeTab, setActiveTab] = useState<TabKey>("lineups");
   const [refreshTick, setRefreshTick] = useState(0);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [lineupsWidgetMapped, setLineupsWidgetMapped] = useState<boolean | null>(
+    null
+  );
 
   const [lineupsLoading, setLineupsLoading] = useState(true);
   const [lineupsError, setLineupsError] = useState<string | null>(null);
@@ -845,6 +877,10 @@ export default function MatchInsightsSection({
     }, AUTO_REFRESH_MS);
 
     return () => window.clearInterval(id);
+  }, [matchId]);
+
+  useEffect(() => {
+    setLineupsWidgetMapped(null);
   }, [matchId]);
 
   useEffect(() => {
@@ -1032,25 +1068,32 @@ export default function MatchInsightsSection({
     if (!hasData) {
       return (
         <div className="space-y-4">
-          {lineupsError ? (
-            <InlineWarning message="Nie udało się pobrać składów z naszej bazy. Próbujemy załadować widget SofaScore." />
-          ) : (
-            <StateBox
-              title="Brak danych o składach w naszej bazie"
-              description={
-                isPreMatch
-                  ? "Przed meczem próbujemy załadować przewidywane albo oficjalne składy bezpośrednio z widgetu SofaScore."
-                  : "Poniżej próbujemy załadować skład bezpośrednio z widgetu SofaScore."
-              }
-            />
-          )}
+          {lineupsWidgetMapped !== true ? (
+            lineupsError ? (
+              <InlineWarning message="Nie udało się pobrać składów z naszej bazy. Próbujemy załadować widget SofaScore." />
+            ) : (
+              <StateBox
+                title="Brak danych o składach w naszej bazie"
+                description={
+                  isPreMatch
+                    ? "Przed meczem próbujemy załadować przewidywane albo oficjalne składy bezpośrednio z widgetu SofaScore."
+                    : "Poniżej próbujemy załadować skład bezpośrednio z widgetu SofaScore."
+                }
+              />
+            )
+          ) : null}
 
           <SofaScoreEventWidget
             matchId={matchId}
             mode="lineups"
             height={786}
-            theme="light"
+            theme="dark"
+            cropInternalFooter
+            cropBottomPx={88}
+            onMappingResolved={setLineupsWidgetMapped}
           />
+
+          <WidgetTroubleshooting title="Jeśli skład się nie wyświetla" />
         </div>
       );
     }
@@ -1338,7 +1381,7 @@ export default function MatchInsightsSection({
           matchId={matchId}
           mode="attackMomentum"
           height={286}
-          theme="light"
+          theme="dark"
         />
       </div>
     );
@@ -1359,7 +1402,8 @@ export default function MatchInsightsSection({
         <Surface className="p-4">
           <div className="text-sm font-semibold text-white">Timeline</div>
           <div className="mt-2 text-sm text-neutral-400">
-            Oś zdarzeń meczu z SofaScore: gole, kartki, zmiany i kluczowe incydenty.
+            Oś zdarzeń meczu z SofaScore: gole, kartki, zmiany i kluczowe
+            incydenty.
           </div>
         </Surface>
 
@@ -1367,7 +1411,7 @@ export default function MatchInsightsSection({
           matchId={matchId}
           mode="incidents"
           height={620}
-          theme="light"
+          theme="dark"
         />
       </div>
     );
