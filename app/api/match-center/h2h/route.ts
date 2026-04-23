@@ -1,4 +1,3 @@
-// app/api/match-center/h2h/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -78,23 +77,13 @@ function safeNullableString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function emptySummary(): H2HSummary {
-  return {
-    homeWins: 0,
-    draws: 0,
-    awayWins: 0,
-    totalMatches: 0,
-    homeGoals: 0,
-    awayGoals: 0,
-    bttsCount: 0,
-    over25Count: 0,
-  };
-}
-
-function emptyResponse(matchId: number | null, updatedAt: string | null): H2HResponse {
+function emptyResponse(
+  matchId: number | null,
+  updatedAt: string | null = null
+): H2HResponse {
   return {
     matchId,
-    summary: emptySummary(),
+    summary: null,
     matches: [],
     updatedAt,
   };
@@ -121,33 +110,109 @@ function normalizeMatchRow(input: unknown): MatchRow {
   };
 }
 
-function isSamePairByIds(
-  match: MatchRow,
-  currentHomeTeamId: number,
-  currentAwayTeamId: number
-) {
-  return (
-    (match.home_team_id === currentHomeTeamId &&
-      match.away_team_id === currentAwayTeamId) ||
-    (match.home_team_id === currentAwayTeamId &&
-      match.away_team_id === currentHomeTeamId)
-  );
+function byUtcDateDesc(a: MatchRow, b: MatchRow) {
+  const aTs = Date.parse(a.utc_date);
+  const bTs = Date.parse(b.utc_date);
+
+  if (Number.isFinite(aTs) && Number.isFinite(bTs)) {
+    return bTs - aTs;
+  }
+
+  return String(b.utc_date).localeCompare(String(a.utc_date));
 }
 
-function isSamePairByNames(
-  match: MatchRow,
-  currentHomeTeam: string,
-  currentAwayTeam: string
-) {
-  return (
-    (match.home_team === currentHomeTeam && match.away_team === currentAwayTeam) ||
-    (match.home_team === currentAwayTeam && match.away_team === currentHomeTeam)
-  );
+function dedupeMatches(matches: MatchRow[]) {
+  const map = new Map<number, MatchRow>();
+
+  for (const match of matches.sort(byUtcDateDesc)) {
+    if (!map.has(match.id)) {
+      map.set(match.id, match);
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+async function loadH2HByIds(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  currentMatch: MatchRow
+): Promise<MatchRow[]> {
+  if (
+    currentMatch.home_team_id === null ||
+    currentMatch.away_team_id === null
+  ) {
+    return [];
+  }
+
+  let query = supabase
+    .from("matches")
+    .select(
+      "id, utc_date, status, competition_name, home_team, away_team, home_team_id, away_team_id, home_score, away_score, last_sync_at"
+    )
+    .eq("status", "FINISHED")
+    .neq("id", currentMatch.id)
+    .or(
+      `and(home_team_id.eq.${currentMatch.home_team_id},away_team_id.eq.${currentMatch.away_team_id}),and(home_team_id.eq.${currentMatch.away_team_id},away_team_id.eq.${currentMatch.home_team_id})`
+    )
+    .order("utc_date", { ascending: false })
+    .limit(10);
+
+  if (currentMatch.utc_date) {
+    query = query.lt("utc_date", currentMatch.utc_date);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(`Nie udało się pobrać meczów H2H po team_id: ${error.message}`);
+  }
+
+  return ((data ?? []) as unknown[]).map(normalizeMatchRow);
+}
+
+async function loadH2HByNames(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  currentMatch: MatchRow
+): Promise<MatchRow[]> {
+  const homeName = currentMatch.home_team.trim();
+  const awayName = currentMatch.away_team.trim();
+
+  if (!homeName || !awayName) {
+    return [];
+  }
+
+  let directQuery = supabase
+    .from("matches")
+    .select(
+      "id, utc_date, status, competition_name, home_team, away_team, home_team_id, away_team_id, home_score, away_score, last_sync_at"
+    )
+    .eq("status", "FINISHED")
+    .neq("id", currentMatch.id)
+    .or(
+      `and(home_team.eq.${homeName},away_team.eq.${awayName}),and(home_team.eq.${awayName},away_team.eq.${homeName})`
+    )
+    .order("utc_date", { ascending: false })
+    .limit(10);
+
+  if (currentMatch.utc_date) {
+    directQuery = directQuery.lt("utc_date", currentMatch.utc_date);
+  }
+
+  const { data, error } = await directQuery;
+
+  if (error) {
+    throw new Error(`Nie udało się pobrać meczów H2H po nazwach: ${error.message}`);
+  }
+
+  return ((data ?? []) as unknown[]).map(normalizeMatchRow);
 }
 
 function buildSummaryFromMatches(
   matches: MatchRow[],
-  currentMatch: MatchRow
+  currentHomeTeamId: number | null,
+  currentAwayTeamId: number | null,
+  currentHomeTeam: string,
+  currentAwayTeam: string
 ): H2HSummary {
   let homeWins = 0;
   let draws = 0;
@@ -158,37 +223,41 @@ function buildSummaryFromMatches(
   let bttsCount = 0;
   let over25Count = 0;
 
-  const hasTeamIds =
-    currentMatch.home_team_id !== null && currentMatch.away_team_id !== null;
-
   for (const match of matches) {
     if (match.home_score === null || match.away_score === null) continue;
 
     let isSameOrientation = false;
     let isReversedOrientation = false;
 
-    if (hasTeamIds) {
+    if (currentHomeTeamId !== null && currentAwayTeamId !== null) {
       isSameOrientation =
-        match.home_team_id === currentMatch.home_team_id &&
-        match.away_team_id === currentMatch.away_team_id;
+        match.home_team_id === currentHomeTeamId &&
+        match.away_team_id === currentAwayTeamId;
 
       isReversedOrientation =
-        match.home_team_id === currentMatch.away_team_id &&
-        match.away_team_id === currentMatch.home_team_id;
+        match.home_team_id === currentAwayTeamId &&
+        match.away_team_id === currentHomeTeamId;
     } else {
       isSameOrientation =
-        match.home_team === currentMatch.home_team &&
-        match.away_team === currentMatch.away_team;
+        match.home_team === currentHomeTeam &&
+        match.away_team === currentAwayTeam;
 
       isReversedOrientation =
-        match.home_team === currentMatch.away_team &&
-        match.away_team === currentMatch.home_team;
+        match.home_team === currentAwayTeam &&
+        match.away_team === currentHomeTeam;
     }
 
-    if (!isSameOrientation && !isReversedOrientation) continue;
+    if (!isSameOrientation && !isReversedOrientation) {
+      continue;
+    }
 
-    const currentHomeScore = isSameOrientation ? match.home_score : match.away_score;
-    const currentAwayScore = isSameOrientation ? match.away_score : match.home_score;
+    const currentHomeScore = isSameOrientation
+      ? match.home_score
+      : match.away_score;
+
+    const currentAwayScore = isSameOrientation
+      ? match.away_score
+      : match.home_score;
 
     totalMatches += 1;
     homeGoals += currentHomeScore;
@@ -283,73 +352,22 @@ export async function GET(request: NextRequest) {
 
     const currentMatch = normalizeMatchRow(currentMatchRaw);
 
-    const hasTeamIds =
-      currentMatch.home_team_id !== null && currentMatch.away_team_id !== null;
-
-    let query = supabase
-      .from("matches")
-      .select(
-        "id, utc_date, status, competition_name, home_team, away_team, home_team_id, away_team_id, home_score, away_score, last_sync_at"
-      )
-      .eq("status", "FINISHED")
-      .neq("id", matchId)
-      .order("utc_date", { ascending: false })
-      .limit(10);
-
-    if (currentMatch.utc_date) {
-      query = query.lt("utc_date", currentMatch.utc_date);
-    }
-
-    if (hasTeamIds) {
-      query = query.or(
-        `and(home_team_id.eq.${currentMatch.home_team_id},away_team_id.eq.${currentMatch.away_team_id}),and(home_team_id.eq.${currentMatch.away_team_id},away_team_id.eq.${currentMatch.home_team_id})`
-      );
-    } else {
-      const homeEscaped = currentMatch.home_team.replaceAll(",", "\\,");
-      const awayEscaped = currentMatch.away_team.replaceAll(",", "\\,");
-      query = query.or(
-        `and(home_team.eq.${homeEscaped},away_team.eq.${awayEscaped}),and(home_team.eq.${awayEscaped},away_team.eq.${homeEscaped})`
-      );
-    }
-
-    const { data: historicalMatchesRaw, error: historicalMatchesError } =
-      await query;
-
-    if (historicalMatchesError) {
-      return NextResponse.json(
-        {
-          error: `Nie udało się pobrać meczów H2H: ${historicalMatchesError.message}`,
-        },
-        { status: 500 }
-      );
-    }
-
-    const historicalMatches = ((historicalMatchesRaw ?? []) as unknown[])
-      .map(normalizeMatchRow)
-      .filter((match) => {
-        if (hasTeamIds && currentMatch.home_team_id !== null && currentMatch.away_team_id !== null) {
-          return isSamePairByIds(
-            match,
-            currentMatch.home_team_id,
-            currentMatch.away_team_id
-          );
-        }
-
-        return isSamePairByNames(
-          match,
-          currentMatch.home_team,
-          currentMatch.away_team
-        );
-      });
+    let historicalMatches = await loadH2HByIds(supabase, currentMatch);
 
     if (historicalMatches.length === 0) {
-      return NextResponse.json(
-        emptyResponse(matchId, currentMatch.last_sync_at ?? currentMatch.utc_date ?? null),
-        { status: 200 }
-      );
+      historicalMatches = await loadH2HByNames(supabase, currentMatch);
     }
 
-    const summary = buildSummaryFromMatches(historicalMatches, currentMatch);
+    historicalMatches = dedupeMatches(historicalMatches).slice(0, 10);
+
+    const summary = buildSummaryFromMatches(
+      historicalMatches,
+      currentMatch.home_team_id,
+      currentMatch.away_team_id,
+      currentMatch.home_team,
+      currentMatch.away_team
+    );
+
     const matches = buildH2HMatchList(historicalMatches);
     const updatedAt = resolveUpdatedAt(currentMatch, historicalMatches);
 
