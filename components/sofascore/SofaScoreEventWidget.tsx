@@ -1,6 +1,7 @@
 // components/sofascore/SofaScoreEventWidget.tsx
 "use client";
 
+import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 type SofaScoreEventWidgetMode = "lineups" | "attackMomentum" | "incidents";
@@ -16,6 +17,7 @@ type SofaScoreEventWidgetProps = {
   cropBottomPx?: number;
   hideExternalLink?: boolean;
   onMappingResolved?: (mapped: boolean) => void;
+  onLoaded?: (loaded: boolean) => void;
 };
 
 type MappingResponse = {
@@ -57,13 +59,14 @@ export default function SofaScoreEventWidget({
   matchId,
   mode,
   height,
-  theme = "dark",
+  theme = "light",
   locale = "pl",
   className,
   cropInternalFooter = false,
   cropBottomPx = 0,
-  hideExternalLink = true,
+  hideExternalLink = false,
   onMappingResolved,
+  onLoaded,
 }: SofaScoreEventWidgetProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -72,11 +75,13 @@ export default function SofaScoreEventWidget({
   useEffect(() => {
     const controller = new AbortController();
 
-    const run = async () => {
-      setLoading(true);
-      setError(null);
-      setSofascoreEventId(null);
+    setLoading(true);
+    setError(null);
+    setSofascoreEventId(null);
+    onLoaded?.(false);
+    onMappingResolved?.(false);
 
+    const run = async () => {
       try {
         const response = await fetch(
           `/api/sofascore/mapping?matchId=${encodeURIComponent(String(matchId))}`,
@@ -102,9 +107,7 @@ export default function SofaScoreEventWidget({
         const mappedId = safeEventId(json?.sofascoreEventId);
 
         if (!json?.mapped || !mappedId) {
-          if (!controller.signal.aborted) {
-            onMappingResolved?.(false);
-          }
+          onMappingResolved?.(false);
           throw new Error("Brak mapowania SofaScore dla tego meczu.");
         }
 
@@ -115,7 +118,9 @@ export default function SofaScoreEventWidget({
       } catch (e: unknown) {
         if (controller.signal.aborted) return;
 
+        onLoaded?.(false);
         onMappingResolved?.(false);
+
         setError(
           e instanceof Error
             ? e.message
@@ -133,12 +138,10 @@ export default function SofaScoreEventWidget({
     return () => {
       controller.abort();
     };
-  }, [matchId, onMappingResolved]);
+  }, [matchId, onLoaded, onMappingResolved]);
 
   const widgetPath = buildWidgetPath(mode);
   const iframeHeight = height ?? buildDefaultHeight(mode);
-  const effectiveCropBottomPx = cropInternalFooter ? Math.max(cropBottomPx, 72) : 0;
-  const wrapperHeight = Math.max(iframeHeight - effectiveCropBottomPx, 120);
 
   const src = useMemo(() => {
     if (!sofascoreEventId) return null;
@@ -158,6 +161,18 @@ export default function SofaScoreEventWidget({
     )}/football/match/_/_#id:${encodeURIComponent(sofascoreEventId)}`;
   }, [locale, sofascoreEventId]);
 
+  const visibleHeight = useMemo(() => {
+    if (!cropInternalFooter) return iframeHeight;
+    return Math.max(iframeHeight - cropBottomPx, 120);
+  }, [cropInternalFooter, cropBottomPx, iframeHeight]);
+
+  const frameWrapStyle: CSSProperties = useMemo(
+    () => ({
+      height: visibleHeight,
+    }),
+    [visibleHeight]
+  );
+
   if (loading) {
     return (
       <div className={cn("space-y-2", className)}>
@@ -168,21 +183,11 @@ export default function SofaScoreEventWidget({
     );
   }
 
-  if (error || !src) {
+  if (error || !src || !matchUrl) {
     return (
-      <div className={cn("space-y-3", className)}>
+      <div className={cn("space-y-2", className)}>
         <div className="rounded-3xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-6 text-sm text-yellow-200">
           {error ?? "Widget SofaScore jest obecnie niedostępny."}
-        </div>
-
-        <div className="rounded-3xl border border-neutral-800 bg-neutral-950 px-4 py-5 text-sm text-neutral-400">
-          <div className="font-medium text-white">Możliwe przyczyny</div>
-          <ul className="mt-3 list-disc space-y-1 pl-5">
-            <li>SofaScore nie udostępnił jeszcze widgetu dla tego meczu.</li>
-            <li>Mecz nie ma jeszcze aktywnego mapowania SofaScore.</li>
-            <li>Masz włączony VPN, proxy lub blokowanie treści zewnętrznych.</li>
-            <li>Widget został chwilowo ograniczony po stronie SofaScore.</li>
-          </ul>
         </div>
       </div>
     );
@@ -195,7 +200,7 @@ export default function SofaScoreEventWidget({
           "overflow-hidden rounded-3xl border border-neutral-800",
           theme === "light" ? "bg-white" : "bg-neutral-950"
         )}
-        style={{ height: wrapperHeight }}
+        style={frameWrapStyle}
       >
         <iframe
           title={`SofaScore ${mode} ${sofascoreEventId}`}
@@ -206,18 +211,11 @@ export default function SofaScoreEventWidget({
           scrolling="no"
           loading="lazy"
           referrerPolicy="strict-origin-when-cross-origin"
-          style={
-            effectiveCropBottomPx > 0
-              ? {
-                  display: "block",
-                  marginBottom: `-${effectiveCropBottomPx}px`,
-                }
-              : { display: "block" }
-          }
+          onLoad={() => onLoaded?.(true)}
         />
       </div>
 
-      {!hideExternalLink && matchUrl ? (
+      {!hideExternalLink ? (
         <div className="text-xs text-neutral-500">
           Dane osadzone z SofaScore.{" "}
           <a

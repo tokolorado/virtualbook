@@ -595,24 +595,29 @@ function InlineWarning({ message }: { message: string }) {
 }
 
 function WidgetTroubleshooting({
-  title = "Jeśli widget się nie wyświetla",
+  title = "Skład się nie wyświetla?",
 }: {
   title?: string;
 }) {
   return (
-    <details className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-300">
-      <summary className="cursor-pointer list-none font-medium text-white [&::-webkit-details-marker]:hidden">
-        {title}
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-medium text-white transition hover:bg-neutral-900 [&::-webkit-details-marker]:hidden">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-neutral-700 text-[11px] font-bold text-neutral-300">
+          i
+        </span>
+        <span>{title}</span>
       </summary>
 
-      <div className="mt-3 space-y-2 text-neutral-400">
-        <div>Najczęstsze przyczyny:</div>
-        <ul className="list-disc space-y-1 pl-5">
+      <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-400">
+        <div className="font-medium text-white">Najczęstsze przyczyny:</div>
+
+        <ul className="mt-3 list-disc space-y-1.5 pl-5">
           <li>SofaScore nie opublikował jeszcze składu albo widżetu dla tego meczu.</li>
           <li>Masz włączony VPN, proxy, AdBlock albo restrykcyjną ochronę prywatności.</li>
           <li>Widżet został chwilowo ograniczony lub nie załadował się po stronie zewnętrznej.</li>
         </ul>
-        <div>
+
+        <div className="mt-3">
           Spróbuj wyłączyć VPN lub proxy, odświeżyć stronę, sprawdzić inną sieć
           albo wrócić bliżej rozpoczęcia meczu.
         </div>
@@ -841,9 +846,11 @@ export default function MatchInsightsSection({
   const [activeTab, setActiveTab] = useState<TabKey>("lineups");
   const [refreshTick, setRefreshTick] = useState(0);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+
   const [lineupsWidgetMapped, setLineupsWidgetMapped] = useState<boolean | null>(
     null
   );
+  const [lineupsWidgetLoaded, setLineupsWidgetLoaded] = useState(false);
 
   const [lineupsLoading, setLineupsLoading] = useState(true);
   const [lineupsError, setLineupsError] = useState<string | null>(null);
@@ -881,6 +888,7 @@ export default function MatchInsightsSection({
 
   useEffect(() => {
     setLineupsWidgetMapped(null);
+    setLineupsWidgetLoaded(false);
   }, [matchId]);
 
   useEffect(() => {
@@ -1055,6 +1063,11 @@ export default function MatchInsightsSection({
 
   const renderLineups = () => {
     const hasData = !!lineups?.home || !!lineups?.away;
+    const showWidgetFallback = !hasData;
+    const showLineupsInfoBox =
+      showWidgetFallback &&
+      lineupsWidgetLoaded !== true &&
+      lineupsWidgetMapped !== true;
 
     if (lineupsLoading && !hasData) {
       return (
@@ -1065,10 +1078,10 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (!hasData) {
+    if (showWidgetFallback) {
       return (
         <div className="space-y-4">
-          {lineupsWidgetMapped !== true ? (
+          {showLineupsInfoBox ? (
             lineupsError ? (
               <InlineWarning message="Nie udało się pobrać składów z naszej bazy. Próbujemy załadować widget SofaScore." />
             ) : (
@@ -1089,11 +1102,15 @@ export default function MatchInsightsSection({
             height={786}
             theme="dark"
             cropInternalFooter
-            cropBottomPx={88}
+            cropBottomPx={120}
+            hideExternalLink
             onMappingResolved={setLineupsWidgetMapped}
+            onLoaded={setLineupsWidgetLoaded}
           />
 
-          <WidgetTroubleshooting title="Jeśli skład się nie wyświetla" />
+          {!lineupsWidgetLoaded ? (
+            <WidgetTroubleshooting title="Skład się nie wyświetla?" />
+          ) : null}
         </div>
       );
     }
