@@ -21,6 +21,13 @@ type ReviewRow = {
   match: MatchDetails | null;
 };
 
+type RawMatchDetails = {
+  utc_date?: unknown;
+  competition_name?: unknown;
+  home_team?: unknown;
+  away_team?: unknown;
+};
+
 type RawReviewRow = {
   match_id: unknown;
   status: unknown;
@@ -29,12 +36,7 @@ type RawReviewRow = {
   next_retry_at: unknown;
   updated_at: unknown;
   mapped_at: unknown;
-  match?: Array<{
-    utc_date?: unknown;
-    competition_name?: unknown;
-    home_team?: unknown;
-    away_team?: unknown;
-  }> | null;
+  match?: RawMatchDetails | RawMatchDetails[] | null;
 };
 
 function getSupabaseAdmin() {
@@ -82,7 +84,9 @@ function normalizeMatchDetails(input: unknown): MatchDetails | null {
 }
 
 function normalizeReviewRow(input: RawReviewRow): ReviewRow {
-  const firstMatch = Array.isArray(input.match) ? input.match[0] : null;
+  const rawMatch = Array.isArray(input.match)
+    ? (input.match[0] ?? null)
+    : (input.match ?? null);
 
   return {
     match_id: safeNumber(input.match_id),
@@ -92,7 +96,7 @@ function normalizeReviewRow(input: RawReviewRow): ReviewRow {
     next_retry_at: safeNullableString(input.next_retry_at),
     updated_at: safeNullableString(input.updated_at),
     mapped_at: safeNullableString(input.mapped_at),
-    match: normalizeMatchDetails(firstMatch),
+    match: normalizeMatchDetails(rawMatch),
   };
 }
 
@@ -181,8 +185,9 @@ export default async function AdminMatchMappingPage() {
                   </div>
 
                   <div className="mt-4 text-xl font-semibold text-white">
-                    {item.match?.home_team ?? "Home"} vs{" "}
-                    {item.match?.away_team ?? "Away"}
+                    {item.match
+                      ? `${item.match.home_team} vs ${item.match.away_team}`
+                      : `matchId ${item.match_id}`}
                   </div>
 
                   <div className="mt-2 flex flex-wrap gap-2 text-xs text-neutral-400">
