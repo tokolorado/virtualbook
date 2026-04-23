@@ -1,4 +1,3 @@
-// components/match/MatchInsightsSection.tsx
 "use client";
 
 import SofaScoreEventWidget from "@/components/sofascore/SofaScoreEventWidget";
@@ -21,7 +20,14 @@ type MatchInsightsSectionProps = {
   isFinished?: boolean;
 };
 
-type TabKey = "lineups" | "stats" | "table" | "momentum" | "timeline";
+type TabKey =
+  | "lineups"
+  | "comparison"
+  | "h2h"
+  | "table"
+  | "liveStats"
+  | "momentum"
+  | "timeline";
 
 type LineupPlayer = {
   id: string;
@@ -45,7 +51,7 @@ type LineupsResponse = {
   away: LineupSide | null;
 };
 
-type StatsItem = {
+type StatLikeItem = {
   key: string;
   label: string;
   homeValue: string;
@@ -65,7 +71,41 @@ type StatsResponse = {
   matchId: number | null;
   home: StatsSide | null;
   away: StatsSide | null;
-  items: StatsItem[];
+  items: StatLikeItem[];
+  updatedAt: string | null;
+};
+
+type ComparisonResponse = {
+  matchId: number | null;
+  items: StatLikeItem[];
+  updatedAt: string | null;
+};
+
+type H2HSummary = {
+  homeWins: number;
+  draws: number;
+  awayWins: number;
+  totalMatches: number;
+  homeGoals: number;
+  awayGoals: number;
+  bttsCount: number;
+  over25Count: number;
+};
+
+type H2HMatch = {
+  id: string;
+  date: string | null;
+  competition: string | null;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number | null;
+  awayScore: number | null;
+};
+
+type H2HResponse = {
+  matchId: number | null;
+  summary: H2HSummary | null;
+  matches: H2HMatch[];
   updatedAt: string | null;
 };
 
@@ -192,6 +232,13 @@ function formatDateTime(value: string | null): string {
   const ts = Date.parse(value);
   if (!Number.isFinite(ts)) return value;
   return new Date(ts).toLocaleString();
+}
+
+function formatShortDate(value: string | null): string {
+  if (!value) return "Brak daty";
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return value;
+  return new Date(ts).toLocaleDateString();
 }
 
 function zonePalette(zone: TableZone) {
@@ -379,7 +426,7 @@ function normalizeStatsSide(
   };
 }
 
-function normalizeStatsItem(input: unknown): StatsItem {
+function normalizeStatLikeItem(input: unknown): StatLikeItem {
   const row =
     typeof input === "object" && input !== null
       ? (input as Record<string, unknown>)
@@ -418,7 +465,70 @@ function normalizeStatsResponse(
     matchId: safeNumber(row.matchId),
     home: normalizeStatsSide(row.home, homeTeam),
     away: normalizeStatsSide(row.away, awayTeam),
-    items: Array.isArray(row.items) ? row.items.map(normalizeStatsItem) : [],
+    items: Array.isArray(row.items) ? row.items.map(normalizeStatLikeItem) : [],
+    updatedAt: safeNullableString(row.updatedAt),
+  };
+}
+
+function normalizeComparisonResponse(input: unknown): ComparisonResponse {
+  const row =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+
+  return {
+    matchId: safeNumber(row.matchId),
+    items: Array.isArray(row.items) ? row.items.map(normalizeStatLikeItem) : [],
+    updatedAt: safeNullableString(row.updatedAt),
+  };
+}
+
+function normalizeH2HSummary(input: unknown): H2HSummary | null {
+  if (typeof input !== "object" || input === null) return null;
+
+  const row = input as Record<string, unknown>;
+
+  return {
+    homeWins: safeNumber(row.homeWins) ?? 0,
+    draws: safeNumber(row.draws) ?? 0,
+    awayWins: safeNumber(row.awayWins) ?? 0,
+    totalMatches: safeNumber(row.totalMatches) ?? 0,
+    homeGoals: safeNumber(row.homeGoals) ?? 0,
+    awayGoals: safeNumber(row.awayGoals) ?? 0,
+    bttsCount: safeNumber(row.bttsCount) ?? 0,
+    over25Count: safeNumber(row.over25Count) ?? 0,
+  };
+}
+
+function normalizeH2HMatch(input: unknown, index: number): H2HMatch {
+  const row =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+
+  return {
+    id: safeString(row.id, `h2h-${index}`),
+    date: safeNullableString(row.date),
+    competition: safeNullableString(row.competition),
+    homeTeam: safeString(row.homeTeam, "Gospodarze"),
+    awayTeam: safeString(row.awayTeam, "Goście"),
+    homeScore: safeNumber(row.homeScore),
+    awayScore: safeNumber(row.awayScore),
+  };
+}
+
+function normalizeH2HResponse(input: unknown): H2HResponse {
+  const row =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+
+  return {
+    matchId: safeNumber(row.matchId),
+    summary: normalizeH2HSummary(row.summary),
+    matches: Array.isArray(row.matches)
+      ? row.matches.map(normalizeH2HMatch)
+      : [],
     updatedAt: safeNullableString(row.updatedAt),
   };
 }
@@ -512,22 +622,6 @@ function positionLabel(position: string | null): string {
 
 function numberDisplay(value: number | null): string {
   return value === null ? "—" : String(value);
-}
-
-function isPlaceholderStatValue(value: string | null | undefined): boolean {
-  if (typeof value !== "string") return true;
-
-  const normalized = value.trim().toLowerCase();
-
-  return (
-    normalized === "" ||
-    normalized === "-" ||
-    normalized === "—" ||
-    normalized === "–" ||
-    normalized === "null" ||
-    normalized === "undefined" ||
-    normalized === "n/a"
-  );
 }
 
 function Surface({
@@ -776,7 +870,7 @@ function SideCard({
   );
 }
 
-function StatBarRow({ item }: { item: StatsItem }) {
+function StatBarRow({ item }: { item: StatLikeItem }) {
   const hasNumeric =
     item.homeNumeric !== null &&
     item.awayNumeric !== null &&
@@ -786,8 +880,8 @@ function StatBarRow({ item }: { item: StatsItem }) {
   const homeNum = item.homeNumeric ?? 0;
   const awayNum = item.awayNumeric ?? 0;
 
-  let homePercent = 0;
-  let awayPercent = 0;
+  let homePercent = 50;
+  let awayPercent = 50;
 
   if (hasNumeric) {
     const total = homeNum + awayNum;
@@ -808,27 +902,63 @@ function StatBarRow({ item }: { item: StatsItem }) {
         <div className="text-base font-semibold text-white">{item.awayValue}</div>
       </div>
 
-      {hasNumeric ? (
-        <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
-          <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
-            <div
-              className="h-full rounded-full bg-sky-500"
-              style={{ width: `${homePercent}%` }}
-            />
-          </div>
+      <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
+        <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
+          <div
+            className="h-full rounded-full bg-sky-500"
+            style={{ width: `${homePercent}%` }}
+          />
+        </div>
 
-          <div className="text-xs font-semibold text-neutral-500">
-            {Math.round(homePercent)}% / {Math.round(awayPercent)}%
-          </div>
+        <div className="text-xs font-semibold text-neutral-500">
+          {Math.round(homePercent)}% / {Math.round(awayPercent)}%
+        </div>
 
-          <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
-            <div
-              className="ml-auto h-full rounded-full bg-neutral-200"
-              style={{ width: `${awayPercent}%` }}
-            />
+        <div className="h-3 overflow-hidden rounded-full bg-neutral-800">
+          <div
+            className="ml-auto h-full rounded-full bg-neutral-200"
+            style={{ width: `${awayPercent}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function H2HSummaryCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+        {label}
+      </div>
+      <div className="mt-2 text-xl font-semibold text-white">{value}</div>
+    </div>
+  );
+}
+
+function H2HMatchRow({ match }: { match: H2HMatch }) {
+  return (
+    <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="text-sm text-neutral-500">
+            {match.competition ?? "H2H"} • {formatShortDate(match.date)}
+          </div>
+          <div className="mt-1 text-sm font-medium text-white">
+            {match.homeTeam} vs {match.awayTeam}
           </div>
         </div>
-      ) : null}
+
+        <div className="shrink-0 rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm font-semibold text-white">
+          {numberDisplay(match.homeScore)} : {numberDisplay(match.awayScore)}
+        </div>
+      </div>
     </div>
   );
 }
@@ -874,9 +1004,17 @@ export default function MatchInsightsSection({
   const [lineupsError, setLineupsError] = useState<string | null>(null);
   const [lineups, setLineups] = useState<LineupsResponse | null>(null);
 
-  const [statsLoading, setStatsLoading] = useState(true);
-  const [statsError, setStatsError] = useState<string | null>(null);
-  const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [liveStatsLoading, setLiveStatsLoading] = useState(true);
+  const [liveStatsError, setLiveStatsError] = useState<string | null>(null);
+  const [liveStats, setLiveStats] = useState<StatsResponse | null>(null);
+
+  const [comparisonLoading, setComparisonLoading] = useState(true);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
+
+  const [h2hLoading, setH2HLoading] = useState(true);
+  const [h2hError, setH2HError] = useState<string | null>(null);
+  const [h2h, setH2H] = useState<H2HResponse | null>(null);
 
   const [tableLoading, setTableLoading] = useState(true);
   const [tableError, setTableError] = useState<string | null>(null);
@@ -895,6 +1033,34 @@ export default function MatchInsightsSection({
     return canRenderLiveWidgets(matchStatus, isLive, isFinished);
   }, [matchStatus, isLive, isFinished]);
 
+  const visibleTabs = useMemo(() => {
+    if (isPreMatch) {
+      return [
+        { key: "lineups" as const, label: "Składy" },
+        { key: "comparison" as const, label: "Porównanie" },
+        { key: "h2h" as const, label: "H2H" },
+        { key: "table" as const, label: "Tabela" },
+      ];
+    }
+
+    if (isLive) {
+      return [
+        { key: "lineups" as const, label: "Składy" },
+        { key: "liveStats" as const, label: "Statystyki" },
+        { key: "table" as const, label: "Tabela" },
+        { key: "momentum" as const, label: "Momentum" },
+        { key: "timeline" as const, label: "Timeline" },
+      ];
+    }
+
+    return [
+      { key: "lineups" as const, label: "Składy" },
+      { key: "liveStats" as const, label: "Statystyki" },
+      { key: "table" as const, label: "Tabela" },
+      { key: "timeline" as const, label: "Timeline" },
+    ];
+  }, [isPreMatch, isLive]);
+
   useEffect(() => {
     const id = window.setInterval(() => {
       if (typeof document !== "undefined" && document.hidden) return;
@@ -908,6 +1074,12 @@ export default function MatchInsightsSection({
     setLineupsWidgetMapped(null);
     setLineupsWidgetLoaded(false);
   }, [matchId]);
+
+  useEffect(() => {
+    if (!visibleTabs.some((tab) => tab.key === activeTab)) {
+      setActiveTab(visibleTabs[0].key);
+    }
+  }, [activeTab, visibleTabs]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -958,15 +1130,22 @@ export default function MatchInsightsSection({
       }
     };
 
-    const loadStats = async () => {
-      if (!isBackgroundRefresh || !stats) {
-        setStatsLoading(true);
+    const loadLiveStats = async () => {
+      if (isPreMatch) {
+        setLiveStats(null);
+        setLiveStatsError(null);
+        setLiveStatsLoading(false);
+        return;
       }
 
-      setStatsError(null);
+      if (!isBackgroundRefresh || !liveStats) {
+        setLiveStatsLoading(true);
+      }
+
+      setLiveStatsError(null);
 
       if (!isBackgroundRefresh) {
-        setStats(null);
+        setLiveStats(null);
       }
 
       try {
@@ -987,7 +1166,7 @@ export default function MatchInsightsSection({
         const normalized = normalizeStatsResponse(json, homeTeam, awayTeam);
 
         if (!controller.signal.aborted) {
-          setStats(normalized);
+          setLiveStats(normalized);
         }
       } catch (error) {
         if (controller.signal.aborted) return;
@@ -995,10 +1174,114 @@ export default function MatchInsightsSection({
         const message =
           error instanceof Error ? error.message : "Błąd ładowania statystyk.";
 
-        setStatsError(message);
+        setLiveStatsError(message);
       } finally {
         if (!controller.signal.aborted) {
-          setStatsLoading(false);
+          setLiveStatsLoading(false);
+        }
+      }
+    };
+
+    const loadComparison = async () => {
+      if (!isPreMatch) {
+        setComparison(null);
+        setComparisonError(null);
+        setComparisonLoading(false);
+        return;
+      }
+
+      if (!isBackgroundRefresh || !comparison) {
+        setComparisonLoading(true);
+      }
+
+      setComparisonError(null);
+
+      if (!isBackgroundRefresh) {
+        setComparison(null);
+      }
+
+      try {
+        const response = await fetch(
+          `/api/match-center/comparison?matchId=${encodeURIComponent(String(matchId))}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Comparison fetch failed: ${response.status}`);
+        }
+
+        const json: unknown = await response.json();
+        const normalized = normalizeComparisonResponse(json);
+
+        if (!controller.signal.aborted) {
+          setComparison(normalized);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        const message =
+          error instanceof Error ? error.message : "Błąd ładowania porównania.";
+
+        setComparisonError(message);
+      } finally {
+        if (!controller.signal.aborted) {
+          setComparisonLoading(false);
+        }
+      }
+    };
+
+    const loadH2H = async () => {
+      if (!isPreMatch) {
+        setH2H(null);
+        setH2HError(null);
+        setH2HLoading(false);
+        return;
+      }
+
+      if (!isBackgroundRefresh || !h2h) {
+        setH2HLoading(true);
+      }
+
+      setH2HError(null);
+
+      if (!isBackgroundRefresh) {
+        setH2H(null);
+      }
+
+      try {
+        const response = await fetch(
+          `/api/match-center/h2h?matchId=${encodeURIComponent(String(matchId))}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`H2H fetch failed: ${response.status}`);
+        }
+
+        const json: unknown = await response.json();
+        const normalized = normalizeH2HResponse(json);
+
+        if (!controller.signal.aborted) {
+          setH2H(normalized);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        const message =
+          error instanceof Error ? error.message : "Błąd ładowania H2H.";
+
+        setH2HError(message);
+      } finally {
+        if (!controller.signal.aborted) {
+          setH2HLoading(false);
         }
       }
     };
@@ -1048,7 +1331,13 @@ export default function MatchInsightsSection({
       }
     };
 
-    void Promise.all([loadLineups(), loadStats(), loadTable()]).then(() => {
+    void Promise.all([
+      loadLineups(),
+      loadLiveStats(),
+      loadComparison(),
+      loadH2H(),
+      loadTable(),
+    ]).then(() => {
       if (!controller.signal.aborted) {
         setLastRefreshedAt(new Date().toISOString());
       }
@@ -1057,7 +1346,7 @@ export default function MatchInsightsSection({
     return () => {
       controller.abort();
     };
-  }, [matchId, homeTeam, awayTeam, refreshTick]);
+  }, [matchId, homeTeam, awayTeam, refreshTick, isPreMatch]);
 
   const sortedTableRows = useMemo(() => {
     return [...(table?.rows ?? [])].sort((a, b) => a.position - b.position);
@@ -1076,21 +1365,35 @@ export default function MatchInsightsSection({
 
   const isRefreshing =
     (lineupsLoading && !!lineups) ||
-    (statsLoading && !!stats) ||
+    (liveStatsLoading && !!liveStats) ||
+    (comparisonLoading && !!comparison) ||
+    (h2hLoading && !!h2h) ||
     (tableLoading && !!table);
 
-  const meaningfulStatsItems = useMemo(() => {
-    return (stats?.items ?? []).filter((item) => {
+  const meaningfulLiveStatsItems = useMemo(() => {
+    return (liveStats?.items ?? []).filter((item) => {
+      const hasNumeric =
+        (item.homeNumeric !== null && item.homeNumeric > 0) ||
+        (item.awayNumeric !== null && item.awayNumeric > 0);
+
+      const hasDisplayValue =
+        item.homeValue !== "—" || item.awayValue !== "—";
+
+      return hasNumeric || hasDisplayValue;
+    });
+  }, [liveStats]);
+
+  const meaningfulComparisonItems = useMemo(() => {
+    return (comparison?.items ?? []).filter((item) => {
       const hasNumeric =
         item.homeNumeric !== null || item.awayNumeric !== null;
 
       const hasDisplayValue =
-        !isPlaceholderStatValue(item.homeValue) ||
-        !isPlaceholderStatValue(item.awayValue);
+        item.homeValue !== "—" || item.awayValue !== "—";
 
       return hasNumeric || hasDisplayValue;
     });
-  }, [stats]);
+  }, [comparison]);
 
   const renderLineups = () => {
     const hasData = !!lineups?.home || !!lineups?.away;
@@ -1160,23 +1463,23 @@ export default function MatchInsightsSection({
     );
   };
 
-  const renderStats = () => {
-    const hasData = meaningfulStatsItems.length > 0;
+  const renderComparison = () => {
+    const hasData = meaningfulComparisonItems.length > 0;
 
-    if (statsLoading && !hasData) {
+    if (comparisonLoading && !hasData) {
       return (
         <StateBox
-          title="Ładowanie statystyk..."
-          description="Pobieramy najważniejsze liczby meczowe dla obu drużyn."
+          title="Ładowanie porównania..."
+          description="Pobieramy przedmeczowe porównanie obu drużyn."
         />
       );
     }
 
-    if (!hasData && statsError) {
+    if (!hasData && comparisonError) {
       return (
         <StateBox
-          title="Nie udało się załadować statystyk"
-          description={statsError}
+          title="Nie udało się załadować porównania"
+          description={comparisonError}
           tone="error"
         />
       );
@@ -1185,15 +1488,145 @@ export default function MatchInsightsSection({
     if (!hasData) {
       return (
         <StateBox
-          title="Brak statystyk"
-          description="Dla tego meczu nie ma obecnie dostępnych statystyk."
+          title="Brak danych porównawczych"
+          description="Dla tego meczu nie ma jeszcze dostępnego porównania przedmeczowego."
         />
       );
     }
 
     return (
       <div className="space-y-4">
-        {statsError ? (
+        {comparisonError ? (
+          <InlineWarning message="Nie udało się odświeżyć porównania. Pokazujemy ostatnio pobrane dane." />
+        ) : null}
+
+        <Surface className="px-4 py-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-neutral-400">
+              Porównanie:{" "}
+              <span className="font-semibold text-white">{homeTeam}</span> vs{" "}
+              <span className="font-semibold text-white">{awayTeam}</span>
+            </div>
+
+            <div className="text-xs text-neutral-500">
+              {formatDateTime(comparison?.updatedAt ?? null)}
+            </div>
+          </div>
+        </Surface>
+
+        <div className="space-y-3">
+          {meaningfulComparisonItems.map((item) => (
+            <StatBarRow key={item.key} item={item} />
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderH2H = () => {
+    const hasData = (h2h?.matches?.length ?? 0) > 0 || !!h2h?.summary;
+
+    if (h2hLoading && !hasData) {
+      return (
+        <StateBox
+          title="Ładowanie H2H..."
+          description="Pobieramy ostatnie bezpośrednie mecze i bilans obu drużyn."
+        />
+      );
+    }
+
+    if (!hasData && h2hError) {
+      return (
+        <StateBox
+          title="Nie udało się załadować H2H"
+          description={h2hError}
+          tone="error"
+        />
+      );
+    }
+
+    if (!hasData) {
+      return (
+        <StateBox
+          title="Brak danych H2H"
+          description="Dla tego meczu nie ma obecnie dostępnych danych head-to-head."
+        />
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {h2hError ? (
+          <InlineWarning message="Nie udało się odświeżyć H2H. Pokazujemy ostatnio pobrane dane." />
+        ) : null}
+
+        {!!h2h?.summary ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <H2HSummaryCard label={`${homeTeam} wygrane`} value={h2h.summary.homeWins} />
+            <H2HSummaryCard label="Remisy" value={h2h.summary.draws} />
+            <H2HSummaryCard label={`${awayTeam} wygrane`} value={h2h.summary.awayWins} />
+            <H2HSummaryCard label="Liczba meczów" value={h2h.summary.totalMatches} />
+            <H2HSummaryCard
+              label="Bramki łącznie"
+              value={`${h2h.summary.homeGoals}:${h2h.summary.awayGoals}`}
+            />
+            <H2HSummaryCard label="BTTS" value={h2h.summary.bttsCount} />
+            <H2HSummaryCard label="Over 2.5" value={h2h.summary.over25Count} />
+            <H2HSummaryCard
+              label="Aktualizacja"
+              value={formatDateTime(h2h.updatedAt ?? null)}
+            />
+          </div>
+        ) : null}
+
+        {(h2h?.matches?.length ?? 0) > 0 ? (
+          <Surface className="p-4">
+            <div className="text-lg font-semibold text-white">Ostatnie mecze H2H</div>
+            <div className="mt-4 space-y-3">
+              {h2h?.matches.map((match) => (
+                <H2HMatchRow key={match.id} match={match} />
+              ))}
+            </div>
+          </Surface>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderLiveStats = () => {
+    const hasData = meaningfulLiveStatsItems.length > 0;
+
+    if (liveStatsLoading && !hasData) {
+      return (
+        <StateBox
+          title="Ładowanie statystyk..."
+          description="Pobieramy najważniejsze liczby meczowe dla obu drużyn."
+        />
+      );
+    }
+
+    if (!hasData && liveStatsError) {
+      return (
+        <StateBox
+          title="Nie udało się załadować statystyk"
+          description={liveStatsError}
+          tone="error"
+        />
+      );
+    }
+
+    if (!hasData) {
+      return (
+        <StateBox
+          title="Brak statystyk live"
+          description="Statystyki meczowe pojawią się, gdy dostawca udostępni dane dla trwającego lub zakończonego spotkania."
+        />
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {liveStatsError ? (
           <InlineWarning message="Nie udało się odświeżyć statystyk. Pokazujemy ostatnio pobrane dane." />
         ) : null}
 
@@ -1202,22 +1635,22 @@ export default function MatchInsightsSection({
             <div className="text-sm text-neutral-400">
               Statystyki:{" "}
               <span className="font-semibold text-white">
-                {stats?.home?.teamName ?? homeTeam}
+                {liveStats?.home?.teamName ?? homeTeam}
               </span>{" "}
               vs{" "}
               <span className="font-semibold text-white">
-                {stats?.away?.teamName ?? awayTeam}
+                {liveStats?.away?.teamName ?? awayTeam}
               </span>
             </div>
 
             <div className="text-xs text-neutral-500">
-              {formatDateTime(stats?.updatedAt ?? null)}
+              {formatDateTime(liveStats?.updatedAt ?? null)}
             </div>
           </div>
         </Surface>
 
         <div className="space-y-3">
-          {meaningfulStatsItems.map((item) => (
+          {meaningfulLiveStatsItems.map((item) => (
             <StatBarRow key={item.key} item={item} />
           ))}
         </div>
@@ -1499,31 +1932,15 @@ export default function MatchInsightsSection({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <TabButton
-            label="Składy"
-            active={activeTab === "lineups"}
-            onClick={() => setActiveTab("lineups")}
-          />
-          <TabButton
-            label="Statystyki"
-            active={activeTab === "stats"}
-            onClick={() => setActiveTab("stats")}
-          />
-          <TabButton
-            label="Tabela"
-            active={activeTab === "table"}
-            onClick={() => setActiveTab("table")}
-          />
-          <TabButton
-            label="Momentum"
-            active={activeTab === "momentum"}
-            onClick={() => setActiveTab("momentum")}
-          />
-          <TabButton
-            label="Timeline"
-            active={activeTab === "timeline"}
-            onClick={() => setActiveTab("timeline")}
-          />
+          {visibleTabs.map((tab) => (
+            <TabButton
+              key={tab.key}
+              label={tab.label}
+              active={activeTab === tab.key}
+              onClick={() => setActiveTab(tab.key)}
+            />
+          ))}
+
           <button
             type="button"
             onClick={() => setRefreshTick((v) => v + 1)}
@@ -1534,16 +1951,20 @@ export default function MatchInsightsSection({
         </div>
       </div>
 
-      <div className="mt-6">
-        {activeTab === "lineups"
-          ? renderLineups()
-          : activeTab === "stats"
-            ? renderStats()
-            : activeTab === "momentum"
-              ? renderMomentum()
-              : activeTab === "timeline"
-                ? renderTimeline()
-                : renderTable()}
+     <div className="mt-6">
+          {activeTab === "lineups"
+            ? renderLineups()
+            : activeTab === "comparison"
+              ? renderComparison()
+              : activeTab === "h2h"
+                ? renderH2H()
+                : activeTab === "liveStats"
+                  ? renderLiveStats()
+                  : activeTab === "momentum"
+                    ? renderMomentum()
+                    : activeTab === "timeline"
+                      ? renderTimeline()
+                      : renderTable()}
       </div>
     </section>
   );
