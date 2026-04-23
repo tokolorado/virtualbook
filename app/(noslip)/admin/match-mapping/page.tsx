@@ -107,6 +107,16 @@ function formatDate(value: string | null) {
   return new Date(ts).toLocaleString();
 }
 
+function isUpcomingOrRecentMatch(utcDate: string | null) {
+  if (!utcDate) return false;
+
+  const ts = Date.parse(utcDate);
+  if (!Number.isFinite(ts)) return false;
+
+  const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
+  return ts >= sixHoursAgo;
+}
+
 async function getReviewItems(): Promise<ReviewRow[]> {
   const supabase = getSupabaseAdmin();
 
@@ -129,13 +139,16 @@ async function getReviewItems(): Promise<ReviewRow[]> {
     `)
     .eq("status", "needs_review")
     .order("updated_at", { ascending: false })
-    .limit(50);
+    .limit(200);
 
   if (error) {
     throw new Error(`Nie udało się pobrać review items: ${error.message}`);
   }
 
-  return ((data ?? []) as RawReviewRow[]).map(normalizeReviewRow);
+  return ((data ?? []) as RawReviewRow[])
+    .map(normalizeReviewRow)
+    .filter((item) => isUpcomingOrRecentMatch(item.match?.utc_date ?? null))
+    .slice(0, 50);
 }
 
 export default async function AdminMatchMappingPage() {
