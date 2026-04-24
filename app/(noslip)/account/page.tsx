@@ -1,3 +1,4 @@
+//app/(noslip)/account/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -47,6 +48,7 @@ type LedgerRow = {
 };
 
 const BET_DETAILS_PATH = (betId: string) => `/bets/${betId}`;
+
 
 function toNum(v: unknown) {
   const n = typeof v === "number" ? v : Number(v);
@@ -215,6 +217,8 @@ function LoadingShell() {
 export default function AccountPage() {
   const router = useRouter();
 
+  const [isRecovery, setIsRecovery] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tab, setTab] = useState<TabKey>("overview");
@@ -259,11 +263,27 @@ export default function AccountPage() {
   }, [oldPass, newPass]);
 
   const canSubmitPass = useMemo(() => {
-    if (cpLoading) return false;
-    if (!oldPass || !newPass || !newPass2) return false;
-    if (passMismatch || newPassTooShort || sameAsOldPass) return false;
+  if (cpLoading) return false;
+
+  if (isRecovery) {
+    if (!newPass || !newPass2) return false;
+    if (passMismatch || newPassTooShort) return false;
     return true;
-  }, [cpLoading, oldPass, newPass, newPass2, passMismatch, newPassTooShort, sameAsOldPass]);
+  }
+
+  if (!oldPass || !newPass || !newPass2) return false;
+  if (passMismatch || newPassTooShort || sameAsOldPass) return false;
+  return true;
+}, [
+  cpLoading,
+  isRecovery,
+  oldPass,
+  newPass,
+  newPass2,
+  passMismatch,
+  newPassTooShort,
+  sameAsOldPass,
+]);
 
   const totalBets = toNum(stats?.bets_count);
   const activeBets = toNum(stats?.active_bets);
@@ -371,6 +391,27 @@ export default function AccountPage() {
   }, []);
 
   useEffect(() => {
+  const { data } = supabase.auth.onAuthStateChange((event) => {
+    if (event === "PASSWORD_RECOVERY") {
+      setIsRecovery(true);
+      setTab("security");
+    }
+  });
+
+  const hash = window.location.hash;
+  const search = window.location.search;
+
+  if (hash.includes("type=recovery") || search.includes("type=recovery")) {
+    setIsRecovery(true);
+    setTab("security");
+  }
+
+  return () => {
+    data.subscription.unsubscribe();
+  };
+}, []);
+
+  useEffect(() => {
     const onRefresh = (e?: Event) => {
       const ce = e as CustomEvent | undefined;
       const maybe = ce?.detail?.balance_vb ?? ce?.detail?.balanceAfter;
@@ -394,7 +435,7 @@ export default function AccountPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  const submitChangePassword = async () => {
+    const submitChangePassword = async () => {
     setCpError(null);
     setCpOk(null);
 
@@ -405,7 +446,9 @@ export default function AccountPage() {
 
     if (!canSubmitPass) {
       setCpError(
-        "Uzupełnij poprawnie pola. Nowe hasło musi mieć minimum 8 znaków, nie może być takie samo jak stare i musi zgadzać się w obu polach."
+        isRecovery
+          ? "Uzupełnij poprawnie pola. Nowe hasło musi mieć minimum 8 znaków i musi zgadzać się w obu polach."
+          : "Uzupełnij poprawnie pola. Nowe hasło musi mieć minimum 8 znaków, nie może być takie samo jak stare i musi zgadzać się w obu polach."
       );
       return;
     }
@@ -413,14 +456,16 @@ export default function AccountPage() {
     try {
       setCpLoading(true);
 
-      const { error: reauthErr } = await supabase.auth.signInWithPassword({
-        email,
-        password: oldPass,
-      });
+      if (!isRecovery) {
+        const { error: reauthErr } = await supabase.auth.signInWithPassword({
+          email,
+          password: oldPass,
+        });
 
-      if (reauthErr) {
-        setCpError("Stare hasło jest nieprawidłowe.");
-        return;
+        if (reauthErr) {
+          setCpError("Stare hasło jest nieprawidłowe.");
+          return;
+        }
       }
 
       const { error: updErr } = await supabase.auth.updateUser({
@@ -432,7 +477,13 @@ export default function AccountPage() {
         return;
       }
 
-      setCpOk("Hasło zostało zmienione ✅");
+      setCpOk(
+        isRecovery
+          ? "Nowe hasło zostało ustawione ✅"
+          : "Hasło zostało zmienione ✅"
+      );
+
+      setIsRecovery(false);
       setOldPass("");
       setNewPass("");
       setNewPass2("");
@@ -999,7 +1050,11 @@ export default function AccountPage() {
 
           <SectionCard
             title="Zmiana hasła"
-            subtitle="Dla bezpieczeństwa wymagamy podania starego hasła"
+            subtitle={
+            isRecovery
+              ? "Ustaw nowe hasło po użyciu linku resetującego"
+              : "Dla bezpieczeństwa wymagamy podania starego hasła"
+            }
           >
             <div className="space-y-4">
               {cpError ? (
@@ -1015,17 +1070,23 @@ export default function AccountPage() {
               ) : null}
 
               <div className="grid grid-cols-1 gap-3">
-                <div className="space-y-1">
-                  <div className="text-xs text-neutral-400">Stare hasło</div>
-                  <input
-                    type="password"
-                    value={oldPass}
-                    onChange={(e) => setOldPass(e.target.value)}
-                    className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm"
-                    autoComplete="current-password"
-                    placeholder="Wpisz stare hasło"
-                  />
-                </div>
+                {!isRecovery ? (
+                  <div className="space-y-1">
+                    <div className="text-xs text-neutral-400">Stare hasło</div>
+                    <input
+                      type="password"
+                      value={oldPass}
+                      onChange={(e) => setOldPass(e.target.value)}
+                      className="w-full rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-3 text-sm"
+                      autoComplete="current-password"
+                      placeholder="Wpisz stare hasło"
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-4 text-sm text-sky-200">
+                    Jesteś w trybie resetowania hasła. Nie musisz znać starego hasła — wpisz tylko nowe.
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="space-y-1">
@@ -1036,7 +1097,7 @@ export default function AccountPage() {
                       onChange={(e) => setNewPass(e.target.value)}
                       className={[
                         "w-full rounded-xl border bg-neutral-950 px-3 py-3 text-sm",
-                        newPassTooShort || sameAsOldPass
+                        newPassTooShort || (!isRecovery && sameAsOldPass)
                           ? "border-red-700"
                           : "border-neutral-800",
                       ].join(" ")}
@@ -1062,16 +1123,22 @@ export default function AccountPage() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-                  <div
-                    className={[
-                      "rounded-xl border px-3 py-2",
-                      oldPass
-                        ? "border-green-500/30 bg-green-500/10 text-green-300"
-                        : "border-neutral-800 bg-neutral-950/50 text-neutral-400",
-                    ].join(" ")}
-                  >
-                    Stare hasło wpisane
-                  </div>
+                  {!isRecovery ? (
+                    <div
+                      className={[
+                        "rounded-xl border px-3 py-2",
+                        oldPass
+                          ? "border-green-500/30 bg-green-500/10 text-green-300"
+                          : "border-neutral-800 bg-neutral-950/50 text-neutral-400",
+                      ].join(" ")}
+                    >
+                      Stare hasło wpisane
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sky-300">
+                      Tryb resetowania aktywny
+                    </div>
+                  )}
 
                   <div
                     className={[
@@ -1087,7 +1154,7 @@ export default function AccountPage() {
                   <div
                     className={[
                       "rounded-xl border px-3 py-2",
-                      !passMismatch && !!newPass && !!newPass2 && !sameAsOldPass
+                      !passMismatch && !!newPass && !!newPass2 && (isRecovery || !sameAsOldPass)
                         ? "border-green-500/30 bg-green-500/10 text-green-300"
                         : "border-neutral-800 bg-neutral-950/50 text-neutral-400",
                     ].join(" ")}
@@ -1106,7 +1173,7 @@ export default function AccountPage() {
                   </div>
                 ) : null}
 
-                {sameAsOldPass ? (
+                {!isRecovery && sameAsOldPass ? (
                   <div className="text-xs text-red-300">
                     Nowe hasło nie może być takie samo jak stare.
                   </div>
@@ -1120,7 +1187,7 @@ export default function AccountPage() {
                   type="button"
                   className="rounded-xl border border-neutral-800 bg-green-700 px-4 py-2 text-sm text-white transition hover:bg-green-600 disabled:opacity-50 disabled:hover:bg-green-700"
                 >
-                  {cpLoading ? "Zmieniam..." : "Zmień hasło"}
+                  {cpLoading ? "Zmieniam..." : isRecovery ? "Ustaw nowe hasło" : "Zmień hasło"}
                 </button>
 
                 <button
