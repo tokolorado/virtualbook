@@ -349,9 +349,26 @@ export default function LoginPageClient() {
         });
 
         if (error) {
-          setForgotError("Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę.");
-          return;
-        }
+            console.error("[forgot-password] resetPasswordForEmail error:", error);
+
+            const msg = String(error.message || "").toLowerCase();
+
+            if (
+              msg.includes("rate") ||
+              msg.includes("too many") ||
+              msg.includes("security purposes")
+            ) {
+              setForgotError(
+                "Link resetujący był wysyłany zbyt często. Odczekaj chwilę i spróbuj ponownie."
+              );
+              return;
+            }
+
+            setForgotError(
+              "Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę."
+            );
+            return;
+          }
       }
 
       setForgotSent(true);
