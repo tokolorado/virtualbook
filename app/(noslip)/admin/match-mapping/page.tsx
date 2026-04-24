@@ -1,3 +1,4 @@
+// app/(noslip)/admin/match-mapping/page.tsx
 import { createClient } from "@supabase/supabase-js";
 import { assignMatchMapping, moveBackToPending } from "./actions";
 
@@ -10,6 +11,12 @@ type MatchDetails = {
   away_team: string;
 };
 
+type MappingDetails = {
+  sofascore_event_id: number;
+  mapping_method: string | null;
+  confidence: number | null;
+};
+
 type ReviewRow = {
   match_id: number;
   status: string;
@@ -19,6 +26,7 @@ type ReviewRow = {
   updated_at: string | null;
   mapped_at: string | null;
   match: MatchDetails | null;
+  mapping: MappingDetails | null;
 };
 
 type RawMatchDetails = {
@@ -26,6 +34,12 @@ type RawMatchDetails = {
   competition_name?: unknown;
   home_team?: unknown;
   away_team?: unknown;
+};
+
+type RawMappingDetails = {
+  sofascore_event_id?: unknown;
+  mapping_method?: unknown;
+  confidence?: unknown;
 };
 
 type RawReviewRow = {
@@ -37,6 +51,7 @@ type RawReviewRow = {
   updated_at: unknown;
   mapped_at: unknown;
   match?: RawMatchDetails | RawMatchDetails[] | null;
+  mapping?: RawMappingDetails | RawMappingDetails[] | null;
 };
 
 function getSupabaseAdmin() {
@@ -83,10 +98,29 @@ function normalizeMatchDetails(input: unknown): MatchDetails | null {
   };
 }
 
+function normalizeMappingDetails(input: unknown): MappingDetails | null {
+  if (typeof input !== "object" || input === null) return null;
+
+  const row = input as Record<string, unknown>;
+  const eventId = safeNumber(row.sofascore_event_id);
+
+  if (!eventId) return null;
+
+  return {
+    sofascore_event_id: eventId,
+    mapping_method: safeNullableString(row.mapping_method),
+    confidence: safeNumber(row.confidence),
+  };
+}
+
 function normalizeReviewRow(input: RawReviewRow): ReviewRow {
   const rawMatch = Array.isArray(input.match)
-    ? (input.match[0] ?? null)
-    : (input.match ?? null);
+    ? input.match[0] ?? null
+    : input.match ?? null;
+
+  const rawMapping = Array.isArray(input.mapping)
+    ? input.mapping[0] ?? null
+    : input.mapping ?? null;
 
   return {
     match_id: safeNumber(input.match_id),
@@ -97,6 +131,7 @@ function normalizeReviewRow(input: RawReviewRow): ReviewRow {
     updated_at: safeNullableString(input.updated_at),
     mapped_at: safeNullableString(input.mapped_at),
     match: normalizeMatchDetails(rawMatch),
+    mapping: normalizeMappingDetails(rawMapping),
   };
 }
 
@@ -105,16 +140,6 @@ function formatDate(value: string | null) {
   const ts = Date.parse(value);
   if (!Number.isFinite(ts)) return value;
   return new Date(ts).toLocaleString();
-}
-
-function isUpcomingOrRecentMatch(utcDate: string | null) {
-  if (!utcDate) return false;
-
-  const ts = Date.parse(utcDate);
-  if (!Number.isFinite(ts)) return false;
-
-  const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
-  return ts >= sixHoursAgo;
 }
 
 async function getReviewItems(): Promise<ReviewRow[]> {
@@ -135,10 +160,18 @@ async function getReviewItems(): Promise<ReviewRow[]> {
         competition_name,
         home_team,
         away_team
+      ),
+      mapping:match_sofascore_map (
+        sofascore_event_id,
+        mapping_method,
+        confidence
       )
     `)
     .eq("status", "needs_review")
-    .gte("match.utc_date", new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString())
+    .gte(
+      "match.utc_date",
+      new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
+    )
     .order("utc_date", {
       referencedTable: "matches",
       ascending: true,
@@ -179,116 +212,131 @@ export default async function AdminMatchMappingPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {items.map((item) => (
-            <div
-              key={item.match_id}
-              className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5"
-            >
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-300">
-                      matchId: {item.match_id}
-                    </span>
-                    <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs text-yellow-300">
-                      {item.status}
-                    </span>
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-300">
-                      attempts: {item.attempts}
-                    </span>
-                  </div>
+          {items.map((item) => {
+            const searchQuery = `${item.match?.home_team ?? ""} ${
+              item.match?.away_team ?? ""
+            }`.trim();
 
-                  <div className="mt-4 text-xl font-semibold text-white">
-                    {item.match
-                      ? `${item.match.home_team} vs ${item.match.away_team}`
-                      : `matchId ${item.match_id}`}
-                  </div>
-
-                  <a
-                    href={`https://www.sofascore.com/search?q=${encodeURIComponent(
-                        `${item.match?.home_team ?? ""} ${item.match?.away_team ?? ""}`
-                    )}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-3 inline-flex rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-900"
-                    >
-                    Szukaj na SofaScore
-                   </a>
-
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-neutral-400">
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
-                      Liga: {item.match?.competition_name ?? "—"}
-                    </span>
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
-                      Data: {formatDate(item.match?.utc_date ?? null)}
-                    </span>
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
-                      Updated: {formatDate(item.updated_at)}
-                    </span>
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
-                      Next retry: {formatDate(item.next_retry_at)}
-                    </span>
-                  </div>
-
-                  <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-                    {item.last_error ?? "Brak błędu"}
-                  </div>
-                </div>
-
-                <div className="w-full xl:w-[420px]">
-                  <form action={assignMatchMapping} className="space-y-3">
-                    <input type="hidden" name="matchId" value={item.match_id} />
-                    <input type="hidden" name="mappingMethod" value="manual" />
-                    <input type="hidden" name="confidence" value="1" />
-
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-400">
-                        SofaScore event ID
-                      </label>
-                      <input
-                        name="sofascoreEventId"
-                        type="number"
-                        required
-                        placeholder="np. 14083330"
-                        className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
-                      />
+            return (
+              <div
+                key={item.match_id}
+                className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5"
+              >
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-300">
+                        matchId: {item.match_id}
+                      </span>
+                      <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs text-yellow-300">
+                        {item.status}
+                      </span>
+                      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-300">
+                        attempts: {item.attempts}
+                      </span>
                     </div>
 
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-400">
-                        Notes
-                      </label>
-                      <input
-                        name="notes"
-                        type="text"
-                        defaultValue="manual review assign"
-                        className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
-                      />
+                    <div className="mt-4 text-xl font-semibold text-white">
+                      {item.match
+                        ? `${item.match.home_team} vs ${item.match.away_team}`
+                        : `matchId ${item.match_id}`}
                     </div>
 
-                    <div className="flex gap-3">
+                    {item.mapping?.sofascore_event_id ? (
+                      <a
+                        href={`https://www.sofascore.com/event/${item.mapping.sofascore_event_id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-3 inline-flex rounded-2xl border border-green-500 bg-green-500/10 px-4 py-2 text-sm font-semibold text-green-300 hover:bg-green-500/15"
+                      >
+                        Otwórz mecz na SofaScore
+                      </a>
+                    ) : (
+                      <a
+                        href={`https://www.sofascore.com/search?q=${encodeURIComponent(
+                          searchQuery
+                        )}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-3 inline-flex rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-900"
+                      >
+                        Szukaj na SofaScore
+                      </a>
+                    )}
+
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-neutral-400">
+                      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
+                        Liga: {item.match?.competition_name ?? "—"}
+                      </span>
+                      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
+                        Data: {formatDate(item.match?.utc_date ?? null)}
+                      </span>
+                      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
+                        Updated: {formatDate(item.updated_at)}
+                      </span>
+                      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
+                        Next retry: {formatDate(item.next_retry_at)}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                      {item.last_error ?? "Brak błędu"}
+                    </div>
+                  </div>
+
+                  <div className="w-full xl:w-[420px]">
+                    <form action={assignMatchMapping} className="space-y-3">
+                      <input type="hidden" name="matchId" value={item.match_id} />
+                      <input type="hidden" name="mappingMethod" value="manual" />
+                      <input type="hidden" name="confidence" value="1" />
+
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-400">
+                          SofaScore event ID
+                        </label>
+                        <input
+                          name="sofascoreEventId"
+                          type="number"
+                          required
+                          placeholder="np. 14083330"
+                          className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-400">
+                          Notes
+                        </label>
+                        <input
+                          name="notes"
+                          type="text"
+                          defaultValue="manual review assign"
+                          className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-500"
+                        />
+                      </div>
+
                       <button
                         type="submit"
                         className="rounded-2xl border border-sky-500 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-300"
                       >
                         Przypisz mapowanie
                       </button>
-                    </div>
-                  </form>
+                    </form>
 
-                  <form action={moveBackToPending} className="mt-3">
-                    <input type="hidden" name="matchId" value={item.match_id} />
-                    <button
-                      type="submit"
-                      className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-white"
-                    >
-                      Przywróć do pending
-                    </button>
-                  </form>
+                    <form action={moveBackToPending} className="mt-3">
+                      <input type="hidden" name="matchId" value={item.match_id} />
+                      <button
+                        type="submit"
+                        className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-white"
+                      >
+                        Przywróć do pending
+                      </button>
+                    </form>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>

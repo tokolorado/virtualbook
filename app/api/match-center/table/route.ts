@@ -1,6 +1,7 @@
 // app/api/match-center/table/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { resolveSofaScoreEventId } from "@/lib/sofascore/resolveEventId";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { resolveSofaScoreEventId } from "@/lib/sofascore/resolveEventId";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

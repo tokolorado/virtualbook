@@ -1,5 +1,7 @@
+// app/api/match-center/lineups/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { resolveSofaScoreEventId } from "@/lib/sofascore/resolveEventId";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +51,9 @@ type LineupTeam = {
 };
 
 type LineupsResponse = {
+  matchId: number;
+  sofascoreEventId: number | null;
+  needsMapping: boolean;
   home: LineupTeam | null;
   away: LineupTeam | null;
 };
@@ -100,8 +105,14 @@ function buildTeam(
   const hasMeta =
     !!meta &&
     (side === "home"
-      ? !!meta.home_team_name || !!meta.home_formation || !!meta.home_status || !!meta.home_coach
-      : !!meta.away_team_name || !!meta.away_formation || !!meta.away_status || !!meta.away_coach);
+      ? !!meta.home_team_name ||
+        !!meta.home_formation ||
+        !!meta.home_status ||
+        !!meta.home_coach
+      : !!meta.away_team_name ||
+        !!meta.away_formation ||
+        !!meta.away_status ||
+        !!meta.away_coach);
 
   if (!hasAnyPlayers && !hasMeta) {
     return null;
@@ -141,6 +152,7 @@ export async function GET(req: Request) {
     }
 
     const sb = supabaseAdmin();
+    const sofascoreEventId = await resolveSofaScoreEventId(sb, matchId);
 
     const [{ data: meta, error: metaError }, { data: players, error: playersError }] =
       await Promise.all([
@@ -191,7 +203,14 @@ export async function GET(req: Request) {
       playersError.message.toLowerCase().includes("does not exist");
 
     if (missingMetaTable || missingPlayersTable) {
-      const empty: LineupsResponse = { home: null, away: null };
+      const empty: LineupsResponse = {
+        matchId,
+        sofascoreEventId,
+        needsMapping: !sofascoreEventId,
+        home: null,
+        away: null,
+      };
+
       return NextResponse.json(empty, { status: 200 });
     }
 
@@ -212,6 +231,9 @@ export async function GET(req: Request) {
     const safePlayers = players ?? [];
 
     const response: LineupsResponse = {
+      matchId,
+      sofascoreEventId,
+      needsMapping: !sofascoreEventId,
       home: buildTeam(meta ?? null, safePlayers, "home"),
       away: buildTeam(meta ?? null, safePlayers, "away"),
     };
