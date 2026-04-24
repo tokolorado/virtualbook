@@ -2,29 +2,15 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { requireCronSecret } from "@/lib/requireCronSecret";
+import { resolveSofaScoreEventId } from "@/lib/sofascore/resolveEventId";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const FOOTBALL_DATA_BASE = "https://api.football-data.org/v4";
+const SOFASCORE_BASE = "https://api.sofascore.com/api/v1";
 
 type ImportBody = {
   matchId?: number | string;
-};
-
-type MatchExistsRow = {
-  id: number;
-};
-
-type FdTeamNormalized = {
-  id: number | null;
-  name: string;
-  formation: string | null;
-  coachName: string | null;
-  status: string | null;
-  lineup: unknown[];
-  bench: unknown[];
-  statistics: Record<string, unknown> | null;
 };
 
 type LineupHeaderUpsert = {
@@ -47,6 +33,7 @@ type LineupPlayerInsert = {
   shirt_number: number | null;
   position: string | null;
   captain: boolean;
+  sort_order: number;
 };
 
 type TeamStatsInsert = {
@@ -94,20 +81,18 @@ function safeBoolean(value: unknown): boolean {
   return value === true;
 }
 
-async function fdFetch(path: string) {
-  const token =
-    process.env.FOOTBALL_DATA_TOKEN || process.env.FOOTBALL_DATA_API_KEY;
-
-  if (!token) {
-    throw new Error("Missing FOOTBALL_DATA_TOKEN (or FOOTBALL_DATA_API_KEY)");
-  }
-
-  const response = await fetch(`${FOOTBALL_DATA_BASE}${path}`, {
+async function sofaFetch(path: string) {
+  const response = await fetch(`${SOFASCORE_BASE}${path}`, {
     method: "GET",
-    headers: {
-      "X-Auth-Token": token,
-    },
     cache: "no-store",
+    headers: {
+      accept: "application/json, text/plain, */*",
+      "accept-language": "en-US,en;q=0.9,pl;q=0.8",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      referer: "https://www.sofascore.com/",
+      origin: "https://www.sofascore.com",
+    },
   });
 
   const text = await response.text();
@@ -120,82 +105,147 @@ async function fdFetch(path: string) {
   }
 
   if (!response.ok) {
-    const errorObj = asRecord(payload);
-    throw new Error(
-      safeString(errorObj?.message) ||
-        safeString(errorObj?.error) ||
-        `football-data error (HTTP ${response.status})`
-    );
+    throw new Error(`SofaScore fetch failed ${path}: ${response.status}`);
   }
 
   return payload;
 }
 
-function normalizeTeamNode(input: unknown, fallbackName: string): FdTeamNormalized {
-  const row = asRecord(input) ?? {};
-  const coach = asRecord(row.coach);
-  const lineup = asArray(row.lineup);
-  const bench = asArray(row.bench);
-  const statistics = asRecord(row.statistics);
+function getTeamName(team: Record<string, unknown> | null, fallback: string) {
+  return (
+    safeNullableString(team?.name) ??
+    safeNullableString(team?.shortName) ??
+    fallback
+  );
+}
 
-  let status: string | null = null;
-  if (lineup.length > 0 || bench.length > 0) {
-    status = "confirmed";
-  }
+function getCoachName(teamLineup: Record<string, unknown> | null) {
+  const manager = asRecord(teamLineup?.manager);
+  return safeNullableString(manager?.name);
+}
 
-  return {
-    id: safeNumber(row.id),
-    name: safeString(row.name, fallbackName),
-    formation: safeNullableString(row.formation),
-    coachName: safeNullableString(coach?.name),
-    status,
-    lineup,
-    bench,
-    statistics,
-  };
+function getFormation(teamLineup: Record<string, unknown> | null) {
+  return safeNullableString(teamLineup?.formation);
 }
 
 function toPlayerRows(
   matchId: number,
   side: "home" | "away",
-  bucket: "starter" | "bench",
-  players: unknown[]
+  playersRaw: unknown[]
 ): LineupPlayerInsert[] {
-  return players.map((player, index) => {
-    const row = asRecord(player) ?? {};
+  return playersRaw.map((item, index) => {
+    const row = asRecord(item) ?? {};
+    const player = asRecord(row.player) ?? row;
+
+    const isSubstitute =
+      safeBoolean(row.substitute) ||
+      safeString(row.type).toLowerCase() === "substitute";
 
     return {
       match_id: matchId,
       side,
-      bucket,
-      player_name: safeString(row.name, `${side}-${bucket}-${index + 1}`),
-      shirt_number: safeNumber(row.shirtNumber),
-      position: safeNullableString(row.position),
+      bucket: isSubstitute ? "bench" : "starter",
+      player_name:
+        safeNullableString(player.name) ??
+        safeNullableString(player.shortName) ??
+        `${side}-${index + 1}`,
+      shirt_number:
+        safeNumber(player.jerseyNumber) ??
+        safeNumber(player.shirtNumber) ??
+        safeNumber(row.jerseyNumber) ??
+        safeNumber(row.shirtNumber),
+      position:
+        safeNullableString(player.position) ??
+        safeNullableString(row.position),
       captain: safeBoolean(row.captain),
+      sort_order: index,
     };
   });
 }
 
-function toStatsRow(
-  matchId: number,
-  teamId: number | null,
-  statistics: Record<string, unknown> | null
-): TeamStatsInsert | null {
-  if (teamId == null) return null;
+function normalizeStatName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
 
-  const stats = statistics ?? {};
+function numberFromStat(value: unknown): number | null {
+  if (typeof value === "string") {
+    const cleaned = value.replace("%", "").trim();
+    return safeNumber(cleaned);
+  }
 
+  return safeNumber(value);
+}
+
+function emptyStats(matchId: number, teamId: number): TeamStatsInsert {
   return {
     match_id: matchId,
     team_id: teamId,
-    shots: safeNumber(stats.shots),
-    shots_on_target: safeNumber(stats.shots_on_goal),
-    possession: safeNumber(stats.ball_possession),
-    corners: safeNumber(stats.corner_kicks),
-    fouls: safeNumber(stats.fouls),
-    yellow_cards: safeNumber(stats.yellow_cards),
-    red_cards: safeNumber(stats.red_cards),
+    shots: null,
+    shots_on_target: null,
+    possession: null,
+    corners: null,
+    fouls: null,
+    yellow_cards: null,
+    red_cards: null,
   };
+}
+
+function applyStat(
+  target: TeamStatsInsert,
+  statName: string,
+  value: number | null
+) {
+  if (value === null) return;
+
+  const key = normalizeStatName(statName);
+
+  if (["total_shots", "shots"].includes(key)) target.shots = value;
+  if (["shots_on_target", "shots_on_goal"].includes(key)) {
+    target.shots_on_target = value;
+  }
+  if (["ball_possession", "possession"].includes(key)) target.possession = value;
+  if (["corner_kicks", "corners"].includes(key)) target.corners = value;
+  if (["fouls"].includes(key)) target.fouls = value;
+  if (["yellow_cards"].includes(key)) target.yellow_cards = value;
+  if (["red_cards"].includes(key)) target.red_cards = value;
+}
+
+function parseStatsRows(
+  matchId: number,
+  homeTeamId: number | null,
+  awayTeamId: number | null,
+  statisticsPayload: unknown
+): TeamStatsInsert[] {
+  if (homeTeamId === null || awayTeamId === null) return [];
+
+  const home = emptyStats(matchId, homeTeamId);
+  const away = emptyStats(matchId, awayTeamId);
+
+  const root = asRecord(statisticsPayload);
+  const periods = asArray(root?.statistics);
+
+  for (const period of periods) {
+    const periodRow = asRecord(period);
+    const groups = asArray(periodRow?.groups);
+
+    for (const group of groups) {
+      const groupRow = asRecord(group);
+      const items = asArray(groupRow?.statisticsItems);
+
+      for (const item of items) {
+        const stat = asRecord(item);
+        const name = safeString(stat?.name);
+
+        applyStat(home, name, numberFromStat(stat?.homeValue ?? stat?.home));
+        applyStat(away, name, numberFromStat(stat?.awayValue ?? stat?.away));
+      }
+    }
+  }
+
+  return [home, away];
 }
 
 export async function POST(req: Request) {
@@ -240,53 +290,82 @@ export async function POST(req: Request) {
       );
     }
 
-    const payload = (await fdFetch(`/matches/${matchId}`)) as unknown;
-    const root = asRecord(payload);
+    const sofascoreEventId = await resolveSofaScoreEventId(sb, matchId);
 
-    if (!root) {
-      return jsonError("football-data returned invalid payload", 500);
+    if (!sofascoreEventId) {
+      return jsonError("Missing SofaScore mapping for this match.", 404, {
+        matchId,
+        needsMapping: true,
+      });
     }
 
-    const competition = asRecord(root.competition);
-    const homeTeamRaw = asRecord(root.homeTeam);
-    const awayTeamRaw = asRecord(root.awayTeam);
+    const [eventPayload, lineupsPayload, statisticsPayload] = await Promise.all([
+      sofaFetch(`/event/${sofascoreEventId}`),
+      sofaFetch(`/event/${sofascoreEventId}/lineups`).catch((error) => ({
+        _error: error instanceof Error ? error.message : "Lineups fetch failed",
+      })),
+      sofaFetch(`/event/${sofascoreEventId}/statistics`).catch((error) => ({
+        _error:
+          error instanceof Error ? error.message : "Statistics fetch failed",
+      })),
+    ]);
 
-    const homeTeam = normalizeTeamNode(homeTeamRaw, "Home");
-    const awayTeam = normalizeTeamNode(awayTeamRaw, "Away");
+    const eventRoot = asRecord(eventPayload);
+    const event = asRecord(eventRoot?.event) ?? eventRoot;
+
+    const homeTeamRaw = asRecord(event?.homeTeam);
+    const awayTeamRaw = asRecord(event?.awayTeam);
+    const tournament = asRecord(event?.tournament);
+    const uniqueTournament = asRecord(tournament?.uniqueTournament);
+
+    const homeTeamId = safeNumber(homeTeamRaw?.id);
+    const awayTeamId = safeNumber(awayTeamRaw?.id);
+
+    const homeTeamName = getTeamName(homeTeamRaw, "Home");
+    const awayTeamName = getTeamName(awayTeamRaw, "Away");
+
+    const lineupsRoot = asRecord(lineupsPayload);
+    const homeLineup = asRecord(lineupsRoot?.home);
+    const awayLineup = asRecord(lineupsRoot?.away);
+
+    const homePlayers = asArray(homeLineup?.players);
+    const awayPlayers = asArray(awayLineup?.players);
 
     const headerRow: LineupHeaderUpsert = {
       match_id: matchId,
-      home_team_name: homeTeam.name,
-      away_team_name: awayTeam.name,
-      home_formation: homeTeam.formation,
-      away_formation: awayTeam.formation,
-      home_status: homeTeam.status,
-      away_status: awayTeam.status,
-      home_coach: homeTeam.coachName,
-      away_coach: awayTeam.coachName,
+      home_team_name: homeTeamName,
+      away_team_name: awayTeamName,
+      home_formation: getFormation(homeLineup),
+      away_formation: getFormation(awayLineup),
+      home_status: homePlayers.length > 0 ? "confirmed" : null,
+      away_status: awayPlayers.length > 0 ? "confirmed" : null,
+      home_coach: getCoachName(homeLineup),
+      away_coach: getCoachName(awayLineup),
     };
 
     const playerRows: LineupPlayerInsert[] = [
-      ...toPlayerRows(matchId, "home", "starter", homeTeam.lineup),
-      ...toPlayerRows(matchId, "home", "bench", homeTeam.bench),
-      ...toPlayerRows(matchId, "away", "starter", awayTeam.lineup),
-      ...toPlayerRows(matchId, "away", "bench", awayTeam.bench),
+      ...toPlayerRows(matchId, "home", homePlayers),
+      ...toPlayerRows(matchId, "away", awayPlayers),
     ];
 
-    const statsRows = [
-      toStatsRow(matchId, homeTeam.id, homeTeam.statistics),
-      toStatsRow(matchId, awayTeam.id, awayTeam.statistics),
-    ].filter((row): row is TeamStatsInsert => row !== null);
+    const statsRows = parseStatsRows(
+      matchId,
+      homeTeamId,
+      awayTeamId,
+      statisticsPayload
+    );
 
     const { error: matchPatchError } = await sb
       .from("matches")
       .update({
         competition_name:
-          safeNullableString(competition?.name) ?? undefined,
-        home_team: homeTeam.name,
-        away_team: awayTeam.name,
-        home_team_id: homeTeam.id,
-        away_team_id: awayTeam.id,
+          safeNullableString(uniqueTournament?.name) ??
+          safeNullableString(tournament?.name) ??
+          undefined,
+        home_team: homeTeamName,
+        away_team: awayTeamName,
+        home_team_id: homeTeamId,
+        away_team_id: awayTeamId,
       })
       .eq("id", matchId);
 
@@ -361,36 +440,37 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       matchId,
+      sofascoreEventId,
       competition: {
-        code: safeNullableString(competition?.code),
-        name: safeNullableString(competition?.name),
+        name:
+          safeNullableString(uniqueTournament?.name) ??
+          safeNullableString(tournament?.name),
       },
-      status: safeNullableString(root.status),
-      footballDataLastUpdated: safeNullableString(root.lastUpdated),
+      status: safeNullableString(event?.status),
       home: {
-        teamId: homeTeam.id,
-        teamName: homeTeam.name,
-        formation: homeTeam.formation,
-        coach: homeTeam.coachName,
-        status: homeTeam.status,
-        lineupCount: homeTeam.lineup.length,
-        benchCount: homeTeam.bench.length,
-        hasStats: homeTeam.statistics !== null,
+        teamId: homeTeamId,
+        teamName: homeTeamName,
+        formation: headerRow.home_formation,
+        coach: headerRow.home_coach,
+        status: headerRow.home_status,
+        playersCount: homePlayers.length,
       },
       away: {
-        teamId: awayTeam.id,
-        teamName: awayTeam.name,
-        formation: awayTeam.formation,
-        coach: awayTeam.coachName,
-        status: awayTeam.status,
-        lineupCount: awayTeam.lineup.length,
-        benchCount: awayTeam.bench.length,
-        hasStats: awayTeam.statistics !== null,
+        teamId: awayTeamId,
+        teamName: awayTeamName,
+        formation: headerRow.away_formation,
+        coach: headerRow.away_coach,
+        status: headerRow.away_status,
+        playersCount: awayPlayers.length,
       },
       hasLineups: playerRows.length > 0,
       hasStats: statsRows.length > 0,
       playersInserted: playerRows.length,
       statsInserted: statsRows.length,
+      lineupsFetchError: safeNullableString(asRecord(lineupsPayload)?._error),
+      statisticsFetchError: safeNullableString(
+        asRecord(statisticsPayload)?._error
+      ),
     });
   } catch (error) {
     const message =
