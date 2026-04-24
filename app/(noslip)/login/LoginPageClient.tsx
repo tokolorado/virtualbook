@@ -1,3 +1,4 @@
+//app/(noslip)/login/LoginPageClient.tsx
 "use client";
 
 import Link from "next/link";
@@ -6,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 type NoticeTone = "success" | "error" | "warning" | "info";
+type AuthView = "login" | "forgot-password";
 
 type AccountCheckResponse = {
   exists: boolean;
@@ -91,8 +93,15 @@ export default function LoginPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
+  const [view, setView] = useState<AuthView>("login");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotError, setForgotError] = useState<string | null>(null);
 
   const [showPassword, setShowPassword] = useState(false);
 
@@ -105,8 +114,17 @@ export default function LoginPageClient() {
   const [hasSession, setHasSession] = useState(false);
 
   const cleanEmail = useMemo(() => normalizeEmail(email), [email]);
+  const cleanForgotEmail = useMemo(() => normalizeEmail(forgotEmail), [forgotEmail]);
+
   const emailError =
     email.length === 0 ? null : isValidEmail(cleanEmail) ? null : "Podaj poprawny adres e-mail.";
+
+  const forgotEmailError =
+    forgotEmail.length === 0
+      ? null
+      : isValidEmail(cleanForgotEmail)
+        ? null
+        : "Podaj poprawny adres e-mail.";
 
   useEffect(() => {
     const emailFromQuery = searchParams.get("email");
@@ -116,6 +134,7 @@ export default function LoginPageClient() {
 
     if (emailFromQuery) {
       setEmail(emailFromQuery);
+      setForgotEmail(emailFromQuery);
     }
 
     let hashType = "";
@@ -278,145 +297,330 @@ export default function LoginPageClient() {
     }
   };
 
+  const openForgotPassword = () => {
+    setView("forgot-password");
+    setForgotSent(false);
+    setForgotError(null);
+    setFieldError(null);
+    setCanResend(false);
+    setForgotEmail(cleanEmail || "");
+  };
+
+  const backToLogin = () => {
+    setView("login");
+    setForgotError(null);
+    setForgotSent(false);
+  };
+
+  const handleForgotPassword = async (e?: FormEvent) => {
+    e?.preventDefault();
+
+    setForgotError(null);
+    setForgotSent(false);
+
+    if (!cleanForgotEmail || !isValidEmail(cleanForgotEmail)) {
+      setForgotError("Wpisz poprawny adres e-mail.");
+      return;
+    }
+
+    try {
+      setForgotLoading(true);
+
+      const checkRes = await fetch(
+        `/api/auth/check-email?email=${encodeURIComponent(cleanForgotEmail)}`,
+        { cache: "no-store" }
+      );
+
+      let checkData: AccountCheckResponse | null = null;
+      try {
+        checkData = await checkRes.json();
+      } catch {
+        checkData = null;
+      }
+
+      if (!checkRes.ok || !checkData) {
+        setForgotError("Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę.");
+        return;
+      }
+
+      if (checkData.exists) {
+        const { error } = await supabase.auth.resetPasswordForEmail(cleanForgotEmail, {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+
+        if (error) {
+          setForgotError("Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę.");
+          return;
+        }
+      }
+
+      setForgotSent(true);
+    } catch (e: any) {
+      setForgotError(e?.message || "Nie udało się wysłać linku resetującego.");
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
   return (
     <div className="mx-auto mt-10 max-w-5xl px-4 pb-10">
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.05fr_0.95fr]">
         <section className="rounded-3xl border border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-900 to-sky-950/20 p-6">
           <div className="inline-flex items-center rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300">
-            Logowanie
+            {view === "forgot-password" ? "Reset hasła" : "Logowanie"}
           </div>
 
           <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white">
-            Wróć do gry w VirtualBook
+            {view === "forgot-password"
+              ? "Odzyskaj dostęp do konta"
+              : "Wróć do gry w VirtualBook"}
           </h1>
 
           <p className="mt-3 max-w-xl text-sm leading-6 text-neutral-400">
-            Zaloguj się, aby przejść do wydarzeń, obstawiać kupony, śledzić saldo VB
-            oraz sprawdzać historię swoich zakładów.
+            {view === "forgot-password"
+              ? "Wpisz adres e-mail przypisany do konta. Jeśli konto istnieje, wyślemy bezpieczny link do ustawienia nowego hasła."
+              : "Zaloguj się, aby przejść do wydarzeń, obstawiać kupony, śledzić saldo VB oraz sprawdzać historię swoich zakładów."}
           </p>
 
           <div className="mt-6 grid gap-3 sm:grid-cols-2">
             <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4">
-              <div className="text-xs text-neutral-400">Po zalogowaniu</div>
-              <div className="mt-2 text-sm font-medium text-white">Kupony i wallet</div>
+              <div className="text-xs text-neutral-400">
+                {view === "forgot-password" ? "Krok 1" : "Po zalogowaniu"}
+              </div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {view === "forgot-password" ? "Link resetujący" : "Kupony i wallet"}
+              </div>
               <div className="mt-1 text-sm text-neutral-500">
-                Dostęp do salda, historii VB, kuponów i konta.
+                {view === "forgot-password"
+                  ? "Wyślemy wiadomość z linkiem do formularza zmiany hasła."
+                  : "Dostęp do salda, historii VB, kuponów i konta."}
               </div>
             </div>
 
             <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4">
-              <div className="text-xs text-neutral-400">Bezpieczeństwo</div>
-              <div className="mt-2 text-sm font-medium text-white">Potwierdzony e-mail</div>
+              <div className="text-xs text-neutral-400">
+                {view === "forgot-password" ? "Krok 2" : "Bezpieczeństwo"}
+              </div>
+              <div className="mt-2 text-sm font-medium text-white">
+                {view === "forgot-password" ? "Nowe hasło" : "Potwierdzony e-mail"}
+              </div>
               <div className="mt-1 text-sm text-neutral-500">
-                Jeśli konto nie jest potwierdzone, pokażemy jasny komunikat i opcję
-                ponownego wysłania linku.
+                {view === "forgot-password"
+                  ? "Po kliknięciu linku ustawisz nowe hasło bez podawania starego."
+                  : "Jeśli konto nie jest potwierdzone, pokażemy jasny komunikat i opcję ponownego wysłania linku."}
               </div>
             </div>
           </div>
 
           <div className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4 text-sm text-neutral-400">
-            Nie masz jeszcze konta?{" "}
-            <Link href="/register" className="font-medium text-white underline underline-offset-2">
-              Zarejestruj się
-            </Link>
+            {view === "forgot-password" ? (
+              <>
+                Pamiętasz hasło?{" "}
+                <button
+                  type="button"
+                  onClick={backToLogin}
+                  className="font-medium text-white underline underline-offset-2"
+                >
+                  Wróć do logowania
+                </button>
+              </>
+            ) : (
+              <>
+                Nie masz jeszcze konta?{" "}
+                <Link href="/register" className="font-medium text-white underline underline-offset-2">
+                  Zarejestruj się
+                </Link>
+              </>
+            )}
           </div>
         </section>
 
         <section className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6">
-          <div className="mb-4">
-            <h2 className="text-xl font-semibold text-white">Zaloguj się</h2>
-            <p className="mt-1 text-sm text-neutral-400">
-              Wpisz e-mail i hasło, aby wejść do aplikacji.
-            </p>
-          </div>
-
-          {notice ? (
-            <div
-              className={[
-                "mb-4 rounded-2xl border p-4 text-sm",
-                noticeClasses(notice.tone),
-              ].join(" ")}
-            >
-              {notice.text}
-            </div>
-          ) : null}
-
-          {hasSession ? (
-            <div className="space-y-4">
-              <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-200">
-                Jesteś już zalogowany. Możesz przejść od razu do wydarzeń.
+          {view === "login" ? (
+            <>
+              <div className="mb-4">
+                <h2 className="text-xl font-semibold text-white">Zaloguj się</h2>
+                <p className="mt-1 text-sm text-neutral-400">
+                  Wpisz e-mail i hasło, aby wejść do aplikacji.
+                </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => router.replace("/events")}
-                className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95"
-              >
-                Przejdź do wydarzeń
-              </button>
-            </div>
-          ) : (
-            <form onSubmit={handleSignIn} className="space-y-4">
-              <InputField
-                label="E-mail"
-                type="email"
-                value={email}
-                onChange={setEmail}
-                placeholder="twoj@email.com"
-                autoComplete="email"
-                error={emailError}
-              />
-
-              <InputField
-                label="Hasło"
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={setPassword}
-                placeholder="Wpisz hasło"
-                autoComplete="current-password"
-                rightSlot={
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-neutral-800"
-                  >
-                    {showPassword ? "Ukryj" : "Pokaż"}
-                  </button>
-                }
-              />
-
-              {fieldError ? (
-                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-                  {fieldError}
+              {notice ? (
+                <div
+                  className={[
+                    "mb-4 rounded-2xl border p-4 text-sm",
+                    noticeClasses(notice.tone),
+                  ].join(" ")}
+                >
+                  {notice.text}
                 </div>
               ) : null}
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95 disabled:opacity-60"
-              >
-                {loading ? "Logowanie..." : "Zaloguj"}
-              </button>
+              {hasSession ? (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-200">
+                    Jesteś już zalogowany. Możesz przejść od razu do wydarzeń.
+                  </div>
 
-              {canResend ? (
-                <button
-                  type="button"
-                  onClick={handleResendConfirmation}
-                  disabled={resending}
-                  className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900 disabled:opacity-60"
-                >
-                  {resending ? "Wysyłam link..." : "Wyślij link potwierdzający ponownie"}
-                </button>
-              ) : null}
+                  <button
+                    type="button"
+                    onClick={() => router.replace("/events")}
+                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95"
+                  >
+                    Przejdź do wydarzeń
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleSignIn} className="space-y-4">
+                  <InputField
+                    label="E-mail"
+                    type="email"
+                    value={email}
+                    onChange={setEmail}
+                    placeholder="twoj@email.com"
+                    autoComplete="email"
+                    error={emailError}
+                  />
 
-              <div className="pt-2 text-sm text-neutral-400">
-                Nie masz konta?{" "}
-                <Link href="/register" className="text-white underline underline-offset-2">
-                  Zarejestruj się
-                </Link>
+                  <InputField
+                    label="Hasło"
+                    type={showPassword ? "text" : "password"}
+                    value={password}
+                    onChange={setPassword}
+                    placeholder="Wpisz hasło"
+                    autoComplete="current-password"
+                    rightSlot={
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword((v) => !v)}
+                        className="rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-neutral-800"
+                      >
+                        {showPassword ? "Ukryj" : "Pokaż"}
+                      </button>
+                    }
+                  />
+
+                  <div className="-mt-1 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={openForgotPassword}
+                      className="text-sm text-neutral-300 underline underline-offset-2 transition hover:text-white"
+                    >
+                      Nie pamiętasz hasła?
+                    </button>
+                  </div>
+
+                  {fieldError ? (
+                    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+                      {fieldError}
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95 disabled:opacity-60"
+                  >
+                    {loading ? "Logowanie..." : "Zaloguj"}
+                  </button>
+
+                  {canResend ? (
+                    <button
+                      type="button"
+                      onClick={handleResendConfirmation}
+                      disabled={resending}
+                      className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900 disabled:opacity-60"
+                    >
+                      {resending ? "Wysyłam link..." : "Wyślij link potwierdzający ponownie"}
+                    </button>
+                  ) : null}
+
+                  <div className="pt-2 text-sm text-neutral-400">
+                    Nie masz konta?{" "}
+                    <Link href="/register" className="text-white underline underline-offset-2">
+                      Zarejestruj się
+                    </Link>
+                  </div>
+                </form>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="mb-4">
+                <h2 className="text-xl font-semibold text-white">Nie pamiętasz hasła?</h2>
+                <p className="mt-1 text-sm text-neutral-400">
+                  Wpisz e-mail konta. Wyślemy link do ustawienia nowego hasła.
+                </p>
               </div>
-            </form>
+
+              {forgotSent ? (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-200">
+                    Jeśli konto z tym adresem istnieje, wysłaliśmy link resetujący hasło.
+                    Sprawdź skrzynkę odbiorczą oraz folder spam.
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={backToLogin}
+                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95"
+                  >
+                    Wróć do logowania
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForgotSent(false);
+                      setForgotError(null);
+                    }}
+                    className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900"
+                  >
+                    Wyślij ponownie
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  <InputField
+                    label="E-mail"
+                    type="email"
+                    value={forgotEmail}
+                    onChange={setForgotEmail}
+                    placeholder="twoj@email.com"
+                    autoComplete="email"
+                    error={forgotEmailError}
+                    help="Użyj adresu e-mail przypisanego do konta VirtualBook."
+                  />
+
+                  {forgotError ? (
+                    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
+                      {forgotError}
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="submit"
+                    disabled={forgotLoading}
+                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95 disabled:opacity-60"
+                  >
+                    {forgotLoading ? "Wysyłam link..." : "Wyślij link resetujący"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={backToLogin}
+                    className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900"
+                  >
+                    Wróć do logowania
+                  </button>
+
+                  <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4 text-xs leading-5 text-sky-200">
+                    Dla bezpieczeństwa nie pokazujemy publicznie, czy dany adres e-mail istnieje w bazie.
+                    Jeśli konto istnieje, link resetujący zostanie wysłany.
+                  </div>
+                </form>
+              )}
+            </>
           )}
         </section>
       </div>
