@@ -233,6 +233,16 @@ function shiftDate(dateOnly: string, offsetDays: number) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function isMatchTooOldForReview(utcDate: string | null) {
+  if (!utcDate) return true;
+
+  const ts = Date.parse(utcDate);
+  if (!Number.isFinite(ts)) return true;
+
+  const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
+  return ts < sixHoursAgo;
+}
+
 function isSofaScore403Error(message: string | null | undefined) {
   return String(message ?? "").includes("SofaScore schedule fetch failed: 403");
 }
@@ -437,6 +447,29 @@ async function markNeedsReview(row: QueueRow, errorMessage: string) {
   console.log(`[review] ${row.match_id} -> ${errorMessage}`);
 }
 
+async function markExpired(row: QueueRow, reason: string) {
+  const nowIso = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("match_mapping_queue")
+    .update({
+      status: "failed",
+      attempts: row.attempts,
+      last_error: reason,
+      locked_at: null,
+      locked_by: null,
+      updated_at: nowIso,
+      next_retry_at: nowIso,
+    })
+    .eq("match_id", row.match_id);
+
+  if (error) {
+    throw new Error(
+      `Nie udało się oznaczyć expired dla ${row.match_id}: ${error.message}`
+    );
+  }
+}
+
 async function markRetry(
   row: QueueRow,
   errorMessage: string,
@@ -445,6 +478,8 @@ async function markRetry(
   const attempts = row.attempts + 1;
   const status =
     permanent || attempts >= MAX_ATTEMPTS ? "needs_review" : "failed";
+
+  const nowIso = new Date().toISOString();
 
   const { error } = await supabase
     .from("match_mapping_queue")
@@ -455,8 +490,8 @@ async function markRetry(
       next_retry_at: nextRetryAtIso(attempts),
       locked_at: null,
       locked_by: null,
-      last_attempt_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      last_attempt_at: nowIso,
+      updated_at: nowIso,
     })
     .eq("match_id", row.match_id);
 
@@ -511,6 +546,12 @@ async function processRow(row: QueueRow) {
   if (!matchRow) {
     await markRetry(row, "Match not found", true);
     console.log(`[needs-review] ${row.match_id} -> match not found`);
+    return;
+  }
+
+  if (isMatchTooOldForReview(matchRow.utc_date)) {
+    await markExpired(row, "Match too old for manual mapping review");
+    console.log(`[expired] ${row.match_id} -> match too old`);
     return;
   }
 
@@ -586,6 +627,17 @@ async function main() {
         error instanceof Error ? error.message : "Unknown mapping worker error";
 
       if (isSofaScore403Error(message)) {
+        const matchRow = await loadMatch(row.match_id);
+
+        if (matchRow && isMatchTooOldForReview(matchRow.utc_date)) {
+          await markExpired(
+            row,
+            "SofaScore blocked and match is already too old"
+          );
+          console.error(`[expired] ${row.match_id} -> ${message}`);
+          continue;
+        }
+
         await markNeedsReview(row, message);
         continue;
       }

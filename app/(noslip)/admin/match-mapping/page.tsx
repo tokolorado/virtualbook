@@ -130,7 +130,7 @@ async function getReviewItems(): Promise<ReviewRow[]> {
       next_retry_at,
       updated_at,
       mapped_at,
-      match:matches (
+      match:matches!inner (
         utc_date,
         competition_name,
         home_team,
@@ -138,17 +138,18 @@ async function getReviewItems(): Promise<ReviewRow[]> {
       )
     `)
     .eq("status", "needs_review")
-    .order("updated_at", { ascending: false })
-    .limit(200);
+    .gte("match.utc_date", new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString())
+    .order("utc_date", {
+      referencedTable: "matches",
+      ascending: true,
+    })
+    .limit(50);
 
   if (error) {
     throw new Error(`Nie udało się pobrać review items: ${error.message}`);
   }
 
-  return ((data ?? []) as RawReviewRow[])
-    .map(normalizeReviewRow)
-    .filter((item) => isUpcomingOrRecentMatch(item.match?.utc_date ?? null))
-    .slice(0, 50);
+  return ((data ?? []) as unknown as RawReviewRow[]).map(normalizeReviewRow);
 }
 
 export default async function AdminMatchMappingPage() {
@@ -202,6 +203,17 @@ export default async function AdminMatchMappingPage() {
                       ? `${item.match.home_team} vs ${item.match.away_team}`
                       : `matchId ${item.match_id}`}
                   </div>
+
+                  <a
+                    href={`https://www.sofascore.com/search?q=${encodeURIComponent(
+                        `${item.match?.home_team ?? ""} ${item.match?.away_team ?? ""}`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-3 inline-flex rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm font-semibold text-white hover:bg-neutral-900"
+                    >
+                    Szukaj na SofaScore
+                   </a>
 
                   <div className="mt-2 flex flex-wrap gap-2 text-xs text-neutral-400">
                     <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
