@@ -299,8 +299,27 @@ export async function POST(req: Request) {
       });
     }
 
-    const [eventPayload, lineupsPayload, statisticsPayload] = await Promise.all([
-      sofaFetch(`/event/${sofascoreEventId}`),
+    let eventPayload: unknown;
+
+    try {
+      eventPayload = await sofaFetch(`/event/${sofascoreEventId}`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "SofaScore event fetch failed";
+
+      return NextResponse.json(
+        {
+          ok: false,
+          matchId,
+          sofascoreEventId,
+          needsExternalImport: true,
+          error: message,
+        },
+        { status: 202 }
+      );
+    }
+
+    const [lineupsPayload, statisticsPayload] = await Promise.all([
       sofaFetch(`/event/${sofascoreEventId}/lineups`).catch((error) => ({
         _error: error instanceof Error ? error.message : "Lineups fetch failed",
       })),
