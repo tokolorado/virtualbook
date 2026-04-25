@@ -37,6 +37,31 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function betCardWrapperClass(status: string) {
+  const s = String(status || "").toLowerCase();
+
+  if (s === "won") {
+    return [
+      "border-green-500/20",
+      "bg-[radial-gradient(circle_at_top_left,rgba(34,197,94,0.14),transparent_30%),linear-gradient(90deg,rgba(22,101,52,0.20),rgba(10,10,10,0.96)_38%,rgba(3,3,3,0.99))]",
+      "shadow-[0_10px_40px_rgba(0,0,0,0.22)]",
+    ].join(" ");
+  }
+
+  if (s === "lost") {
+    return [
+      "border-red-500/20",
+      "bg-[radial-gradient(circle_at_top_left,rgba(239,68,68,0.14),transparent_30%),linear-gradient(90deg,rgba(127,29,29,0.20),rgba(10,10,10,0.96)_38%,rgba(3,3,3,0.99))]",
+      "shadow-[0_10px_40px_rgba(0,0,0,0.22)]",
+    ].join(" ");
+  }
+
+  return [
+    "border-neutral-800",
+    "bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.06),transparent_28%),linear-gradient(90deg,rgba(23,23,23,0.92),rgba(5,5,5,0.98))]",
+  ].join(" ");
+}
+
 function safeNumber(value: unknown, fallback = 0) {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -65,24 +90,6 @@ function pickLabel(pick: string, home: string, away: string) {
   if (p === "X") return "Remis";
 
   return pick;
-}
-
-function badgeClass(status: string) {
-  const s = String(status || "").toLowerCase();
-
-  if (s === "won") {
-    return "border-green-500/30 bg-green-500/10 text-green-300";
-  }
-
-  if (s === "lost") {
-    return "border-red-500/30 bg-red-500/10 text-red-300";
-  }
-
-  if (s === "void") {
-    return "border-neutral-600 bg-neutral-700/20 text-neutral-300";
-  }
-
-  return "border-yellow-500/30 bg-yellow-500/10 text-yellow-300";
 }
 
 function labelStatus(status: string) {
@@ -609,10 +616,9 @@ export default function BetsPage() {
                 <div
                   key={bet.id}
                   className={cn(
-                    "rounded-3xl border bg-neutral-950/70 p-4 transition",
-                    isOpen
-                      ? "border-white/15"
-                      : "border-neutral-800 hover:border-neutral-700"
+                    "rounded-3xl border p-4 transition",
+                    betCardWrapperClass(bet.status),
+                    isOpen ? "ring-1 ring-white/20" : "hover:border-neutral-700"
                   )}
                 >
                   <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -630,7 +636,7 @@ export default function BetsPage() {
                       </div>
 
                       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                        <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
                           <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                             Stawka
                           </div>
@@ -639,7 +645,7 @@ export default function BetsPage() {
                           </div>
                         </div>
 
-                        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                        <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
                           <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                             Kurs
                           </div>
@@ -648,7 +654,7 @@ export default function BetsPage() {
                           </div>
                         </div>
 
-                        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                        <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
                           <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                             Możliwa wygrana
                           </div>
@@ -657,7 +663,7 @@ export default function BetsPage() {
                           </div>
                         </div>
 
-                        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-3">
+                        <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
                           <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                             Zdarzenia
                           </div>
