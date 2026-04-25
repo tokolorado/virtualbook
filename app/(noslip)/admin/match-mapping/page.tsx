@@ -36,13 +36,7 @@ type RawMatchDetails = {
   away_team?: unknown;
 };
 
-type RawMappingDetails = {
-  sofascore_event_id?: unknown;
-  mapping_method?: unknown;
-  confidence?: unknown;
-};
-
-type RawReviewRow = {
+type RawQueueRow = {
   match_id: unknown;
   status: unknown;
   attempts: unknown;
@@ -51,7 +45,13 @@ type RawReviewRow = {
   updated_at: unknown;
   mapped_at: unknown;
   match?: RawMatchDetails | RawMatchDetails[] | null;
-  mapping?: RawMappingDetails | RawMappingDetails[] | null;
+};
+
+type RawMappingRow = {
+  match_id?: unknown;
+  sofascore_event_id?: unknown;
+  mapping_method?: unknown;
+  confidence?: unknown;
 };
 
 function getSupabaseAdmin() {
@@ -73,6 +73,11 @@ function getSupabaseAdmin() {
 function safeNumber(value: unknown, fallback = 0) {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function safeNullableNumber(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function safeString(value: unknown, fallback = "") {
@@ -102,25 +107,21 @@ function normalizeMappingDetails(input: unknown): MappingDetails | null {
   if (typeof input !== "object" || input === null) return null;
 
   const row = input as Record<string, unknown>;
-  const eventId = safeNumber(row.sofascore_event_id);
+  const eventId = safeNullableNumber(row.sofascore_event_id);
 
-  if (!eventId) return null;
+  if (eventId === null) return null;
 
   return {
     sofascore_event_id: eventId,
     mapping_method: safeNullableString(row.mapping_method),
-    confidence: safeNumber(row.confidence),
+    confidence: safeNullableNumber(row.confidence),
   };
 }
 
-function normalizeReviewRow(input: RawReviewRow): ReviewRow {
+function normalizeQueueRow(input: RawQueueRow): Omit<ReviewRow, "mapping"> {
   const rawMatch = Array.isArray(input.match)
     ? input.match[0] ?? null
     : input.match ?? null;
-
-  const rawMapping = Array.isArray(input.mapping)
-    ? input.mapping[0] ?? null
-    : input.mapping ?? null;
 
   return {
     match_id: safeNumber(input.match_id),
@@ -131,7 +132,6 @@ function normalizeReviewRow(input: RawReviewRow): ReviewRow {
     updated_at: safeNullableString(input.updated_at),
     mapped_at: safeNullableString(input.mapped_at),
     match: normalizeMatchDetails(rawMatch),
-    mapping: normalizeMappingDetails(rawMapping),
   };
 }
 
@@ -139,13 +139,15 @@ function formatDate(value: string | null) {
   if (!value) return "—";
   const ts = Date.parse(value);
   if (!Number.isFinite(ts)) return value;
-  return new Date(ts).toLocaleString();
+  return new Date(ts).toLocaleString("pl-PL");
 }
 
 async function getReviewItems(): Promise<ReviewRow[]> {
   const supabase = getSupabaseAdmin();
 
-  const { data, error } = await supabase
+  const sinceIso = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+
+  const { data: queueData, error: queueError } = await supabase
     .from("match_mapping_queue")
     .select(`
       match_id,
@@ -160,29 +162,61 @@ async function getReviewItems(): Promise<ReviewRow[]> {
         competition_name,
         home_team,
         away_team
-      ),
-      mapping:match_sofascore_map (
-        sofascore_event_id,
-        mapping_method,
-        confidence
       )
     `)
     .eq("status", "needs_review")
-    .gte(
-      "match.utc_date",
-      new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()
-    )
+    .gte("match.utc_date", sinceIso)
     .order("utc_date", {
       referencedTable: "matches",
       ascending: true,
     })
     .limit(50);
 
-  if (error) {
-    throw new Error(`Nie udało się pobrać review items: ${error.message}`);
+  if (queueError) {
+    throw new Error(`Nie udało się pobrać review items: ${queueError.message}`);
   }
 
-  return ((data ?? []) as unknown as RawReviewRow[]).map(normalizeReviewRow);
+  const queueRows = ((queueData ?? []) as unknown as RawQueueRow[])
+    .map(normalizeQueueRow)
+    .filter((row) => row.match_id > 0);
+
+  if (queueRows.length === 0) {
+    return [];
+  }
+
+  const matchIds = queueRows.map((row) => row.match_id);
+
+  const { data: mappingData, error: mappingError } = await supabase
+    .from("match_sofascore_map")
+    .select(`
+      match_id,
+      sofascore_event_id,
+      mapping_method,
+      confidence
+    `)
+    .in("match_id", matchIds);
+
+  if (mappingError) {
+    throw new Error(
+      `Nie udało się pobrać istniejących mapowań: ${mappingError.message}`
+    );
+  }
+
+  const mappingByMatchId = new Map<number, MappingDetails>();
+
+  for (const rawMapping of (mappingData ?? []) as unknown as RawMappingRow[]) {
+    const matchId = safeNullableNumber(rawMapping.match_id);
+    const mapping = normalizeMappingDetails(rawMapping);
+
+    if (matchId !== null && mapping) {
+      mappingByMatchId.set(matchId, mapping);
+    }
+  }
+
+  return queueRows.map((row) => ({
+    ...row,
+    mapping: mappingByMatchId.get(row.match_id) ?? null,
+  }));
 }
 
 export default async function AdminMatchMappingPage() {
