@@ -1514,6 +1514,62 @@ export default function EventsPage() {
     );
   };
 
+  const dayToolsPanel = (
+    <details className="rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+            Narzędzia dnia
+          </div>
+          <div className="mt-1 text-sm text-neutral-400">
+            Ręczne odświeżenie meczów i administracyjna synchronizacja kursów.
+          </div>
+        </div>
+
+        <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs font-semibold text-neutral-300">
+          Pokaż
+        </span>
+      </summary>
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={refreshCurrentDay}
+          disabled={loadingMatches}
+          className={cn(
+            "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+            loadingMatches
+              ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+              : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-neutral-700 hover:bg-neutral-900"
+          )}
+        >
+          {loadingMatches ? "Odświeżam…" : "Odśwież mecze"}
+        </button>
+
+        {!checkingAdmin && isAdmin ? (
+          <button
+            type="button"
+            onClick={() =>
+              manualSyncOddsForDay({
+                date: selectedDate,
+                league: selectedLeague,
+              })
+            }
+            disabled={syncingOdds}
+            className={cn(
+              "rounded-2xl px-4 py-3 text-sm font-semibold transition",
+              syncingOdds
+                ? "cursor-not-allowed bg-neutral-800 text-neutral-500"
+                : "bg-white text-black hover:bg-neutral-200"
+            )}
+          >
+            {syncingOdds ? "Synchronizuję kursy…" : "Synchronizuj kursy"}
+          </button>
+        ) : null}
+      </div>
+    </details>
+  );
+
   const renderStandingsPanel = () => {
     if (selectedLeague === "ALL") {
       return (
@@ -1723,7 +1779,7 @@ export default function EventsPage() {
     <div className="space-y-5">
       <SurfaceCard className="overflow-hidden">
         <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.11),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
             <div className="min-w-0">
               <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
                 VirtualBook Football
@@ -1786,51 +1842,17 @@ export default function EventsPage() {
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-3">
-                <DayBar
-                  value={selectedDate}
-                  onChange={setSelectedDate}
-                  enabledDates={enabledDates}
-                  enabledDatesLoaded={enabledDatesLoaded}
-                />
+              <div className="space-y-3">
+                <div className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-3">
+                  <DayBar
+                    value={selectedDate}
+                    onChange={setSelectedDate}
+                    enabledDates={enabledDates}
+                    enabledDatesLoaded={enabledDatesLoaded}
+                    showCalendarInline
+                  />
+                </div>
               </div>
-
-              <button
-                type="button"
-                onClick={refreshCurrentDay}
-                disabled={loadingMatches}
-                className={cn(
-                  "w-full rounded-2xl border px-4 py-3 text-sm font-semibold transition",
-                  loadingMatches
-                    ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
-                    : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-neutral-700 hover:bg-neutral-900"
-                )}
-              >
-                {loadingMatches ? "Odświeżam…" : "Odśwież mecze"}
-              </button>
-
-              {!checkingAdmin && isAdmin ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    manualSyncOddsForDay({
-                      date: selectedDate,
-                      league: selectedLeague,
-                    })
-                  }
-                  disabled={syncingOdds}
-                  className={cn(
-                    "w-full rounded-2xl px-4 py-3 text-sm font-semibold transition",
-                    syncingOdds
-                      ? "cursor-not-allowed bg-neutral-800 text-neutral-500"
-                      : "bg-white text-black hover:bg-neutral-200"
-                  )}
-                >
-                  {syncingOdds ? "Synchronizuję kursy…" : "Synchronizuj kursy"}
-                </button>
-              ) : null}
-            </div>
           </div>
         </div>
 
@@ -2140,6 +2162,8 @@ export default function EventsPage() {
                     </div>
                   </div>
                 ) : null}
+
+                {dayToolsPanel}
               </div>
             )
           ) : (

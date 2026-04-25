@@ -1,4 +1,4 @@
-//components/DayBar.tsx
+// components/DayBar.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -10,6 +10,7 @@ type Props = {
   onChange: (v: string) => void;
   enabledDates?: string[];
   enabledDatesLoaded?: boolean;
+  showCalendarInline?: boolean;
 };
 
 function weekdayShortPL(d: Date) {
@@ -30,6 +31,7 @@ export default function DayBar({
   onChange,
   enabledDates = [],
   enabledDatesLoaded = false,
+  showCalendarInline = false,
 }: Props) {
   const [open, setOpen] = useState(false);
 
@@ -51,54 +53,78 @@ export default function DayBar({
 
   const canGoPrev =
     enabledDates.length === 0 || enabledSet.has(addDaysLocal(value, -1));
+
   const canGoNext =
     enabledDates.length === 0 || enabledSet.has(addDaysLocal(value, 1));
 
+  const handleCenterClick = () => {
+    if (showCalendarInline) {
+      onChange(todayLocalYYYYMMDD());
+      return;
+    }
+
+    setOpen(true);
+  };
+
   return (
     <>
-      <div className="flex items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-        <button
-          onClick={() => {
-            if (canGoPrev) onChange(addDaysLocal(value, -1));
-          }}
-          disabled={!canGoPrev}
-          className={[
-            "rounded-xl border px-3 py-2 text-sm transition",
-            canGoPrev
-              ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
-              : "border-neutral-900 bg-neutral-950/40 text-neutral-600 cursor-not-allowed",
-          ].join(" ")}
-          aria-label="Poprzedni dzień"
-        >
-          ←
-        </button>
+      <div className={showCalendarInline ? "space-y-3" : ""}>
+        <div className="flex items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+          <button
+            type="button"
+            onClick={() => {
+              if (canGoPrev) onChange(addDaysLocal(value, -1));
+            }}
+            disabled={!canGoPrev}
+            className={[
+              "rounded-xl border px-3 py-2 text-sm transition",
+              canGoPrev
+                ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
+                : "cursor-not-allowed border-neutral-900 bg-neutral-950/40 text-neutral-600",
+            ].join(" ")}
+            aria-label="Poprzedni dzień"
+          >
+            ←
+          </button>
 
-        <button
-          onClick={() => setOpen(true)}
-          className="rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm hover:bg-neutral-800 transition"
-          title="Wybierz dzień"
-        >
-          {label}
-        </button>
+          <button
+            type="button"
+            onClick={handleCenterClick}
+            className="rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm transition hover:bg-neutral-800"
+            title={showCalendarInline ? "Przejdź do dzisiaj" : "Wybierz dzień"}
+          >
+            {label}
+          </button>
 
-        <button
-          onClick={() => {
-            if (canGoNext) onChange(addDaysLocal(value, +1));
-          }}
-          disabled={!canGoNext}
-          className={[
-            "rounded-xl border px-3 py-2 text-sm transition",
-            canGoNext
-              ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
-              : "border-neutral-900 bg-neutral-950/40 text-neutral-600 cursor-not-allowed",
-          ].join(" ")}
-          aria-label="Następny dzień"
-        >
-          →
-        </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (canGoNext) onChange(addDaysLocal(value, 1));
+            }}
+            disabled={!canGoNext}
+            className={[
+              "rounded-xl border px-3 py-2 text-sm transition",
+              canGoNext
+                ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
+                : "cursor-not-allowed border-neutral-900 bg-neutral-950/40 text-neutral-600",
+            ].join(" ")}
+            aria-label="Następny dzień"
+          >
+            →
+          </button>
+        </div>
+
+        {showCalendarInline ? (
+          <MonthCalendar
+            value={value}
+            enabledDates={enabledDates}
+            enabledDatesLoaded={enabledDatesLoaded}
+            onChange={onChange}
+          />
+        ) : null}
       </div>
 
-      {open && (
+      {!showCalendarInline && open ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
           onMouseDown={() => setOpen(false)}
@@ -118,17 +144,18 @@ export default function DayBar({
             />
 
             <button
+              type="button"
               onClick={() => {
                 onChange(todayLocalYYYYMMDD());
                 setOpen(false);
               }}
-              className="mt-3 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm hover:bg-neutral-800 transition"
+              className="mt-3 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm transition hover:bg-neutral-800"
             >
               Dzisiaj
             </button>
           </div>
         </div>
-      )}
+      ) : null}
     </>
   );
 }
