@@ -165,7 +165,7 @@ async function getReviewItems(): Promise<ReviewRow[]> {
         away_team
       )
     `)
-    .eq("status", "needs_review")
+    .in("status", ["needs_review", "failed"])
     .gte("match.utc_date", nowIso)
     .lte("match.utc_date", next24hIso)
     .order("utc_date", {
