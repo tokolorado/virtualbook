@@ -1925,8 +1925,8 @@ export default function EventsPage() {
         </div>
       </SurfaceCard>
 
-      <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="hidden xl:block">
+      <div className="grid gap-5 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
+        <aside className="hidden xl:block min-w-0">
           <div className="sticky top-24 space-y-4">
             <SurfaceCard className="p-4">
               <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
@@ -2097,7 +2097,7 @@ export default function EventsPage() {
                       count={featuredMatches.length}
                       subtitle="Szybki dostęp do aktualnych i najbliższych spotkań."
                     />
-                    <div className="grid gap-3 xl:grid-cols-3">
+                    <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
                       {featuredMatches.map((m) => renderFeaturedMatchCard(m))}
                     </div>
                   </div>

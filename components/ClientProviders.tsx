@@ -52,27 +52,25 @@ export default function ClientProviders({
 
   return (
     <BetSlipProvider>
-      <main className="w-full min-w-0 px-4 py-6">
-        {hideSlip ? (
-          <div className="mx-auto w-full max-w-[1600px] min-w-0">{children}</div>
-        ) : (
-          <>
-            <div className="mx-auto w-full max-w-[1600px] min-w-0">
-              <div className="min-w-0 lg:pr-[392px]">{children}</div>
-            </div>
+      {hideSlip ? (
+        <div className="w-full min-w-0">{children}</div>
+      ) : (
+        <>
+          <div className="mx-auto grid w-full max-w-[1920px] grid-cols-1 gap-5 px-4 py-6 sm:px-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-6 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:gap-6 2xl:px-8">
+            <div className="min-w-0">{children}</div>
 
-            <div className="hidden lg:block">
-              <div className="fixed right-4 top-[88px] z-40 h-[calc(100dvh-104px)] w-[360px]">
+            <aside className="hidden min-w-0 lg:block">
+              <div className="sticky top-[88px] h-[calc(100dvh-104px)] min-h-0">
                 <BetSlip variant="desktop" />
               </div>
-            </div>
+            </aside>
+          </div>
 
-            <div className="lg:hidden">
-              <BetSlip variant="mobile" />
-            </div>
-          </>
-        )}
-      </main>
+          <div className="lg:hidden">
+            <BetSlip variant="mobile" />
+          </div>
+        </>
+      )}
     </BetSlipProvider>
   );
 }
