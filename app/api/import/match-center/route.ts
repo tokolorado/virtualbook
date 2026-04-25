@@ -81,6 +81,55 @@ function safeBoolean(value: unknown): boolean {
   return value === true;
 }
 
+const MISSING_SOFASCORE_MAPPING_ERROR =
+  "Brak mapowania SofaScore dla tego meczu.";
+
+function isDateInNextHours(value: unknown, hours: number): boolean {
+  const dateValue = safeNullableString(value);
+  if (!dateValue) return false;
+
+  const timestamp = Date.parse(dateValue);
+  if (!Number.isFinite(timestamp)) return false;
+
+  const now = Date.now();
+  const max = now + hours * 60 * 60 * 1000;
+
+  return timestamp >= now && timestamp <= max;
+}
+
+async function markMissingSofaScoreMapping(
+  sb: ReturnType<typeof supabaseAdmin>,
+  matchId: number,
+  utcDate: unknown
+) {
+  const nowIso = new Date().toISOString();
+  const shouldGoToReview = isDateInNextHours(utcDate, 24);
+
+  const { error } = await sb
+    .from("match_mapping_queue")
+    .update({
+      status: shouldGoToReview ? "needs_review" : "failed",
+      last_error: MISSING_SOFASCORE_MAPPING_ERROR,
+      next_retry_at: shouldGoToReview ? null : nowIso,
+      locked_at: null,
+      locked_by: null,
+      mapped_at: null,
+      updated_at: nowIso,
+    })
+    .eq("match_id", matchId);
+
+  if (error) {
+    throw new Error(
+      `Failed to update match_mapping_queue after missing SofaScore mapping: ${error.message}`
+    );
+  }
+
+  return {
+    status: shouldGoToReview ? "needs_review" : "failed",
+    shouldGoToReview,
+  };
+}
+
 async function sofaFetch(path: string) {
   const response = await fetch(`${SOFASCORE_BASE}${encodeURIComponent(path)}`, {
     method: "GET",
@@ -272,7 +321,7 @@ export async function POST(req: Request) {
 
     const { data: existingMatch, error: existingMatchError } = await sb
       .from("matches")
-      .select("id")
+      .select("id, utc_date")
       .eq("id", matchId)
       .maybeSingle();
 
@@ -293,9 +342,17 @@ export async function POST(req: Request) {
     const sofascoreEventId = await resolveSofaScoreEventId(sb, matchId);
 
     if (!sofascoreEventId) {
+      const queueResult = await markMissingSofaScoreMapping(
+        sb,
+        matchId,
+        existingMatch.utc_date
+      );
+
       return jsonError("Missing SofaScore mapping for this match.", 404, {
         matchId,
         needsMapping: true,
+        queueStatus: queueResult.status,
+        shouldGoToReview: queueResult.shouldGoToReview,
       });
     }
 
