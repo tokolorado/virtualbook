@@ -654,13 +654,47 @@ export default function BetSlip({ variant }: { variant?: string }) {
       `}</style>
 
       <div className={cx("shrink-0", isDesktop && "space-y-4")}>
-        <div className="flex items-center justify-between">
-          <h3 className="text-xl font-semibold">Kupon</h3>
-          <div className="text-sm text-neutral-400">{slip.length} zdarzeń</div>
+        <div className="overflow-hidden rounded-2xl border border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_34%),linear-gradient(135deg,rgba(18,18,18,0.98),rgba(3,3,3,0.99))]">
+          <div className="p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                  Bet slip
+                </div>
+                <h3 className="mt-2 text-2xl font-semibold tracking-tight text-white">
+                  Kupon
+                </h3>
+              </div>
+
+              <div className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs font-semibold text-neutral-300">
+                {slip.length} zdarzeń
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">
+                  Kurs
+                </div>
+                <div className="mt-1 text-lg font-semibold text-white">
+                  {slip.length ? formatOdd(totalOdds) : "—"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
+                <div className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">
+                  Wygrana
+                </div>
+                <div className="mt-1 text-lg font-semibold text-white">
+                  {potentialWin ? `${formatVB(potentialWin)} VB` : "—"}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {hasStarted ? (
-          <div className="rounded-xl border border-red-400/40 bg-red-950/20 p-3 text-sm text-red-200">
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
             Masz w kuponie mecz, który już się rozpoczął — usuń go, aby móc postawić
             kupon.
           </div>
@@ -674,8 +708,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
         )}
       >
         {slip.length === 0 ? (
-          <div className="rounded-xl border border-neutral-800 bg-neutral-950 p-3 text-sm text-neutral-300">
-            Brak zdarzeń. Kliknij kurs, żeby dodać do kuponu.
+          <div className="rounded-2xl border border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.10),transparent_32%),linear-gradient(135deg,rgba(18,18,18,0.96),rgba(5,5,5,0.99))] p-4 text-sm leading-6 text-neutral-300">
+            <div className="font-semibold text-white">Brak zdarzeń</div>
+            <div className="mt-1 text-neutral-400">
+              Kliknij kurs przy meczu, żeby dodać typ do kuponu.
+            </div>
           </div>
         ) : (
           slip.map((it) => {
@@ -687,8 +724,8 @@ export default function BetSlip({ variant }: { variant?: string }) {
               <div
                 key={k}
                 className={cx(
-                  "rounded-2xl border border-neutral-800 bg-neutral-950 p-4 transition",
-                  flash && "vb-pop ring-2 ring-neutral-200/60",
+                  "rounded-2xl border border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.10),transparent_30%),linear-gradient(135deg,rgba(18,18,18,0.98),rgba(5,5,5,0.99))] p-4 shadow-[0_10px_34px_rgba(0,0,0,0.24)] transition hover:border-neutral-700",
+                  flash && "vb-pop ring-2 ring-white/40",
                   started && "opacity-50"
                 )}
               >
@@ -762,7 +799,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
           isDesktop && "border-t border-neutral-800 pt-4"
         )}
       >
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
+        <div className="rounded-2xl border border-sky-500/20 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_32%),linear-gradient(135deg,rgba(8,47,73,0.24),rgba(5,5,5,0.99))] p-4">
           <div className="flex items-center justify-between text-sm">
             <span className="text-neutral-300">Kurs łączny</span>
             <span className="font-semibold">
@@ -797,7 +834,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 inputMode="decimal"
                 placeholder={`np. ${MIN_STAKE}`}
                 className={cx(
-                  "w-full rounded-xl border bg-neutral-950 px-3 py-3 pr-14 text-sm outline-none transition",
+                  "w-full rounded-2xl border bg-black/30 px-4 py-3 pr-14 text-sm text-white outline-none transition placeholder:text-neutral-600",
                   submitting && "cursor-not-allowed opacity-70",
                   stakeError
                     ? "border-red-400/60 focus:border-red-300"
@@ -818,10 +855,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
                   onClick={() => addStake(v)}
                   disabled={submitting}
                   className={cx(
-                    "rounded-lg border px-2 py-1.5 text-xs transition",
+                    "rounded-xl border px-2 py-2 text-xs font-semibold transition",
                     submitting
                       ? "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-600"
-                      : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
+                      : "border-neutral-800 bg-black/30 text-neutral-300 hover:border-neutral-700 hover:bg-white/5"
                   )}
                 >
                   +{v}
@@ -846,8 +883,8 @@ export default function BetSlip({ variant }: { variant?: string }) {
             className={cx(
               "w-full rounded-xl px-4 py-3 text-sm font-semibold transition",
               canSubmit
-                ? "bg-white text-black hover:opacity-95 active:scale-[0.99]"
-                : "cursor-not-allowed bg-neutral-800 text-neutral-500"
+              ? "bg-white text-black shadow-[0_12px_34px_rgba(255,255,255,0.10)] hover:bg-neutral-200 active:scale-[0.99]"
+              : "cursor-not-allowed bg-neutral-800/80 text-neutral-500"
             )}
           >
             {submitting ? "Stawiam…" : "POSTAW KUPON"}
@@ -859,8 +896,8 @@ export default function BetSlip({ variant }: { variant?: string }) {
             className={cx(
               "w-full rounded-xl border px-4 py-3 text-sm transition",
               slip.length && !submitting
-                ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900 active:scale-[0.99]"
-                : "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-600"
+              ? "border-neutral-800 bg-black/30 text-neutral-200 hover:border-neutral-700 hover:bg-white/5 active:scale-[0.99]"
+              : "cursor-not-allowed border-neutral-900 bg-black/20 text-neutral-600"
             )}
           >
             Wyczyść kupon
@@ -881,11 +918,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
   const cardWrap = (content: ReactNode, className?: string) => (
     <div
       className={cx(
-        "rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4",
+        "relative overflow-hidden rounded-3xl border border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.96),rgba(5,5,5,0.99))] shadow-[0_18px_80px_rgba(0,0,0,0.40)]",
         className
       )}
     >
-      {content}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-white/30 via-white/10 to-transparent" />
+      <div className="relative h-full min-h-0 p-4">{content}</div>
     </div>
   );
 
@@ -910,7 +948,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         {successModalNode}
         {errorModalNode}
 
-        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-neutral-800 bg-neutral-950/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+        <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.98),rgba(5,5,5,0.99))] shadow-[0_-18px_60px_rgba(0,0,0,0.45)] backdrop-blur pb-[env(safe-area-inset-bottom)]">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0">
               <div className="text-sm font-semibold text-neutral-100">
