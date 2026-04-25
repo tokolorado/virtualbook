@@ -69,7 +69,7 @@ export default function DayBar({
   return (
     <>
       <div className={showCalendarInline ? "space-y-3" : ""}>
-        <div className="flex items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+        <div className="flex items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-900/40 p-3">
           <button
             type="button"
             onClick={() => {
@@ -77,7 +77,7 @@ export default function DayBar({
             }}
             disabled={!canGoPrev}
             className={[
-              "rounded-xl border px-3 py-2 text-sm transition",
+              "rounded-xl border px-2.5 py-1.5 text-sm transition",
               canGoPrev
                 ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
                 : "cursor-not-allowed border-neutral-900 bg-neutral-950/40 text-neutral-600",
@@ -90,7 +90,7 @@ export default function DayBar({
           <button
             type="button"
             onClick={handleCenterClick}
-            className="rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm transition hover:bg-neutral-800"
+            className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm transition hover:bg-neutral-800"
             title={showCalendarInline ? "Przejdź do dzisiaj" : "Wybierz dzień"}
           >
             {label}

@@ -1779,7 +1779,7 @@ export default function EventsPage() {
     <div className="space-y-5">
       <SurfaceCard className="overflow-hidden">
         <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.11),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px] 2xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_340px]">
             <div className="min-w-0">
               <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
                 VirtualBook Football
@@ -1843,7 +1843,7 @@ export default function EventsPage() {
             </div>
 
               <div className="space-y-3">
-                <div className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-3">
+                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-2">
                   <DayBar
                     value={selectedDate}
                     onChange={setSelectedDate}
