@@ -62,7 +62,7 @@ export default function ClientProviders({
             </div>
           </main>
 
-          <aside className="fixed bottom-0 right-4 top-[88px] z-40 hidden w-[360px] xl:w-[380px] lg:block">
+          <aside className="fixed bottom-6 right-4 top-[100px] z-40 hidden w-[360px] xl:w-[380px] lg:block">
             <div className="h-full min-h-0">
               <BetSlip variant="desktop" />
             </div>
