@@ -103,7 +103,7 @@ export default function DayBar({
             }}
             disabled={!canGoNext}
             className={[
-              "rounded-xl border px-3 py-2 text-sm transition",
+              "rounded-xl border px-2.5 py-1.5 text-sm transition",
               canGoNext
                 ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
                 : "cursor-not-allowed border-neutral-900 bg-neutral-950/40 text-neutral-600",
@@ -120,6 +120,7 @@ export default function DayBar({
             enabledDates={enabledDates}
             enabledDatesLoaded={enabledDatesLoaded}
             onChange={onChange}
+            compact
           />
         ) : null}
       </div>

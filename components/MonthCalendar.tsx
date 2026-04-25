@@ -1,4 +1,4 @@
-//components/MonthCalendar.tsx
+// components/MonthCalendar.tsx
 "use client";
 
 import React, { useMemo, useState } from "react";
@@ -9,6 +9,7 @@ type Props = {
   onChange: (next: string) => void;
   enabledDates?: string[]; // dni, w których są mecze
   enabledDatesLoaded?: boolean;
+  compact?: boolean;
 };
 
 function parseLocalYYYYMMDD(s: string): Date {
@@ -45,6 +46,7 @@ export default function MonthCalendar({
   onChange,
   enabledDates = [],
   enabledDatesLoaded = false,
+  compact = false,
 }: Props) {
   const selected = useMemo(() => parseLocalYYYYMMDD(value), [value]);
   const [viewMonth, setViewMonth] = useState<Date>(() => startOfMonth(selected));
@@ -53,12 +55,14 @@ export default function MonthCalendar({
 
   React.useEffect(() => {
     const sm = startOfMonth(selected);
+
     if (
       sm.getFullYear() !== viewMonth.getFullYear() ||
       sm.getMonth() !== viewMonth.getMonth()
     ) {
       setViewMonth(sm);
     }
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
@@ -66,15 +70,24 @@ export default function MonthCalendar({
     const first = startOfMonth(viewMonth);
     const firstWeekday = (first.getDay() + 6) % 7;
     const start = new Date(first);
+
     start.setDate(first.getDate() - firstWeekday);
 
     const cells: { date: Date; inMonth: boolean; key: string }[] = [];
+
     for (let i = 0; i < 42; i++) {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
+
       const inMonth = d.getMonth() === viewMonth.getMonth();
-      cells.push({ date: d, inMonth, key: formatLocalYYYYMMDD(d) });
+
+      cells.push({
+        date: d,
+        inMonth,
+        key: formatLocalYYYYMMDD(d),
+      });
     }
+
     return cells;
   }, [viewMonth]);
 
@@ -82,26 +95,55 @@ export default function MonthCalendar({
   const todayKey = formatLocalYYYYMMDD(new Date());
 
   return (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
-      <div className="flex items-center justify-between">
+    <div
+      className={[
+        "rounded-2xl border border-neutral-800 bg-neutral-900/40",
+        compact ? "p-3" : "p-4",
+      ].join(" ")}
+    >
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm text-neutral-400">Kalendarz</div>
-          <div className="text-base font-semibold">
+          <div
+            className={
+              compact ? "text-xs text-neutral-400" : "text-sm text-neutral-400"
+            }
+          >
+            Kalendarz
+          </div>
+
+          <div
+            className={
+              compact ? "text-sm font-semibold" : "text-base font-semibold"
+            }
+          >
             {MONTHS_PL[viewMonth.getMonth()]} {viewMonth.getFullYear()}
           </div>
         </div>
 
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={() => setViewMonth(addMonths(viewMonth, -1))}
-            className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm hover:bg-neutral-800 transition"
+            className={[
+              "border border-neutral-800 bg-neutral-950 transition hover:bg-neutral-800",
+              compact
+                ? "rounded-lg px-2 py-1 text-xs"
+                : "rounded-xl px-3 py-2 text-sm",
+            ].join(" ")}
             aria-label="Poprzedni miesiąc"
           >
             ←
           </button>
+
           <button
+            type="button"
             onClick={() => setViewMonth(addMonths(viewMonth, 1))}
-            className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm hover:bg-neutral-800 transition"
+            className={[
+              "border border-neutral-800 bg-neutral-950 transition hover:bg-neutral-800",
+              compact
+                ? "rounded-lg px-2 py-1 text-xs"
+                : "rounded-xl px-3 py-2 text-sm",
+            ].join(" ")}
             aria-label="Następny miesiąc"
           >
             →
@@ -109,9 +151,17 @@ export default function MonthCalendar({
         </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-7 gap-1 text-xs text-neutral-400">
+      <div
+        className={[
+          "grid grid-cols-7 gap-1 text-xs text-neutral-400",
+          compact ? "mt-2" : "mt-3",
+        ].join(" ")}
+      >
         {WEEKDAYS.map((w) => (
-          <div key={w} className="text-center py-1">
+          <div
+            key={w}
+            className={compact ? "py-0.5 text-center" : "py-1 text-center"}
+          >
             {w}
           </div>
         ))}
@@ -127,21 +177,24 @@ export default function MonthCalendar({
           return (
             <button
               key={key}
+              type="button"
               onClick={() => {
                 if (!isEnabled) return;
                 onChange(key);
               }}
               disabled={!isEnabled}
               className={[
-                "relative h-10 rounded-xl border text-sm transition flex items-center justify-center",
+                compact
+                  ? "relative flex h-8 items-center justify-center rounded-lg border text-xs transition"
+                  : "relative flex h-10 items-center justify-center rounded-xl border text-sm transition",
                 cell.inMonth
                   ? "border-neutral-800 bg-neutral-950"
                   : "border-neutral-900 bg-neutral-950/30 text-neutral-600",
                 cell.inMonth && isEnabled
-                  ? "hover:bg-neutral-800 text-neutral-200"
+                  ? "text-neutral-200 hover:bg-neutral-800"
                   : "",
                 !isEnabled
-                  ? "opacity-45 cursor-not-allowed text-neutral-500"
+                  ? "cursor-not-allowed text-neutral-500 opacity-45"
                   : "",
                 isToday ? "ring-1 ring-sky-500/70" : "",
                 isSelected
@@ -160,25 +213,50 @@ export default function MonthCalendar({
               <span>{cell.date.getDate()}</span>
 
               {!isSelected && isEnabled && cell.inMonth ? (
-                <span className="absolute bottom-1 h-1.5 w-1.5 rounded-full bg-yellow-400" />
+                <span
+                  className={
+                    compact
+                      ? "absolute bottom-0.5 h-1 w-1 rounded-full bg-yellow-400"
+                      : "absolute bottom-1 h-1.5 w-1.5 rounded-full bg-yellow-400"
+                  }
+                />
               ) : null}
             </button>
           );
         })}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-500">
+      <div
+        className={[
+          "flex flex-wrap items-center text-neutral-500",
+          compact
+            ? "mt-2 gap-x-3 gap-y-1 text-[11px]"
+            : "mt-3 gap-x-4 gap-y-2 text-xs",
+        ].join(" ")}
+      >
         <div>
           Wybrany dzień: <span className="text-neutral-200">{value}</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="inline-block h-2 w-2 rounded-full bg-yellow-400" />
+          <span
+            className={
+              compact
+                ? "inline-block h-1.5 w-1.5 rounded-full bg-yellow-400"
+                : "inline-block h-2 w-2 rounded-full bg-yellow-400"
+            }
+          />
           <span>Dzień z meczami</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="inline-block h-2 w-2 rounded-full bg-neutral-600" />
+          <span
+            className={
+              compact
+                ? "inline-block h-1.5 w-1.5 rounded-full bg-neutral-600"
+                : "inline-block h-2 w-2 rounded-full bg-neutral-600"
+            }
+          />
           <span>Brak meczów</span>
         </div>
       </div>
