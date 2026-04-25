@@ -7,7 +7,7 @@ import { resolveSofaScoreEventId } from "@/lib/sofascore/resolveEventId";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SOFASCORE_BASE = "https://api.sofascore.com/api/v1";
+const SOFASCORE_BASE = "https://broad-cake-65f1.tobiasrottmann.workers.dev";
 
 type ImportBody = {
   matchId?: number | string;
@@ -320,10 +320,10 @@ export async function POST(req: Request) {
     }
 
     const [lineupsPayload, statisticsPayload] = await Promise.all([
-      sofaFetch(`/event/${sofascoreEventId}/lineups`).catch((error) => ({
+      sofaFetch(`/lineups/${sofascoreEventId}`).catch((error) => ({
         _error: error instanceof Error ? error.message : "Lineups fetch failed",
       })),
-      sofaFetch(`/event/${sofascoreEventId}/statistics`).catch((error) => ({
+      sofaFetch(`/statistics/${sofascoreEventId}`).catch((error) => ({
         _error:
           error instanceof Error ? error.message : "Statistics fetch failed",
       })),
