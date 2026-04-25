@@ -7,7 +7,7 @@ import { resolveSofaScoreEventId } from "@/lib/sofascore/resolveEventId";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SOFASCORE_BASE = "https://broad-cake-65f1.tobiasrottmann.workers.dev";
+const SOFASCORE_BASE = "https://virtualbook-sable.vercel.app/api/sofascore?path=";
 
 type ImportBody = {
   matchId?: number | string;
@@ -82,7 +82,7 @@ function safeBoolean(value: unknown): boolean {
 }
 
 async function sofaFetch(path: string) {
-  const response = await fetch(`${SOFASCORE_BASE}${path}`, {
+  const response = await fetch(`${SOFASCORE_BASE}${encodeURIComponent(path)}`, {
     method: "GET",
     cache: "no-store",
     headers: {
