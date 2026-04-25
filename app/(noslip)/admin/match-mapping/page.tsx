@@ -145,7 +145,8 @@ function formatDate(value: string | null) {
 async function getReviewItems(): Promise<ReviewRow[]> {
   const supabase = getSupabaseAdmin();
 
-  const sinceIso = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const nowIso = new Date().toISOString();
+  const next24hIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
   const { data: queueData, error: queueError } = await supabase
     .from("match_mapping_queue")
@@ -165,12 +166,13 @@ async function getReviewItems(): Promise<ReviewRow[]> {
       )
     `)
     .eq("status", "needs_review")
-    .gte("match.utc_date", sinceIso)
+    .gte("match.utc_date", nowIso)
+    .lte("match.utc_date", next24hIso)
     .order("utc_date", {
       referencedTable: "matches",
       ascending: true,
     })
-    .limit(50);
+    .limit(100);
 
   if (queueError) {
     throw new Error(`Nie udało się pobrać review items: ${queueError.message}`);
