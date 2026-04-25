@@ -1,3 +1,4 @@
+// app/(main)/leaderboard/page.tsx
 "use client";
 
 import Link from "next/link";
@@ -21,8 +22,13 @@ type LeaderboardRow = {
 type SortKey = "profit" | "balance" | "roi" | "winrate";
 
 const MIN_BETS_FOR_RATE_RANKING = 5;
+
 const USER_PROFILE_PATH = (username: string) =>
   `/users/${encodeURIComponent(username)}`;
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
+}
 
 function toNum(v: unknown) {
   const n = typeof v === "number" ? v : Number(v);
@@ -30,7 +36,20 @@ function toNum(v: unknown) {
 }
 
 function fmt(v: unknown) {
-  return toNum(v).toFixed(2);
+  return toNum(v).toLocaleString("pl-PL", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function fmtInt(v: unknown) {
+  return toNum(v).toLocaleString("pl-PL", {
+    maximumFractionDigits: 0,
+  });
+}
+
+function fmtPct(v: unknown) {
+  return `${fmt(v)}%`;
 }
 
 function rankLabel(index: number) {
@@ -48,13 +67,19 @@ function sortLabel(sortBy: SortKey) {
 }
 
 function medalBg(index: number) {
-  if (index === 0)
-    return "from-yellow-500/20 to-amber-500/5 border-yellow-500/30";
-  if (index === 1)
-    return "from-slate-300/15 to-slate-500/5 border-slate-300/20";
-  if (index === 2)
-    return "from-orange-500/15 to-amber-700/5 border-orange-500/25";
-  return "from-neutral-800/40 to-neutral-900/20 border-neutral-800";
+  if (index === 0) {
+    return "border-yellow-500/30 bg-[radial-gradient(circle_at_top_left,rgba(234,179,8,0.24),transparent_36%),linear-gradient(180deg,rgba(23,23,23,0.94),rgba(5,5,5,0.98))]";
+  }
+
+  if (index === 1) {
+    return "border-slate-300/20 bg-[radial-gradient(circle_at_top_left,rgba(203,213,225,0.16),transparent_36%),linear-gradient(180deg,rgba(23,23,23,0.94),rgba(5,5,5,0.98))]";
+  }
+
+  if (index === 2) {
+    return "border-orange-500/25 bg-[radial-gradient(circle_at_top_left,rgba(249,115,22,0.18),transparent_36%),linear-gradient(180deg,rgba(23,23,23,0.94),rgba(5,5,5,0.98))]";
+  }
+
+  return "border-neutral-800 bg-neutral-950/70";
 }
 
 function metricColor(v: number) {
@@ -71,11 +96,98 @@ function trendLabel(profit: number, roi: number, winrate: number) {
 }
 
 function trendClasses(label: string) {
-  if (label === "HOT")
+  if (label === "HOT") {
     return "border-green-500/30 bg-green-500/10 text-green-300";
-  if (label === "UP") return "border-sky-500/30 bg-sky-500/10 text-sky-300";
-  if (label === "DOWN") return "border-red-500/30 bg-red-500/10 text-red-300";
-  return "border-neutral-700 bg-neutral-800/40 text-neutral-300";
+  }
+
+  if (label === "UP") {
+    return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+  }
+
+  if (label === "DOWN") {
+    return "border-red-500/30 bg-red-500/10 text-red-300";
+  }
+
+  return "border-neutral-700 bg-neutral-900 text-neutral-300";
+}
+
+function SmallPill({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "green" | "red" | "yellow" | "blue";
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold",
+        tone === "neutral" &&
+          "border-neutral-800 bg-neutral-950 text-neutral-300",
+        tone === "green" && "border-green-500/30 bg-green-500/10 text-green-300",
+        tone === "red" && "border-red-500/30 bg-red-500/10 text-red-300",
+        tone === "yellow" &&
+          "border-yellow-500/30 bg-yellow-500/10 text-yellow-300",
+        tone === "blue" && "border-sky-500/30 bg-sky-500/10 text-sky-300"
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  hint,
+  tone = "neutral",
+}: {
+  label: string;
+  value: React.ReactNode;
+  hint?: React.ReactNode;
+  tone?: "neutral" | "green" | "red" | "yellow" | "blue";
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border p-4",
+        tone === "neutral" && "border-neutral-800 bg-neutral-950/80",
+        tone === "green" && "border-green-500/20 bg-green-500/10",
+        tone === "red" && "border-red-500/20 bg-red-500/10",
+        tone === "yellow" && "border-yellow-500/20 bg-yellow-500/10",
+        tone === "blue" && "border-sky-500/20 bg-sky-500/10"
+      )}
+    >
+      <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+        {label}
+      </div>
+
+      <div className="mt-2 text-2xl font-semibold leading-tight text-white">
+        {value}
+      </div>
+
+      {hint ? <div className="mt-1 text-xs text-neutral-500">{hint}</div> : null}
+    </div>
+  );
+}
+
+function SurfaceCard({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={cn(
+        "rounded-3xl border border-neutral-800 bg-neutral-950/70 shadow-[0_18px_80px_rgba(0,0,0,0.35)]",
+        className
+      )}
+    >
+      {children}
+    </section>
+  );
 }
 
 function Sparkline({
@@ -86,6 +198,7 @@ function Sparkline({
   positive: boolean;
 }) {
   const amp = Math.max(3, Math.min(10, Math.abs(value) / 35));
+
   const d = `
     M 4 18
     C 12 ${18 - amp}, 20 ${18 - amp}, 28 18
@@ -124,16 +237,17 @@ function SortButton({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={[
-        "px-4 py-2 rounded-xl border text-[15px] transition",
+      className={cn(
+        "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
         active
-          ? "border-neutral-200 bg-white text-black"
-          : "border-neutral-700 hover:bg-neutral-800 text-white",
-      ].join(" ")}
+          ? "border-white bg-white text-black"
+          : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
+      )}
     >
       <span className="inline-flex items-center gap-2">
-        <span>Sortuj: {label}</span>
+        <span>{label}</span>
         {active ? (
           <span className="rounded-full bg-black/10 px-2 py-0.5 text-[11px] font-semibold">
             aktywne
@@ -152,7 +266,7 @@ function HeaderLabel({
   active: boolean;
 }) {
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex items-center justify-end gap-1">
       <span>{label}</span>
       {active ? <span className="text-neutral-300">↓</span> : null}
     </span>
@@ -185,29 +299,31 @@ function PodiumCard({
         ? `${fmt(balance)} VB`
         : sortBy === "roi"
           ? rateEligible
-            ? `${fmt(roi)}%`
+            ? fmtPct(roi)
             : "—"
           : rateEligible
-            ? `${fmt(winrate)}%`
+            ? fmtPct(winrate)
             : "—";
 
   return (
     <div
-      className={[
-        "rounded-2xl border bg-gradient-to-b p-4 transition",
-        medalBg(index),
-      ].join(" ")}
+      className={cn(
+        "rounded-3xl border p-4 transition hover:border-neutral-600",
+        medalBg(index)
+      )}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="text-2xl">{rankLabel(index)}</div>
+
           <Link
             href={USER_PROFILE_PATH(username)}
-            className="mt-2 block text-lg font-semibold text-white hover:text-sky-300 transition break-words"
+            className="mt-3 block break-words text-lg font-semibold text-white transition hover:text-sky-300"
           >
             {username}
           </Link>
-          <div className="mt-2 text-xs text-neutral-400">
+
+          <div className="mt-2 text-xs leading-5 text-neutral-400">
             {rateEligible
               ? "pełne statystyki rankingowe"
               : `za mało kuponów do ROI/Winrate (${betsCount}/${MIN_BETS_FOR_RATE_RANKING})`}
@@ -215,38 +331,71 @@ function PodiumCard({
         </div>
 
         <span
-          className={[
-            "rounded-full border px-2 py-1 text-[11px] font-semibold",
-            trendClasses(trend),
-          ].join(" ")}
+          className={cn(
+            "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+            trendClasses(trend)
+          )}
         >
           {trend}
         </span>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div className="rounded-xl border border-neutral-800 bg-black/20 p-3">
-          <div className="text-xs text-neutral-400">Aktualna metryka</div>
+      <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+        <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+            Aktualna metryka
+          </div>
           <div className="mt-1 font-semibold text-white">{primaryMetric}</div>
         </div>
 
-        <div className="rounded-xl border border-neutral-800 bg-black/20 p-3">
-          <div className="text-xs text-neutral-400">Saldo</div>
+        <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+            Saldo
+          </div>
           <div className="mt-1 font-semibold text-white">{fmt(balance)} VB</div>
         </div>
 
-        <div className="rounded-xl border border-neutral-800 bg-black/20 p-3">
-          <div className="text-xs text-neutral-400">Profit</div>
-          <div className={`mt-1 font-semibold ${metricColor(profit)}`}>
+        <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+            Profit
+          </div>
+          <div className={cn("mt-1 font-semibold", metricColor(profit))}>
             {profit > 0 ? "+" : ""}
             {fmt(profit)} VB
           </div>
         </div>
 
-        <div className="rounded-xl border border-neutral-800 bg-black/20 p-3">
-          <div className="text-xs text-neutral-400">W grze</div>
+        <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
+          <div className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+            W grze
+          </div>
           <div className="mt-1 font-semibold text-yellow-300">{activeBets}</div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-5">
+      <SurfaceCard className="overflow-hidden">
+        <div className="p-5 sm:p-6">
+          <div className="h-8 w-64 animate-pulse rounded bg-neutral-800" />
+          <div className="mt-4 h-4 w-96 max-w-full animate-pulse rounded bg-neutral-800" />
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="h-20 animate-pulse rounded-2xl bg-neutral-800" />
+            <div className="h-20 animate-pulse rounded-2xl bg-neutral-800" />
+            <div className="h-20 animate-pulse rounded-2xl bg-neutral-800" />
+            <div className="h-20 animate-pulse rounded-2xl bg-neutral-800" />
+          </div>
+        </div>
+      </SurfaceCard>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="h-52 animate-pulse rounded-3xl border border-neutral-800 bg-neutral-900/40" />
+        <div className="h-52 animate-pulse rounded-3xl border border-neutral-800 bg-neutral-900/40" />
+        <div className="h-52 animate-pulse rounded-3xl border border-neutral-800 bg-neutral-900/40" />
       </div>
     </div>
   );
@@ -257,17 +406,44 @@ export default function LeaderboardPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sortBy, setSortBy] = useState<SortKey>("profit");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [lastLoadedAt, setLastLoadedAt] = useState<string | null>(null);
 
   const load = useCallback(async (silent = false) => {
-    if (silent) setRefreshing(true);
-    else setLoading(true);
+    if (silent) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
+    setLoadError(null);
 
     try {
-      const { data } = await supabase.from("leaderboard_global").select("*");
+      const { data, error } = await supabase
+        .from("leaderboard_global")
+        .select("*");
+
+      if (error) {
+        setRows([]);
+        setLoadError(`Nie udało się pobrać rankingu: ${error.message}`);
+        return;
+      }
+
       setRows((data ?? []) as LeaderboardRow[]);
+      setLastLoadedAt(new Date().toISOString());
+    } catch (error) {
+      setRows([]);
+      setLoadError(
+        error instanceof Error
+          ? error.message
+          : "Nie udało się pobrać rankingu."
+      );
     } finally {
-      if (silent) setRefreshing(false);
-      else setLoading(false);
+      if (silent) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -329,6 +505,7 @@ export default function LeaderboardPage() {
       if (aEligible && bEligible && bWinrate !== aWinrate) {
         return bWinrate - aWinrate;
       }
+
       if (bProfit !== aProfit) return bProfit - aProfit;
       return bBets - aBets;
     });
@@ -338,250 +515,387 @@ export default function LeaderboardPage() {
 
   const podiumRows = sortedRows.slice(0, 3);
 
+  const stats = useMemo(() => {
+    const totalPlayers = rows.length;
+    const activePlayers = rows.filter((row) => toNum(row.bets_count) > 0).length;
+    const totalBets = rows.reduce((sum, row) => sum + toNum(row.bets_count), 0);
+    const activeBets = rows.reduce((sum, row) => sum + toNum(row.active_bets), 0);
+
+    const leader = sortedRows[0] ?? null;
+    const leaderUsername = leader?.username?.trim() || null;
+
+    const totalProfit = rows.reduce((sum, row) => sum + toNum(row.profit), 0);
+    const profitablePlayers = rows.filter((row) => toNum(row.profit) > 0).length;
+
+    return {
+      totalPlayers,
+      activePlayers,
+      totalBets,
+      activeBets,
+      leader,
+      leaderUsername,
+      totalProfit,
+      profitablePlayers,
+    };
+  }, [rows, sortedRows]);
+
   if (loading) {
-    return (
-      <div className="mx-auto w-full max-w-6xl px-4">
-        <h1 className="text-3xl font-semibold">Ranking globalny</h1>
-        <p className="text-neutral-400 mt-2">Ładowanie...</p>
-      </div>
-    );
+    return <LoadingSkeleton />;
   }
 
   return (
-    <div className="w-full min-w-0 space-y-6 overflow-x-hidden">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold">Ranking globalny</h1>
-          <p className="text-neutral-400 mt-1">
-            Porównanie wszystkich graczy według wyniku i statystyk kuponów.
-          </p>
+    <div className="w-full min-w-0 space-y-5 overflow-x-hidden">
+      <SurfaceCard className="overflow-hidden">
+        <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.96),rgba(5,5,5,0.99))] p-5 sm:p-6">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
+                VirtualBook Football
+              </div>
+
+              <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+                Ranking globalny
+              </h1>
+
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
+                Porównanie wszystkich graczy według profitu, salda, ROI i
+                skuteczności kuponów. Ranking pokazuje aktualną formę oraz
+                historię wyników wirtualnych zakładów.
+              </p>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <SmallPill tone="blue">Gracze: {stats.totalPlayers}</SmallPill>
+                <SmallPill>Aktywni: {stats.activePlayers}</SmallPill>
+                <SmallPill tone="yellow">W grze: {stats.activeBets}</SmallPill>
+                <SmallPill tone="green">
+                  Na plusie: {stats.profitablePlayers}
+                </SmallPill>
+                {lastLoadedAt ? (
+                  <SmallPill>
+                    Aktualizacja:{" "}
+                    {new Date(lastLoadedAt).toLocaleTimeString("pl-PL", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </SmallPill>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:w-[520px]">
+              <StatCard
+                label="Lider"
+                value={stats.leaderUsername ?? "—"}
+                hint={stats.leader ? `${sortLabel(sortBy)} ranking` : "Brak danych"}
+                tone="blue"
+              />
+
+              <StatCard
+                label="Kupony"
+                value={fmtInt(stats.totalBets)}
+                hint="Łączna liczba kuponów graczy"
+              />
+
+              <StatCard
+                label="Profit łącznie"
+                value={`${stats.totalProfit >= 0 ? "+" : ""}${fmt(
+                  stats.totalProfit
+                )} VB`}
+                hint="Suma profitu z rankingu"
+                tone={
+                  stats.totalProfit > 0
+                    ? "green"
+                    : stats.totalProfit < 0
+                      ? "red"
+                      : "neutral"
+                }
+              />
+
+              <StatCard
+                label="Sortowanie"
+                value={sortLabel(sortBy)}
+                hint={`ROI/Winrate od ${MIN_BETS_FOR_RATE_RANKING} kuponów`}
+                tone="neutral"
+              />
+            </div>
+          </div>
         </div>
 
-        <button
-          onClick={() => {
-            void load(true);
-          }}
-          disabled={refreshing}
-          className={[
-            "px-4 py-2 rounded-xl border text-sm transition",
-            refreshing
-              ? "border-neutral-800 bg-neutral-950 text-neutral-500 cursor-not-allowed"
-              : "border-neutral-700 hover:bg-neutral-800 text-white",
-          ].join(" ")}
-        >
-          {refreshing ? "Odświeżam..." : "Odśwież"}
-        </button>
-      </div>
+        <div className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[minmax(0,1fr)_auto]">
+          <div>
+            <div className="text-xs font-medium text-neutral-500">
+              Aktualne sortowanie
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <SortButton
+                active={sortBy === "profit"}
+                label="Profit"
+                onClick={() => setSortBy("profit")}
+              />
 
-      <div className="sticky top-20 z-10 rounded-2xl border border-neutral-800 bg-black/70 backdrop-blur supports-[backdrop-filter]:bg-black/55 p-3">
-        <div className="flex gap-2 flex-wrap">
-          <SortButton
-            active={sortBy === "profit"}
-            label="Profit"
-            onClick={() => setSortBy("profit")}
-          />
+              <SortButton
+                active={sortBy === "balance"}
+                label="Saldo"
+                onClick={() => setSortBy("balance")}
+              />
 
-          <SortButton
-            active={sortBy === "balance"}
-            label="Saldo"
-            onClick={() => setSortBy("balance")}
-          />
+              <SortButton
+                active={sortBy === "roi"}
+                label="ROI"
+                onClick={() => setSortBy("roi")}
+              />
 
-          <SortButton
-            active={sortBy === "roi"}
-            label="ROI"
-            onClick={() => setSortBy("roi")}
-          />
-
-          <SortButton
-            active={sortBy === "winrate"}
-            label="Winrate"
-            onClick={() => setSortBy("winrate")}
-          />
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-neutral-800 bg-neutral-950/40 px-4 py-3 text-sm text-neutral-400">
-        Aktualne sortowanie:{" "}
-        <span className="text-white font-semibold">{sortLabel(sortBy)}</span>
-      </div>
-
-      {podiumRows.length > 0 ? (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">Top 3</h2>
-            <div className="text-xs text-neutral-500">
-              Podium aktualnego rankingu
+              <SortButton
+                active={sortBy === "winrate"}
+                label="Winrate"
+                onClick={() => setSortBy("winrate")}
+              />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            {podiumRows.map((row, index) => (
-              <PodiumCard
-                key={row.id}
-                row={row}
-                index={index}
-                sortBy={sortBy}
-              />
-            ))}
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={() => {
+                void load(true);
+              }}
+              disabled={refreshing}
+              className={cn(
+                "w-full rounded-2xl border px-4 py-3 text-sm font-semibold transition lg:w-auto",
+                refreshing
+                  ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-500"
+                  : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+              )}
+            >
+              {refreshing ? "Odświeżam..." : "Odśwież ranking"}
+            </button>
           </div>
-        </section>
-      ) : null}
+        </div>
 
-      <div className="w-full min-w-0 border border-neutral-800 rounded-2xl bg-neutral-900/40 px-2 py-2 overflow-hidden">
-        <table className="w-full min-w-0 table-fixed text-sm">
-          <thead className="border-b border-neutral-800 text-neutral-400">
-            <tr>
-              <th className="text-left px-2 py-3 w-10">#</th>
-              <th className="text-left px-2 py-3 w-[220px]">Użytkownik</th>
-              <th className="text-right px-2 py-3 w-[90px]">
-                <HeaderLabel label="Saldo" active={sortBy === "balance"} />
-              </th>
-              <th className="text-right px-2 py-3 w-[100px]">
-                <HeaderLabel label="Profit" active={sortBy === "profit"} />
-              </th>
-              <th className="text-right px-2 py-3 w-[75px]">
-                <HeaderLabel label="ROI" active={sortBy === "roi"} />
-              </th>
-              <th className="text-right px-2 py-3 w-[85px]">
-                <HeaderLabel label="Winrate" active={sortBy === "winrate"} />
-              </th>
-              <th className="text-right px-2 py-3 w-[70px]">Kupony</th>
-              <th className="text-right px-2 py-3 w-[70px]">W grze</th>
-              <th className="text-right px-2 py-3 w-[55px]">Won</th>
-              <th className="text-right px-2 py-3 w-[55px]">Lost</th>
-              <th className="text-right px-2 py-3 w-[55px]">Void</th>
-            </tr>
-          </thead>
+        {loadError ? (
+          <div className="px-4 pb-5 sm:px-5">
+            <div className="rounded-2xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
+              {loadError}
+            </div>
+          </div>
+        ) : null}
+      </SurfaceCard>
 
-          <tbody>
-            {sortedRows.map((row, index) => {
-              const profit = toNum(row.profit);
-              const roi = toNum(row.roi);
-              const winrate = toNum(row.winrate);
-              const betsCount = toNum(row.bets_count);
-              const activeBets = toNum(row.active_bets);
-              const rateEligible = betsCount >= MIN_BETS_FOR_RATE_RANKING;
-              const username = row.username?.trim() || "gracz";
-              const trend = trendLabel(profit, roi, winrate);
+      {rows.length === 0 ? (
+        <SurfaceCard className="p-6">
+          <div className="text-lg font-semibold text-white">
+            Brak danych rankingu
+          </div>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">
+            Ranking pojawi się, gdy użytkownicy zaczną stawiać i rozliczać
+            wirtualne kupony.
+          </p>
+        </SurfaceCard>
+      ) : (
+        <>
+          {podiumRows.length > 0 ? (
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold text-white">Top 3</h2>
+                  <SmallPill>{podiumRows.length}</SmallPill>
+                </div>
 
-              return (
-                <tr
-                  key={row.id}
-                  className="border-b border-neutral-800 hover:bg-neutral-800/40 transition animate-[fadeIn_.35s_ease]"
-                >
-                  <td className="px-3 py-6 text-base font-semibold text-neutral-300 align-top">
-                    {rankLabel(index)}
-                  </td>
+                <div className="text-xs text-neutral-500">
+                  Podium aktualnego rankingu
+                </div>
+              </div>
 
-                  <td className="px-3 py-6 align-top">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <Link
-                          href={USER_PROFILE_PATH(username)}
-                          className="block font-medium text-white hover:text-sky-300 transition truncate"
-                          title={username}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                {podiumRows.map((row, index) => (
+                  <PodiumCard
+                    key={row.id}
+                    row={row}
+                    index={index}
+                    sortBy={sortBy}
+                  />
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <SurfaceCard className="overflow-hidden">
+            <div className="flex flex-col gap-3 border-b border-neutral-800 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+              <div>
+                <div className="text-xl font-semibold text-white">
+                  Pełna tabela
+                </div>
+                <div className="mt-1 text-sm text-neutral-400">
+                  Ranking według:{" "}
+                  <span className="font-semibold text-white">
+                    {sortLabel(sortBy)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <SmallPill>Graczy: {sortedRows.length}</SmallPill>
+                <SmallPill tone="yellow">
+                  W grze: {stats.activeBets}
+                </SmallPill>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[1080px] text-sm">
+                <thead className="border-b border-neutral-800 text-neutral-400">
+                  <tr>
+                    <th className="w-14 px-4 py-4 text-left font-medium">#</th>
+                    <th className="min-w-[260px] px-4 py-4 text-left font-medium">
+                      Użytkownik
+                    </th>
+                    <th className="px-4 py-4 text-right font-medium">
+                      <HeaderLabel label="Saldo" active={sortBy === "balance"} />
+                    </th>
+                    <th className="px-4 py-4 text-right font-medium">
+                      <HeaderLabel label="Profit" active={sortBy === "profit"} />
+                    </th>
+                    <th className="px-4 py-4 text-right font-medium">
+                      <HeaderLabel label="ROI" active={sortBy === "roi"} />
+                    </th>
+                    <th className="px-4 py-4 text-right font-medium">
+                      <HeaderLabel
+                        label="Winrate"
+                        active={sortBy === "winrate"}
+                      />
+                    </th>
+                    <th className="px-4 py-4 text-right font-medium">Kupony</th>
+                    <th className="px-4 py-4 text-right font-medium">W grze</th>
+                    <th className="px-4 py-4 text-right font-medium">Won</th>
+                    <th className="px-4 py-4 text-right font-medium">Lost</th>
+                    <th className="px-4 py-4 text-right font-medium">Void</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {sortedRows.map((row, index) => {
+                    const profit = toNum(row.profit);
+                    const roi = toNum(row.roi);
+                    const winrate = toNum(row.winrate);
+                    const betsCount = toNum(row.bets_count);
+                    const activeBets = toNum(row.active_bets);
+                    const rateEligible =
+                      betsCount >= MIN_BETS_FOR_RATE_RANKING;
+                    const username = row.username?.trim() || "gracz";
+                    const trend = trendLabel(profit, roi, winrate);
+
+                    return (
+                      <tr
+                        key={row.id}
+                        className="border-b border-neutral-800/70 transition hover:bg-neutral-900/50"
+                      >
+                        <td className="px-4 py-5 text-base font-semibold text-neutral-300">
+                          {rankLabel(index)}
+                        </td>
+
+                        <td className="px-4 py-5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <Link
+                                href={USER_PROFILE_PATH(username)}
+                                className="block truncate font-semibold text-white transition hover:text-sky-300"
+                                title={username}
+                              >
+                                {username}
+                              </Link>
+
+                              <div className="mt-2 flex flex-wrap items-center gap-2">
+                                <span
+                                  className={cn(
+                                    "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
+                                    trendClasses(trend)
+                                  )}
+                                >
+                                  {trend}
+                                </span>
+
+                                <span className="text-xs text-neutral-500">
+                                  {rateEligible
+                                    ? "pełne statystyki rankingowe"
+                                    : `za mało kuponów do ROI/Winrate (${betsCount}/${MIN_BETS_FOR_RATE_RANKING})`}
+                                </span>
+                              </div>
+                            </div>
+
+                            <Sparkline value={profit} positive={profit >= 0} />
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-5 text-right text-neutral-200">
+                          {fmt(row.balance_vb)} VB
+                        </td>
+
+                        <td
+                          className={cn(
+                            "px-4 py-5 text-right font-semibold",
+                            metricColor(profit)
+                          )}
                         >
-                          {username}
-                        </Link>
+                          {profit > 0 ? "+" : ""}
+                          {fmt(profit)} VB
+                        </td>
 
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <span
-                            className={[
-                              "rounded-full border px-2 py-0.5 text-[10px] font-semibold",
-                              trendClasses(trend),
-                            ].join(" ")}
-                          >
-                            {trend}
-                          </span>
+                        <td
+                          className={cn(
+                            "px-4 py-5 text-right",
+                            !rateEligible ? "text-neutral-500" : metricColor(roi)
+                          )}
+                          title={
+                            rateEligible
+                              ? undefined
+                              : `ROI liczone rankingowo od ${MIN_BETS_FOR_RATE_RANKING} kuponów`
+                          }
+                        >
+                          {rateEligible ? fmtPct(roi) : "—"}
+                        </td>
 
-                          <span className="text-xs text-neutral-500">
-                            {rateEligible
-                              ? "pełne statystyki rankingowe"
-                              : `za mało kuponów do ROI/Winrate (${betsCount}/${MIN_BETS_FOR_RATE_RANKING})`}
-                          </span>
-                        </div>
-                      </div>
+                        <td
+                          className={cn(
+                            "px-4 py-5 text-right",
+                            !rateEligible ? "text-neutral-500" : "text-neutral-200"
+                          )}
+                          title={
+                            rateEligible
+                              ? undefined
+                              : `Winrate liczony rankingowo od ${MIN_BETS_FOR_RATE_RANKING} kuponów`
+                          }
+                        >
+                          {rateEligible ? fmtPct(winrate) : "—"}
+                        </td>
 
-                      <Sparkline value={profit} positive={profit >= 0} />
-                    </div>
-                  </td>
+                        <td className="px-4 py-5 text-right text-neutral-200">
+                          {betsCount}
+                        </td>
 
-                  <td className="px-3 py-6 text-right text-neutral-200 align-top">
-                    {fmt(row.balance_vb)} VB
-                  </td>
+                        <td className="px-4 py-5 text-right font-semibold text-yellow-300">
+                          {activeBets}
+                        </td>
 
-                  <td
-                    className={`px-3 py-6 text-right font-semibold align-top ${metricColor(profit)}`}
-                  >
-                    {profit > 0 ? "+" : ""}
-                    {fmt(profit)} VB
-                  </td>
+                        <td className="px-4 py-5 text-right text-green-400">
+                          {toNum(row.won_bets)}
+                        </td>
 
-                  <td
-                    className={`px-3 py-6 text-right align-top ${
-                      !rateEligible ? "text-neutral-500" : metricColor(roi)
-                    }`}
-                    title={
-                      rateEligible
-                        ? undefined
-                        : `ROI liczone rankingowo od ${MIN_BETS_FOR_RATE_RANKING} kuponów`
-                    }
-                  >
-                    {rateEligible ? `${fmt(roi)}%` : "—"}
-                  </td>
+                        <td className="px-4 py-5 text-right text-red-400">
+                          {toNum(row.lost_bets)}
+                        </td>
 
-                  <td
-                    className={`px-3 py-6 text-right align-top ${
-                      !rateEligible ? "text-neutral-500" : "text-neutral-200"
-                    }`}
-                    title={
-                      rateEligible
-                        ? undefined
-                        : `Winrate liczony rankingowo od ${MIN_BETS_FOR_RATE_RANKING} kuponów`
-                    }
-                  >
-                    {rateEligible ? `${fmt(winrate)}%` : "—"}
-                  </td>
-
-                  <td className="px-3 py-6 text-right text-neutral-200 align-top">
-                    {betsCount}
-                  </td>
-
-                  <td className="px-3 py-6 text-right text-yellow-300 align-top font-semibold">
-                    {activeBets}
-                  </td>
-
-                  <td className="px-3 py-6 text-right text-green-400 align-top">
-                    {toNum(row.won_bets)}
-                  </td>
-
-                  <td className="px-3 py-6 text-right text-red-400 align-top">
-                    {toNum(row.lost_bets)}
-                  </td>
-
-                  <td className="px-3 py-6 text-right text-neutral-200 align-top">
-                    {toNum(row.void_bets)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      <style jsx>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(4px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-      `}</style>
+                        <td className="px-4 py-5 text-right text-neutral-200">
+                          {toNum(row.void_bets)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </SurfaceCard>
+        </>
+      )}
     </div>
   );
 }
