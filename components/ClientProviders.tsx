@@ -1,3 +1,4 @@
+// components/ClientProviders.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -52,19 +53,17 @@ export default function ClientProviders({
   return (
     <BetSlipProvider>
       {hideSlip ? (
-        <main className="w-full min-w-0 px-4 py-6">
-          <div className="mx-auto w-full max-w-[1600px] min-w-0">
-            {children}
-          </div>
-        </main>
+        <>{children}</>
       ) : (
         <>
-          <main className="w-full min-w-0 px-4 py-6">
-            <div className="w-full min-w-0 lg:pr-[392px]">{children}</div>
+          <main className="w-full min-w-0 px-4 py-6 sm:px-5 lg:px-6 2xl:px-8">
+            <div className="w-full min-w-0 lg:pr-[392px] xl:pr-[412px]">
+              {children}
+            </div>
           </main>
 
-          <aside className="fixed right-4 top-[88px] bottom-4 z-40 hidden w-[360px] lg:block">
-            <div className="h-full">
+          <aside className="fixed bottom-4 right-4 top-[88px] z-40 hidden w-[360px] xl:w-[380px] lg:block">
+            <div className="h-full min-h-0">
               <BetSlip variant="desktop" />
             </div>
           </aside>
