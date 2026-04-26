@@ -65,6 +65,7 @@ type MarketUI = {
 };
 
 const BETTING_CLOSE_BUFFER_MS = 60_000;
+const ESTIMATED_LIVE_AFTER_KICKOFF_MS = 150 * 60 * 1000;
 
 const FALLBACK_MARKETS: Record<
   string,
@@ -470,6 +471,56 @@ function isBettingClosed(kickoffUtc: string, nowMs: number) {
   return nowMs >= t - BETTING_CLOSE_BUFFER_MS;
 }
 
+function isLiveStatus(status?: string | null) {
+  const s = String(status || "").toUpperCase();
+  return s === "LIVE" || s === "IN_PLAY" || s === "PAUSED";
+}
+
+function isNonLiveTerminalStatus(status?: string | null) {
+  const s = String(status || "").toUpperCase();
+
+  return (
+    s === "FINISHED" ||
+    s === "CANCELED" ||
+    s === "CANCELLED" ||
+    s === "POSTPONED" ||
+    s === "SUSPENDED" ||
+    s === "AWARDED"
+  );
+}
+
+function isEffectivelyLiveByClock(args: {
+  status?: string | null;
+  kickoffUtc?: string | null;
+  explicitLive?: boolean;
+  explicitFinished?: boolean;
+  nowMs: number;
+}) {
+  if (args.explicitFinished) return false;
+  if (args.explicitLive) return true;
+
+  const status = String(args.status || "").toUpperCase();
+
+  if (isLiveStatus(status)) return true;
+  if (isNonLiveTerminalStatus(status)) return false;
+
+  const canEstimateLive =
+    status === "TIMED" ||
+    status === "SCHEDULED" ||
+    status === "PRE_MATCH" ||
+    status === "NOT_STARTED";
+
+  if (!canEstimateLive) return false;
+
+  const kickoffTs = Date.parse(String(args.kickoffUtc || ""));
+  if (!Number.isFinite(kickoffTs)) return false;
+
+  return (
+    args.nowMs >= kickoffTs &&
+    args.nowMs <= kickoffTs + ESTIMATED_LIVE_AFTER_KICKOFF_MS
+  );
+}
+
 function resolveTemplate(template: string, home: string, away: string) {
   return template.replaceAll("{HOME}", home).replaceAll("{AWAY}", away);
 }
@@ -623,10 +674,28 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     return () => window.clearInterval(id);
   }, []);
 
+  const effectiveIsLive = useMemo(() => {
+    return isEffectivelyLiveByClock({
+      status: matchUI.status,
+      kickoffUtc: kickoffIso,
+      explicitLive: matchUI.isLive,
+      explicitFinished: matchUI.isFinished,
+      nowMs,
+    });
+  }, [
+    kickoffIso,
+    matchUI.isFinished,
+    matchUI.isLive,
+    matchUI.status,
+    nowMs,
+  ]);
+
+  const effectiveMatchStatus = effectiveIsLive ? "LIVE" : matchUI.status;
+
   const closed = useMemo(() => {
-    if (matchUI.isLive || matchUI.isFinished) return true;
+    if (effectiveIsLive || matchUI.isFinished) return true;
     return kickoffIso ? isBettingClosed(kickoffIso, nowMs) : false;
-  }, [kickoffIso, nowMs, matchUI.isFinished, matchUI.isLive]);
+  }, [effectiveIsLive, kickoffIso, nowMs, matchUI.isFinished]);
 
   const shouldAutoRefreshMatch = useMemo(() => {
     const status = String(matchUI.status || "").toUpperCase();
@@ -636,7 +705,10 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     const kickoffTs = Date.parse(kickoffIso);
     if (!Number.isFinite(kickoffTs)) return true;
 
-    return nowMs >= kickoffTs - 2 * 60 * 60 * 1000;
+    return (
+      nowMs >= kickoffTs - 2 * 60 * 60 * 1000 &&
+      nowMs <= kickoffTs + 4 * 60 * 60 * 1000
+    );
   }, [matchUI.status, kickoffIso, nowMs]);
 
   useEffect(() => {
@@ -874,7 +946,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   }, [oddsRows]);
 
   const statusPill = useMemo(() => {
-    if (matchUI.isLive) {
+    if (effectiveIsLive) {
       return (
         <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-300">
           LIVE
@@ -903,7 +975,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         Pre-match
       </span>
     );
-  }, [closed, matchUI.isFinished, matchUI.isLive]);
+  }, [closed, effectiveIsLive, matchUI.isFinished]);
 
   return (
     <div className="space-y-5">
@@ -985,8 +1057,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         competitionCode={competitionCode}
         homeTeam={matchUI.home}
         awayTeam={matchUI.away}
-        matchStatus={matchUI.status}
-        isLive={matchUI.isLive}
+        matchStatus={effectiveMatchStatus}
+        isLive={effectiveIsLive}
         isFinished={matchUI.isFinished}
       />
 

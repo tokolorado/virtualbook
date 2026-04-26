@@ -86,6 +86,7 @@ const FREE_TIER_LEAGUES: League[] = [
 
 const MARKET_ID_1X2 = "1x2";
 const BETTING_CLOSE_BUFFER_MS = 60_000;
+const ESTIMATED_LIVE_AFTER_KICKOFF_MS = 150 * 60 * 1000;
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -185,9 +186,64 @@ function isFinishedStatus(status?: string | null) {
   return s === "FINISHED";
 }
 
+function isNonLiveTerminalStatus(status?: string | null) {
+  const s = String(status || "").toUpperCase();
+
+  return (
+    s === "FINISHED" ||
+    s === "CANCELED" ||
+    s === "CANCELLED" ||
+    s === "POSTPONED" ||
+    s === "SUSPENDED" ||
+    s === "AWARDED"
+  );
+}
+
+function isEffectivelyLiveByClock(args: {
+  status?: string | null;
+  kickoffUtc?: string | null;
+  explicitLive?: boolean;
+  explicitFinished?: boolean;
+  nowMs: number;
+}) {
+  if (args.explicitFinished) return false;
+  if (args.explicitLive) return true;
+
+  const status = String(args.status || "").toUpperCase();
+
+  if (isLiveStatus(status)) return true;
+  if (isNonLiveTerminalStatus(status)) return false;
+
+  const canEstimateLive =
+    status === "TIMED" ||
+    status === "SCHEDULED" ||
+    status === "PRE_MATCH" ||
+    status === "NOT_STARTED";
+
+  if (!canEstimateLive) return false;
+
+  const kickoffTs = Date.parse(String(args.kickoffUtc || ""));
+  if (!Number.isFinite(kickoffTs)) return false;
+
+  return (
+    args.nowMs >= kickoffTs &&
+    args.nowMs <= kickoffTs + ESTIMATED_LIVE_AFTER_KICKOFF_MS
+  );
+}
+
+function isEffectivelyLiveMatch(m: Match, nowMs: number) {
+  return isEffectivelyLiveByClock({
+    status: m.status,
+    kickoffUtc: m.kickoffUtc,
+    explicitLive: m.isLive,
+    explicitFinished: m.isFinished,
+    nowMs,
+  });
+}
+
 function getMatchAvailability(m: Match, nowMs: number): MatchAvailability {
-  const live = m.isLive || isLiveStatus(m.status);
   const finished = m.isFinished || isFinishedStatus(m.status);
+  const live = isEffectivelyLiveMatch(m, nowMs);
   const closedByKickoff = isBettingClosed(m.kickoffUtc, nowMs);
 
   if (live) {
@@ -245,7 +301,7 @@ function isBeyondHorizonDay(selectedYmd: string, horizonYmd: string | null) {
 }
 
 function matchSortWeight(m: Match, nowMs: number) {
-  if (m.isLive || isLiveStatus(m.status)) return 0;
+  if (isEffectivelyLiveMatch(m, nowMs)) return 0;
 
   const kickoff = Date.parse(m.kickoffUtc);
   if (!Number.isFinite(kickoff)) return 3;
@@ -750,7 +806,7 @@ export default function EventsPage() {
     if (!isToday) return;
 
     const shouldRefreshToday = matches.some((m) => {
-      if (m.isLive || isLiveStatus(m.status)) return true;
+      if (isEffectivelyLiveMatch(m, nowMs)) return true;
       if (m.isFinished || isFinishedStatus(m.status)) return false;
 
       const kickoffTs = Date.parse(m.kickoffUtc);
@@ -1244,18 +1300,18 @@ export default function EventsPage() {
   }, [matches, selectedLeague, nowMs, normalizedSearchQuery, sortMode]);
 
   const liveMatches = useMemo(
-    () => filteredMatches.filter((m) => m.isLive || isLiveStatus(m.status)),
-    [filteredMatches]
+    () => filteredMatches.filter((m) => isEffectivelyLiveMatch(m, nowMs)),
+    [filteredMatches, nowMs]
   );
 
   const openMatches = useMemo(
     () =>
       filteredMatches.filter((m) => {
-        if (m.isLive || isLiveStatus(m.status)) return false;
+        if (isEffectivelyLiveMatch(m, nowMs)) return false;
         if (m.isFinished || isFinishedStatus(m.status)) return false;
         return true;
       }),
-    [filteredMatches]
+    [filteredMatches, nowMs]
   );
 
   const finishedMatches = useMemo(
@@ -1871,17 +1927,17 @@ export default function EventsPage() {
               </div>
             </div>
 
-              <div className="space-y-3">
-                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-2">
-                  <DayBar
-                    value={selectedDate}
-                    onChange={setSelectedDate}
-                    enabledDates={enabledDates}
-                    enabledDatesLoaded={enabledDatesLoaded}
-                    showCalendarInline
-                  />
-                </div>
+            <div className="space-y-3">
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-2">
+                <DayBar
+                  value={selectedDate}
+                  onChange={setSelectedDate}
+                  enabledDates={enabledDates}
+                  enabledDatesLoaded={enabledDatesLoaded}
+                  showCalendarInline
+                />
               </div>
+            </div>
           </div>
         </div>
 
