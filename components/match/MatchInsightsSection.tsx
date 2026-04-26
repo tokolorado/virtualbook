@@ -1,3 +1,4 @@
+// components/match/MatchInsightsSection.tsx
 "use client";
 
 import SofaScoreEventWidget from "@/components/sofascore/SofaScoreEventWidget";
@@ -870,27 +871,130 @@ function SideCard({
   );
 }
 
-function StatBarRow({ item }: { item: StatLikeItem }) {
-  const hasNumeric =
-    item.homeNumeric !== null &&
-    item.awayNumeric !== null &&
-    item.homeNumeric >= 0 &&
-    item.awayNumeric >= 0;
+function normalizeFormString(value: string) {
+  return value.replace(/[^A-Za-z]/g, "").toUpperCase();
+}
 
-  const homeNum = item.homeNumeric ?? 0;
-  const awayNum = item.awayNumeric ?? 0;
+function isFormComparisonItem(item: StatLikeItem) {
+  const key = item.key.toLowerCase();
+  const label = item.label.toLowerCase();
 
-  let homePercent = 50;
-  let awayPercent = 50;
+  const homeForm = normalizeFormString(item.homeValue);
+  const awayForm = normalizeFormString(item.awayValue);
 
-  if (hasNumeric) {
-    const total = homeNum + awayNum;
+  const bothLookLikeForm =
+    homeForm.length > 0 &&
+    awayForm.length > 0 &&
+    /^[WDLRP]+$/.test(homeForm) &&
+    /^[WDLRP]+$/.test(awayForm);
+
+  return (
+    key.includes("form") ||
+    label.includes("forma") ||
+    label.includes("form") ||
+    bothLookLikeForm
+  );
+}
+
+function formScore(value: string): number | null {
+  const normalized = normalizeFormString(value);
+
+  if (!normalized || !/^[WDLRP]+$/.test(normalized)) {
+    return null;
+  }
+
+  return normalized.split("").reduce((sum, char) => {
+    if (char === "W") return sum + 3;
+    if (char === "D" || char === "R") return sum + 1;
+    if (char === "L" || char === "P") return sum;
+    return sum;
+  }, 0);
+}
+
+function readComparableNumber(
+  numericValue: number | null,
+  displayValue: string
+): number | null {
+  if (numericValue !== null && Number.isFinite(numericValue)) {
+    return numericValue;
+  }
+
+  const normalized = displayValue.replace(/\s+/g, "").replace(",", ".");
+  const match = normalized.match(/[+-]?\d+(?:\.\d+)?/);
+
+  if (!match) return null;
+
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function splitMetricPercentages(homeValue: number, awayValue: number) {
+  if (homeValue === awayValue) {
+    return {
+      homePercent: 50,
+      awayPercent: 50,
+    };
+  }
+
+  const minValue = Math.min(homeValue, awayValue);
+
+  if (minValue < 0) {
+    const shift = Math.abs(minValue);
+    const homeScore = homeValue + shift;
+    const awayScore = awayValue + shift;
+    const total = homeScore + awayScore;
 
     if (total > 0) {
-      homePercent = (homeNum / total) * 100;
-      awayPercent = (awayNum / total) * 100;
+      return {
+        homePercent: (homeScore / total) * 100,
+        awayPercent: (awayScore / total) * 100,
+      };
+    }
+
+    return homeValue > awayValue
+      ? { homePercent: 100, awayPercent: 0 }
+      : { homePercent: 0, awayPercent: 100 };
+  }
+
+  const total = homeValue + awayValue;
+
+  if (total > 0) {
+    return {
+      homePercent: (homeValue / total) * 100,
+      awayPercent: (awayValue / total) * 100,
+    };
+  }
+
+  return homeValue > awayValue
+    ? { homePercent: 100, awayPercent: 0 }
+    : { homePercent: 0, awayPercent: 100 };
+}
+
+function resolveStatBarPercentages(item: StatLikeItem) {
+  if (isFormComparisonItem(item)) {
+    const homeFormScore = formScore(item.homeValue);
+    const awayFormScore = formScore(item.awayValue);
+
+    if (homeFormScore !== null && awayFormScore !== null) {
+      return splitMetricPercentages(homeFormScore, awayFormScore);
     }
   }
+
+  const homeValue = readComparableNumber(item.homeNumeric, item.homeValue);
+  const awayValue = readComparableNumber(item.awayNumeric, item.awayValue);
+
+  if (homeValue !== null && awayValue !== null) {
+    return splitMetricPercentages(homeValue, awayValue);
+  }
+
+  return {
+    homePercent: 50,
+    awayPercent: 50,
+  };
+}
+
+function StatBarRow({ item }: { item: StatLikeItem }) {
+  const { homePercent, awayPercent } = resolveStatBarPercentages(item);
 
   return (
     <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
@@ -1376,8 +1480,7 @@ export default function MatchInsightsSection({
         (item.homeNumeric !== null && item.homeNumeric > 0) ||
         (item.awayNumeric !== null && item.awayNumeric > 0);
 
-      const hasDisplayValue =
-        item.homeValue !== "—" || item.awayValue !== "—";
+      const hasDisplayValue = item.homeValue !== "—" || item.awayValue !== "—";
 
       return hasNumeric || hasDisplayValue;
     });
@@ -1385,11 +1488,9 @@ export default function MatchInsightsSection({
 
   const meaningfulComparisonItems = useMemo(() => {
     return (comparison?.items ?? []).filter((item) => {
-      const hasNumeric =
-        item.homeNumeric !== null || item.awayNumeric !== null;
+      const hasNumeric = item.homeNumeric !== null || item.awayNumeric !== null;
 
-      const hasDisplayValue =
-        item.homeValue !== "—" || item.awayValue !== "—";
+      const hasDisplayValue = item.homeValue !== "—" || item.awayValue !== "—";
 
       return hasNumeric || hasDisplayValue;
     });
@@ -1524,93 +1625,89 @@ export default function MatchInsightsSection({
   };
 
   const renderH2H = () => {
-  const hasData =
-    (h2h?.matches?.length ?? 0) > 0 || (h2h?.summary?.totalMatches ?? 0) > 0;
+    const hasData =
+      (h2h?.matches?.length ?? 0) > 0 || (h2h?.summary?.totalMatches ?? 0) > 0;
 
-  if (h2hLoading && !hasData) {
+    if (h2hLoading && !hasData) {
+      return (
+        <StateBox
+          title="Ładowanie H2H..."
+          description="Pobieramy ostatnie bezpośrednie mecze i bilans obu drużyn."
+        />
+      );
+    }
+
+    if (!hasData && h2hError) {
+      return (
+        <StateBox
+          title="Nie udało się załadować H2H"
+          description={h2hError}
+          tone="error"
+        />
+      );
+    }
+
+    if (!hasData) {
+      return (
+        <StateBox
+          title="Brak danych H2H"
+          description="Dla tego meczu nie ma obecnie dostępnych danych head-to-head."
+        />
+      );
+    }
+
     return (
-      <StateBox
-        title="Ładowanie H2H..."
-        description="Pobieramy ostatnie bezpośrednie mecze i bilans obu drużyn."
-      />
-    );
-  }
+      <div className="space-y-4">
+        {h2hError ? (
+          <InlineWarning message="Nie udało się odświeżyć H2H. Pokazujemy ostatnio pobrane dane." />
+        ) : null}
 
-  if (!hasData && h2hError) {
-    return (
-      <StateBox
-        title="Nie udało się załadować H2H"
-        description={h2hError}
-        tone="error"
-      />
-    );
-  }
-
-  if (!hasData) {
-    return (
-      <StateBox
-        title="Brak danych H2H"
-        description="Dla tego meczu nie ma obecnie dostępnych danych head-to-head."
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {h2hError ? (
-        <InlineWarning message="Nie udało się odświeżyć H2H. Pokazujemy ostatnio pobrane dane." />
-      ) : null}
-
-      {(h2h?.summary?.totalMatches ?? 0) > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <H2HSummaryCard
-            label={`${homeTeam} wygrane`}
-            value={h2h?.summary?.homeWins ?? 0}
-          />
-          <H2HSummaryCard
-            label="Remisy"
-            value={h2h?.summary?.draws ?? 0}
-          />
-          <H2HSummaryCard
-            label={`${awayTeam} wygrane`}
-            value={h2h?.summary?.awayWins ?? 0}
-          />
-          <H2HSummaryCard
-            label="Liczba meczów"
-            value={h2h?.summary?.totalMatches ?? 0}
-          />
-          <H2HSummaryCard
-            label="Bramki łącznie"
-            value={`${h2h?.summary?.homeGoals ?? 0}:${h2h?.summary?.awayGoals ?? 0}`}
-          />
-          <H2HSummaryCard
-            label="BTTS"
-            value={h2h?.summary?.bttsCount ?? 0}
-          />
-          <H2HSummaryCard
-            label="Over 2.5"
-            value={h2h?.summary?.over25Count ?? 0}
-          />
-          <H2HSummaryCard
-            label="Aktualizacja"
-            value={formatDateTime(h2h?.updatedAt ?? null)}
-          />
-        </div>
-      ) : null}
-
-      {(h2h?.matches?.length ?? 0) > 0 ? (
-        <Surface className="p-4">
-          <div className="text-lg font-semibold text-white">Ostatnie mecze H2H</div>
-          <div className="mt-4 space-y-3">
-            {h2h?.matches.map((match) => (
-              <H2HMatchRow key={match.id} match={match} />
-            ))}
+        {(h2h?.summary?.totalMatches ?? 0) > 0 ? (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <H2HSummaryCard
+              label={`${homeTeam} wygrane`}
+              value={h2h?.summary?.homeWins ?? 0}
+            />
+            <H2HSummaryCard label="Remisy" value={h2h?.summary?.draws ?? 0} />
+            <H2HSummaryCard
+              label={`${awayTeam} wygrane`}
+              value={h2h?.summary?.awayWins ?? 0}
+            />
+            <H2HSummaryCard
+              label="Liczba meczów"
+              value={h2h?.summary?.totalMatches ?? 0}
+            />
+            <H2HSummaryCard
+              label="Bramki łącznie"
+              value={`${h2h?.summary?.homeGoals ?? 0}:${h2h?.summary?.awayGoals ?? 0}`}
+            />
+            <H2HSummaryCard label="BTTS" value={h2h?.summary?.bttsCount ?? 0} />
+            <H2HSummaryCard
+              label="Over 2.5"
+              value={h2h?.summary?.over25Count ?? 0}
+            />
+            <H2HSummaryCard
+              label="Aktualizacja"
+              value={formatDateTime(h2h?.updatedAt ?? null)}
+            />
           </div>
-        </Surface>
-      ) : null}
-    </div>
-  );
-};
+        ) : null}
+
+        {(h2h?.matches?.length ?? 0) > 0 ? (
+          <Surface className="p-4">
+            <div className="text-lg font-semibold text-white">
+              Ostatnie mecze H2H
+            </div>
+            <div className="mt-4 space-y-3">
+              {h2h?.matches.map((match) => (
+                <H2HMatchRow key={match.id} match={match} />
+              ))}
+            </div>
+          </Surface>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderLiveStats = () => {
     const hasData = meaningfulLiveStatsItems.length > 0;
@@ -1812,12 +1909,8 @@ export default function MatchInsightsSection({
                             <span className="font-medium text-white">
                               {row.teamName}
                             </span>
-                            {isHome ? (
-                              <TableRowHighlightBadge label="HOME" />
-                            ) : null}
-                            {isAway ? (
-                              <TableRowHighlightBadge label="AWAY" />
-                            ) : null}
+                            {isHome ? <TableRowHighlightBadge label="HOME" /> : null}
+                            {isAway ? <TableRowHighlightBadge label="AWAY" /> : null}
                           </div>
                         </td>
 
@@ -1868,9 +1961,7 @@ export default function MatchInsightsSection({
     return (
       <div className="space-y-4">
         <Surface className="p-4">
-          <div className="text-sm font-semibold text-white">
-            Attack Momentum
-          </div>
+          <div className="text-sm font-semibold text-white">Attack Momentum</div>
           <div className="mt-2 text-sm text-neutral-400">
             Widżet SofaScore pokazujący przebieg naporu i presji obu drużyn
             podczas meczu.
@@ -1944,9 +2035,7 @@ export default function MatchInsightsSection({
               </StatusChip>
             ) : null}
 
-            {isRefreshing ? (
-              <StatusChip tone="green">Odświeżanie…</StatusChip>
-            ) : null}
+            {isRefreshing ? <StatusChip tone="green">Odświeżanie…</StatusChip> : null}
           </div>
         </div>
 
@@ -1970,20 +2059,20 @@ export default function MatchInsightsSection({
         </div>
       </div>
 
-     <div className="mt-6">
-          {activeTab === "lineups"
-            ? renderLineups()
-            : activeTab === "comparison"
-              ? renderComparison()
-              : activeTab === "h2h"
-                ? renderH2H()
-                : activeTab === "liveStats"
-                  ? renderLiveStats()
-                  : activeTab === "momentum"
-                    ? renderMomentum()
-                    : activeTab === "timeline"
-                      ? renderTimeline()
-                      : renderTable()}
+      <div className="mt-6">
+        {activeTab === "lineups"
+          ? renderLineups()
+          : activeTab === "comparison"
+            ? renderComparison()
+            : activeTab === "h2h"
+              ? renderH2H()
+              : activeTab === "liveStats"
+                ? renderLiveStats()
+                : activeTab === "momentum"
+                  ? renderMomentum()
+                  : activeTab === "timeline"
+                    ? renderTimeline()
+                    : renderTable()}
       </div>
     </section>
   );
