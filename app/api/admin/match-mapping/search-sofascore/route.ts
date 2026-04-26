@@ -1,4 +1,3 @@
-// app/api/admin/match-mapping/search-sofascore/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/requireAdmin";
@@ -6,23 +5,12 @@ import { requireAdmin } from "@/lib/requireAdmin";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type MatchDetails = {
+type MatchRow = {
+  id: number;
   utc_date: string | null;
   competition_name: string | null;
-  home_team: string;
-  away_team: string;
-};
-
-type RawMatchDetails = {
-  utc_date?: unknown;
-  competition_name?: unknown;
-  home_team?: unknown;
-  away_team?: unknown;
-};
-
-type RawQueueRow = {
-  match_id: unknown;
-  match?: RawMatchDetails | RawMatchDetails[] | null;
+  home_team: string | null;
+  away_team: string | null;
 };
 
 type SofaCandidate = {
@@ -43,132 +31,103 @@ function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
-function safeNumber(value: unknown): number | null {
+function readNumber(value: unknown): number | null {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function safeString(value: unknown, fallback = "") {
+function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
-function safeNullableString(value: unknown): string | null {
+function asNullableString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
+function asNullableNumber(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
-function normalizeMatchDetails(input: unknown): MatchDetails | null {
-  const row = asRecord(input);
-  if (!row) return null;
-
-  return {
-    utc_date: safeNullableString(row.utc_date),
-    competition_name: safeNullableString(row.competition_name),
-    home_team: safeString(row.home_team, "Home"),
-    away_team: safeString(row.away_team, "Away"),
-  };
-}
-
-function normalizeText(value: string) {
+function normalizeName(value: string) {
   return value
+    .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9ąćęłńóśźż\s-]/gi, " ")
-    .replace(/\s+/g, " ")
+    .replace(/&/g, " and ")
+    .replace(/\b(fc|cf|sc|afc|club|de|la|the|calcio|ud|cd|rcd|ss)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
 
-function compactTeamName(value: string) {
-  const stopWords = new Set([
-    "fc",
-    "cf",
-    "cd",
-    "ud",
-    "rcd",
-    "rc",
-    "ac",
-    "as",
-    "ss",
-    "sc",
-    "club",
-    "de",
-    "la",
-    "el",
-    "the",
-    "calcio",
-    "football",
-  ]);
-
-  return normalizeText(value)
-    .split(" ")
-    .filter((part) => part.length > 1 && !stopWords.has(part))
-    .join(" ")
-    .trim();
+function tokens(value: string) {
+  return normalizeName(value)
+    .split(/\s+/)
+    .filter((token) => token.length >= 2);
 }
 
 function tokenScore(expected: string, actual: string) {
-  const expectedTokens = compactTeamName(expected).split(" ").filter(Boolean);
-  const actualTokens = compactTeamName(actual).split(" ").filter(Boolean);
+  const expectedNorm = normalizeName(expected);
+  const actualNorm = normalizeName(actual);
 
-  if (expectedTokens.length === 0 || actualTokens.length === 0) return 0;
+  if (!expectedNorm || !actualNorm) return 0;
+  if (expectedNorm === actualNorm) return 100;
+  if (actualNorm.includes(expectedNorm) || expectedNorm.includes(actualNorm)) {
+    return 88;
+  }
 
-  const matched = expectedTokens.filter((token) =>
-    actualTokens.some(
-      (actualToken) =>
-        actualToken === token ||
-        actualToken.includes(token) ||
-        token.includes(actualToken)
-    )
-  ).length;
+  const expectedTokens = tokens(expected);
+  const actualTokens = new Set(tokens(actual));
 
-  return matched / expectedTokens.length;
+  if (expectedTokens.length === 0) return 0;
+
+  const matched = expectedTokens.filter((token) => actualTokens.has(token)).length;
+  const coverage = matched / expectedTokens.length;
+
+  return Math.round(coverage * 80);
 }
 
-function dateScore(matchDate: string | null, candidateStartTimestamp: number | null) {
-  if (!matchDate || !candidateStartTimestamp) return 0;
+function teamPairScore(args: {
+  expectedHome: string;
+  expectedAway: string;
+  actualHome: string;
+  actualAway: string;
+}) {
+  const direct =
+    (tokenScore(args.expectedHome, args.actualHome) +
+      tokenScore(args.expectedAway, args.actualAway)) /
+    2;
 
-  const matchMs = Date.parse(matchDate);
-  const candidateMs = candidateStartTimestamp * 1000;
+  const reversed =
+    (tokenScore(args.expectedHome, args.actualAway) +
+      tokenScore(args.expectedAway, args.actualHome)) /
+    2;
 
-  if (!Number.isFinite(matchMs) || !Number.isFinite(candidateMs)) return 0;
-
-  const diffHours = Math.abs(matchMs - candidateMs) / (1000 * 60 * 60);
-
-  if (diffHours <= 3) return 1;
-  if (diffHours <= 8) return 0.9;
-  if (diffHours <= 24) return 0.7;
-  if (diffHours <= 72) return 0.45;
-
-  return 0.1;
+  return Math.round(Math.max(direct, reversed));
 }
 
-function candidateScore(match: MatchDetails, candidate: Omit<SofaCandidate, "score">) {
-  const normal =
-    (tokenScore(match.home_team, candidate.homeTeam) +
-      tokenScore(match.away_team, candidate.awayTeam)) /
-    2;
+function dateScore(matchUtcDate: string | null, eventStartTimestamp: number | null) {
+  if (!matchUtcDate || eventStartTimestamp === null) return 0;
 
-  const swapped =
-    (tokenScore(match.home_team, candidate.awayTeam) +
-      tokenScore(match.away_team, candidate.homeTeam)) /
-    2;
+  const matchTs = Date.parse(matchUtcDate);
+  const eventTs = eventStartTimestamp * 1000;
 
-  const teamScore = Math.max(normal, swapped * 0.92);
-  const timeScore = dateScore(match.utc_date, candidate.startTimestamp);
+  if (!Number.isFinite(matchTs) || !Number.isFinite(eventTs)) return 0;
 
-  return Math.round((teamScore * 0.78 + timeScore * 0.22) * 100);
+  const diffMinutes = Math.abs(matchTs - eventTs) / 60_000;
+
+  if (diffMinutes <= 30) return 20;
+  if (diffMinutes <= 90) return 15;
+  if (diffMinutes <= 180) return 10;
+  if (diffMinutes <= 360) return 5;
+
+  return 0;
 }
 
 function formatStartTime(startTimestamp: number | null) {
-  if (!startTimestamp) return null;
+  if (startTimestamp === null) return null;
 
   return new Date(startTimestamp * 1000).toLocaleString("pl-PL", {
     day: "2-digit",
@@ -179,119 +138,99 @@ function formatStartTime(startTimestamp: number | null) {
   });
 }
 
-function readTeamName(value: unknown) {
-  const row = asRecord(value);
-  if (!row) return "";
-
-  return (
-    safeString(row.name) ||
-    safeString(row.shortName) ||
-    safeString(row.slug) ||
-    ""
-  );
+function dateKeyFromIso(value: string) {
+  return new Date(value).toISOString().slice(0, 10);
 }
 
-function normalizeSofaEvent(
-  input: unknown,
-  match: MatchDetails,
-  sourceQuery: string
-): SofaCandidate | null {
-  const raw = asRecord(input);
-  if (!raw) return null;
+function getCandidateDates(matchUtcDate: string | null) {
+  const base = matchUtcDate ? new Date(matchUtcDate) : new Date();
 
-  const type = safeNullableString(raw.type);
-  if (type && type !== "event") return null;
+  if (Number.isNaN(base.getTime())) {
+    return [dateKeyFromIso(new Date().toISOString())];
+  }
 
-  const entity = asRecord(raw.entity) ?? raw;
-  const eventId = safeNumber(entity.id);
+  const dates = new Set<string>();
 
-  if (!eventId || eventId <= 0) return null;
+  for (const offset of [-1, 0, 1]) {
+    const d = new Date(base);
+    d.setUTCDate(d.getUTCDate() + offset);
+    dates.add(dateKeyFromIso(d.toISOString()));
+  }
 
-  const homeTeam = readTeamName(entity.homeTeam);
-  const awayTeam = readTeamName(entity.awayTeam);
-
-  if (!homeTeam || !awayTeam) return null;
-
-  const tournament = asRecord(entity.tournament);
-  const category = asRecord(tournament?.category);
-  const status = asRecord(entity.status);
-
-  const startTimestamp = safeNumber(entity.startTimestamp);
-
-  const baseCandidate: Omit<SofaCandidate, "score"> = {
-    eventId,
-    homeTeam,
-    awayTeam,
-    tournament: safeNullableString(tournament?.name),
-    category: safeNullableString(category?.name),
-    startTimestamp,
-    startTime: formatStartTime(startTimestamp),
-    status:
-      safeNullableString(status?.description) ??
-      safeNullableString(status?.type),
-    sourceQuery,
-    url: `https://www.sofascore.com/event/${eventId}`,
-  };
-
-  return {
-    ...baseCandidate,
-    score: candidateScore(match, baseCandidate),
-  };
+  return Array.from(dates);
 }
 
-function extractResults(data: unknown): unknown[] {
-  const row = asRecord(data);
-  if (!row) return [];
+async function fetchSofaJson(path: string) {
+  const url = `https://www.sofascore.com/api/v1${path}`;
 
-  if (Array.isArray(row.results)) return row.results;
-  if (Array.isArray(row.events)) return row.events;
-
-  const nested = asRecord(row.data);
-  if (Array.isArray(nested?.results)) return nested.results;
-  if (Array.isArray(nested?.events)) return nested.events;
-
-  return [];
-}
-
-function buildQueries(match: MatchDetails) {
-  const full = `${match.home_team} ${match.away_team}`.trim();
-  const compact = `${compactTeamName(match.home_team)} ${compactTeamName(
-    match.away_team
-  )}`.trim();
-
-  const queries = [
-    full,
-    compact,
-    `${match.home_team} vs ${match.away_team}`,
-    match.home_team,
-    match.away_team,
-  ]
-    .map((q) => q.trim())
-    .filter(Boolean);
-
-  return Array.from(new Set(queries)).slice(0, 5);
-}
-
-async function fetchSofaSearch(query: string) {
-  const url = new URL("https://www.sofascore.com/api/v1/search/events/");
-  url.searchParams.set("q", query);
-  url.searchParams.set("page", "0");
-
-  const res = await fetch(url.toString(), {
+  const res = await fetch(url, {
     cache: "no-store",
     headers: {
-      accept: "application/json",
-      "user-agent":
-        "Mozilla/5.0 (compatible; VirtualBookAdmin/1.0; +https://virtualbook-sable.vercel.app)",
+      accept: "application/json, text/plain, */*",
+      "accept-language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+      origin: "https://www.sofascore.com",
       referer: "https://www.sofascore.com/",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
     },
   });
 
   if (!res.ok) {
-    throw new Error(`SofaScore search failed: HTTP ${res.status}`);
+    throw new Error(`SofaScore scheduled-events failed: HTTP ${res.status}`);
   }
 
   return res.json();
+}
+
+function normalizeSofaEvent(
+  raw: unknown,
+  match: MatchRow,
+  sourceQuery: string
+): SofaCandidate | null {
+  if (typeof raw !== "object" || raw === null) return null;
+
+  const event = raw as Record<string, any>;
+
+  const eventId = asNullableNumber(event.id);
+  if (eventId === null) return null;
+
+  const homeTeam = asString(event.homeTeam?.name ?? event.homeTeam?.shortName);
+  const awayTeam = asString(event.awayTeam?.name ?? event.awayTeam?.shortName);
+
+  if (!homeTeam || !awayTeam) return null;
+
+  const startTimestamp = asNullableNumber(event.startTimestamp);
+  const tournament = asNullableString(event.tournament?.name);
+  const category = asNullableString(event.tournament?.category?.name);
+  const status =
+    asNullableString(event.status?.description) ??
+    asNullableString(event.status?.type);
+
+  const baseScore = teamPairScore({
+    expectedHome: match.home_team ?? "",
+    expectedAway: match.away_team ?? "",
+    actualHome: homeTeam,
+    actualAway: awayTeam,
+  });
+
+  const finalScore = Math.min(
+    100,
+    baseScore + dateScore(match.utc_date, startTimestamp)
+  );
+
+  return {
+    eventId,
+    homeTeam,
+    awayTeam,
+    tournament,
+    category,
+    startTimestamp,
+    startTime: formatStartTime(startTimestamp),
+    status,
+    score: finalScore,
+    sourceQuery,
+    url: `https://www.sofascore.com/event/${eventId}`,
+  };
 }
 
 export async function GET(req: Request) {
@@ -307,7 +246,7 @@ export async function GET(req: Request) {
 
   try {
     const url = new URL(req.url);
-    const matchId = safeNumber(url.searchParams.get("matchId"));
+    const matchId = readNumber(url.searchParams.get("matchId"));
 
     if (!matchId || matchId <= 0) {
       return json(400, {
@@ -319,78 +258,78 @@ export async function GET(req: Request) {
 
     const supabase = supabaseAdmin();
 
-    const { data: queueRow, error: queueError } = await supabase
-      .from("match_mapping_queue")
-      .select(
-        `
-        match_id,
-        match:matches!inner (
-          utc_date,
-          competition_name,
-          home_team,
-          away_team
-        )
-      `
-      )
-      .eq("match_id", matchId)
+    const { data: match, error: matchError } = await supabase
+      .from("matches")
+      .select("id, utc_date, competition_name, home_team, away_team")
+      .eq("id", matchId)
       .maybeSingle();
 
-    if (queueError) {
+    if (matchError) {
       return json(500, {
         ok: false,
-        error: queueError.message,
+        error: matchError.message,
         candidates: [],
       });
     }
-
-    const rawQueue = queueRow as unknown as RawQueueRow | null;
-    const rawMatch = Array.isArray(rawQueue?.match)
-      ? rawQueue?.match[0] ?? null
-      : rawQueue?.match ?? null;
-
-    const match = normalizeMatchDetails(rawMatch);
 
     if (!match) {
       return json(404, {
         ok: false,
-        error: "Nie znaleziono meczu dla tego matchId.",
+        error: "Nie znaleziono meczu.",
         candidates: [],
       });
     }
 
-    const queries = buildQueries(match);
-    const candidatesById = new Map<number, SofaCandidate>();
+    const matchRow = match as MatchRow;
+    const candidateDates = getCandidateDates(matchRow.utc_date);
+
+    const candidatesByEventId = new Map<number, SofaCandidate>();
     const errors: string[] = [];
 
-    for (const query of queries) {
+    for (const dateKey of candidateDates) {
       try {
-        const data = await fetchSofaSearch(query);
-        const results = extractResults(data);
+        const data = await fetchSofaJson(
+          `/sport/football/scheduled-events/${dateKey}`
+        );
 
-        for (const result of results) {
-          const candidate = normalizeSofaEvent(result, match, query);
+        const events = Array.isArray(data?.events) ? data.events : [];
+
+        for (const rawEvent of events) {
+          const candidate = normalizeSofaEvent(
+            rawEvent,
+            matchRow,
+            `scheduled-events:${dateKey}`
+          );
 
           if (!candidate) continue;
 
-          const current = candidatesById.get(candidate.eventId);
+          const existing = candidatesByEventId.get(candidate.eventId);
 
-          if (!current || candidate.score > current.score) {
-            candidatesById.set(candidate.eventId, candidate);
+          if (!existing || candidate.score > existing.score) {
+            candidatesByEventId.set(candidate.eventId, candidate);
           }
         }
-      } catch (e) {
-        errors.push(e instanceof Error ? e.message : "SofaScore search error");
+      } catch (e: unknown) {
+        errors.push(e instanceof Error ? e.message : `Błąd dla daty ${dateKey}`);
       }
     }
 
-    const candidates = Array.from(candidatesById.values())
-      .sort((a, b) => b.score - a.score)
+    const candidates = Array.from(candidatesByEventId.values())
+      .filter((candidate) => candidate.score >= 35)
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+
+        const aTs = a.startTimestamp ?? 0;
+        const bTs = b.startTimestamp ?? 0;
+
+        return aTs - bTs;
+      })
       .slice(0, 8);
 
-    if (candidates.length === 0 && errors.length === queries.length) {
+    if (candidates.length === 0 && errors.length > 0) {
       return json(502, {
         ok: false,
-        error: errors[0] ?? "Nie udało się pobrać kandydatów SofaScore.",
+        error: errors.join(" | "),
         candidates: [],
       });
     }
@@ -398,11 +337,16 @@ export async function GET(req: Request) {
     return json(200, {
       ok: true,
       matchId,
-      match,
-      queries,
+      match: {
+        homeTeam: matchRow.home_team,
+        awayTeam: matchRow.away_team,
+        utcDate: matchRow.utc_date,
+        competitionName: matchRow.competition_name,
+      },
+      dates: candidateDates,
       candidates,
     });
-  } catch (e) {
+  } catch (e: unknown) {
     return json(500, {
       ok: false,
       error:
