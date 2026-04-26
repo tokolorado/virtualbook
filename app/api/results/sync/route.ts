@@ -245,6 +245,10 @@ function isLiveLocalStatus(status: string) {
   return s === "LIVE" || s === "IN_PLAY" || s === "PAUSED";
 }
 
+function canPersistScore(status: string) {
+  return status.toUpperCase() === "FINISHED";
+}
+
 function isoDateOnlyUTC(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -488,18 +492,15 @@ async function runResultsSync(req: Request) {
           const upstreamHomeScore = pickMatchScore(upstreamMatch, "home");
           const upstreamAwayScore = pickMatchScore(upstreamMatch, "away");
 
-          const shouldClearScore =
-            nextStatus === "SCHEDULED" || nextStatus === "TIMED";
+          const scoreCanBePersisted = canPersistScore(nextStatus);
 
-          const nextHomeScore =
-            upstreamHomeScore !== null || shouldClearScore
-              ? upstreamHomeScore
-              : localMatch.home_score;
+          const nextHomeScore = scoreCanBePersisted
+            ? upstreamHomeScore ?? localMatch.home_score
+            : null;
 
-          const nextAwayScore =
-            upstreamAwayScore !== null || shouldClearScore
-              ? upstreamAwayScore
-              : localMatch.away_score;
+          const nextAwayScore = scoreCanBePersisted
+            ? upstreamAwayScore ?? localMatch.away_score
+            : null;
 
           const nextIsLive = isLiveLocalStatus(nextStatus);
           const nextMinute = nextIsLive ? pickMatchMinute(upstreamMatch) : null;

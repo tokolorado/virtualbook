@@ -41,6 +41,10 @@ type FootballDataMatchesPayload = {
   matches?: FootballDataMatch[];
 };
 
+function canPersistScore(status: string | null | undefined) {
+  return String(status ?? "").toUpperCase() === "FINISHED";
+}
+
 export async function ensureMatchesCached(dateISO: string, maxAgeMinutes = 10) {
   const sb = supabaseAdmin();
 
@@ -79,8 +83,12 @@ export async function ensureMatchesCached(dateISO: string, maxAgeMinutes = 10) {
     season: match.season?.id != null ? String(match.season.id) : null,
     home_team: match.homeTeam?.name ?? "Home",
     away_team: match.awayTeam?.name ?? "Away",
-    home_score: match.score?.fullTime?.home ?? match.score?.halfTime?.home ?? null,
-    away_score: match.score?.fullTime?.away ?? match.score?.halfTime?.away ?? null,
+    home_score: canPersistScore(match.status)
+      ? match.score?.fullTime?.home ?? match.score?.halfTime?.home ?? null
+      : null,
+    away_score: canPersistScore(match.status)
+      ? match.score?.fullTime?.away ?? match.score?.halfTime?.away ?? null
+      : null,
     last_sync_at: new Date().toISOString(),
   }));
 

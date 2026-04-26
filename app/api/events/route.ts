@@ -112,6 +112,10 @@ function isFinishedStatus(status: string | null | undefined) {
   return normalizeStatus(status) === "FINISHED";
 }
 
+function canPersistScore(status: string | null | undefined) {
+  return isFinishedStatus(status);
+}
+
 function isTerminalStatus(status: string | null | undefined) {
   const s = normalizeStatus(status);
 
@@ -170,6 +174,22 @@ type DbMatchRow = {
   away_team_id: number | null;
   last_sync_at: string | null;
 };
+
+type DisplayScore = {
+  home: number | null;
+  away: number | null;
+  status: string;
+  source: string;
+  updatedAt: string;
+};
+
+function hasAnyScore(home: number | null, away: number | null) {
+  return home !== null || away !== null;
+}
+
+function canExposeDisplayScore(status: string | null | undefined) {
+  return isLiveStatus(status) || isFinishedStatus(status);
+}
 
 function shouldRefreshMatchDetails(row: DbMatchRow, nowMs: number) {
   if (isTerminalStatus(row.status)) return false;
@@ -264,6 +284,28 @@ export async function GET(req: Request) {
       updated_at: new Date().toISOString(),
     });
   };
+
+  const displayScores = new Map<number, DisplayScore>();
+
+  function rememberDisplayScore(args: {
+    matchId: number;
+    status: string;
+    home: number | null;
+    away: number | null;
+    source: string;
+    updatedAt: string;
+  }) {
+    if (!canExposeDisplayScore(args.status)) return;
+    if (!hasAnyScore(args.home, args.away)) return;
+
+    displayScores.set(args.matchId, {
+      home: args.home,
+      away: args.away,
+      status: args.status,
+      source: args.source,
+      updatedAt: args.updatedAt,
+    });
+  }
 
   async function readAllMatchesFromDb() {
     const { data, error } = await supabase
@@ -380,8 +422,18 @@ export async function GET(req: Request) {
 
         const hs = pickMatchScore(m, "home");
         const as = pickMatchScore(m, "away");
+        const scoreCanBePersisted = canPersistScore(status);
         const minute = isLiveStatus(status) ? pickMatchMinute(m) : null;
         const injuryTime = isLiveStatus(status) ? pickInjuryTime(m) : null;
+
+        rememberDisplayScore({
+          matchId: id,
+          status,
+          home: hs,
+          away: as,
+          source: "football-data:league",
+          updatedAt: nowIso,
+        });
 
         const row: Record<string, any> = {
           id,
@@ -395,22 +447,12 @@ export async function GET(req: Request) {
           away_team: away,
           home_team_id: homeTeamId,
           away_team_id: awayTeamId,
+          home_score: scoreCanBePersisted ? hs : null,
+          away_score: scoreCanBePersisted ? as : null,
           minute,
           injury_time: injuryTime,
           last_sync_at: nowIso,
         };
-
-        if (hs !== null) {
-          row.home_score = hs;
-        } else if (status === "SCHEDULED" || status === "TIMED") {
-          row.home_score = null;
-        }
-
-        if (as !== null) {
-          row.away_score = as;
-        } else if (status === "SCHEDULED" || status === "TIMED") {
-          row.away_score = null;
-        }
 
         return row;
       })
@@ -474,12 +516,31 @@ export async function GET(req: Request) {
       }
 
       const status = normalizeStatus((upstreamMatch as any)?.status);
+      const scoreCanBePersisted = canPersistScore(status);
+      const hs = pickMatchScore(upstreamMatch, "home");
+      const as = pickMatchScore(upstreamMatch, "away");
+      const isLive = isLiveStatus(status);
+      const syncAt = new Date().toISOString();
+
+      rememberDisplayScore({
+        matchId: row.id,
+        status,
+        home: hs,
+        away: as,
+        source: "football-data:match-detail",
+        updatedAt: syncAt,
+      });
 
       if (isTerminalStatus(status)) {
         const { error } = await supabase
           .from("matches")
           .update({
-            last_sync_at: new Date().toISOString(),
+            status,
+            home_score: scoreCanBePersisted ? hs : null,
+            away_score: scoreCanBePersisted ? as : null,
+            minute: null,
+            injury_time: null,
+            last_sync_at: syncAt,
           })
           .eq("id", row.id);
 
@@ -496,28 +557,14 @@ export async function GET(req: Request) {
         continue;
       }
 
-      const hs = pickMatchScore(upstreamMatch, "home");
-      const as = pickMatchScore(upstreamMatch, "away");
-      const isLive = isLiveStatus(status);
-
       const updatePayload: Record<string, any> = {
         status,
+        home_score: scoreCanBePersisted ? hs : null,
+        away_score: scoreCanBePersisted ? as : null,
         minute: isLive ? pickMatchMinute(upstreamMatch) : null,
         injury_time: isLive ? pickInjuryTime(upstreamMatch) : null,
-        last_sync_at: new Date().toISOString(),
+        last_sync_at: syncAt,
       };
-
-      if (hs !== null) {
-        updatePayload.home_score = hs;
-      } else if (status === "SCHEDULED" || status === "TIMED") {
-        updatePayload.home_score = null;
-      }
-
-      if (as !== null) {
-        updatePayload.away_score = as;
-      } else if (status === "SCHEDULED" || status === "TIMED") {
-        updatePayload.away_score = null;
-      }
 
       const { error } = await supabase
         .from("matches")
@@ -659,6 +706,7 @@ export async function GET(req: Request) {
         const status = normalizeStatus(m.status);
         const isLive = isLiveStatus(status);
         const isFinished = isFinishedStatus(status);
+        const displayScore = displayScores.get(Number(m.id)) ?? null;
 
         const odds = oddsMap.get(Number(m.id)) ?? {
           "1": null,
@@ -683,6 +731,7 @@ export async function GET(req: Request) {
           score: {
             fullTime: { home: m.home_score, away: m.away_score },
           },
+          displayScore,
           odds,
         };
       }),

@@ -442,6 +442,10 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
 
       const homeName = m?.homeTeam?.name ?? "Home";
       const awayName = m?.awayTeam?.name ?? "Away";
+      const displayHomeScore = safeNum(m?.displayScore?.home);
+      const displayAwayScore = safeNum(m?.displayScore?.away);
+      const canonicalHomeScore = safeNum(m?.score?.fullTime?.home);
+      const canonicalAwayScore = safeNum(m?.score?.fullTime?.away);
 
       all.push({
         id: String(m.id),
@@ -457,14 +461,8 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
         status: String(m?.status ?? "SCHEDULED"),
         isLive: Boolean(m?.live?.isLive),
         isFinished: Boolean(m?.live?.isFinished),
-        homeScore:
-          typeof m?.score?.fullTime?.home === "number"
-            ? m.score.fullTime.home
-            : null,
-        awayScore:
-          typeof m?.score?.fullTime?.away === "number"
-            ? m.score.fullTime.away
-            : null,
+        homeScore: displayHomeScore ?? canonicalHomeScore,
+        awayScore: displayAwayScore ?? canonicalAwayScore,
         minute: safeInt(m?.minute),
         injuryTime: safeInt(m?.injuryTime ?? m?.injury_time),
         odds: {

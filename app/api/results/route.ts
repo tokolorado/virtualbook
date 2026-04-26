@@ -42,6 +42,10 @@ function toIntOrNull(x: any): number | null {
   return null;
 }
 
+function canPersistScore(status: string) {
+  return status.toUpperCase() === "FINISHED";
+}
+
 export async function GET(req: Request) {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -83,6 +87,7 @@ export async function GET(req: Request) {
   const ftAway = toIntOrNull(match?.score?.fullTime?.away);
   const htHome = toIntOrNull(match?.score?.halfTime?.home);
   const htAway = toIntOrNull(match?.score?.halfTime?.away);
+  const scoreCanBePersisted = canPersistScore(localStatus);
 
   const utcDate = match?.utcDate ? String(match.utcDate) : null;
 
@@ -90,10 +95,10 @@ export async function GET(req: Request) {
   const upsertPayload = {
     p_match_id: String(matchId),
     p_status: localStatus,
-    p_home_score: ftHome,
-    p_away_score: ftAway,
-    p_ht_home: htHome,
-    p_ht_away: htAway,
+    p_home_score: scoreCanBePersisted ? ftHome : null,
+    p_away_score: scoreCanBePersisted ? ftAway : null,
+    p_ht_home: scoreCanBePersisted ? htHome : null,
+    p_ht_away: scoreCanBePersisted ? htAway : null,
     p_started_at: utcDate, // opcjonalnie: start = utcDate
     p_finished_at: localStatus === "FINISHED" ? new Date().toISOString() : null,
   };
