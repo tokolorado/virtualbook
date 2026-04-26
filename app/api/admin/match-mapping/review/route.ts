@@ -1,88 +1,76 @@
 //app/api/admin/match-mapping/review/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireAdmin } from "@/lib/requireAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type QueueStatus =
-  | "pending"
-  | "processing"
-  | "mapped"
-  | "failed"
-  | "needs_review";
+type MatchDetails = {
+  utc_date: string | null;
+  competition_name: string | null;
+  home_team: string;
+  away_team: string;
+};
 
-type ReviewItem = {
-  matchId: number;
-  status: QueueStatus;
+type MappingDetails = {
+  sofascore_event_id: number;
+  mapping_method: string | null;
+  confidence: number | null;
+};
+
+type ReviewRow = {
+  match_id: number;
+  status: string;
   attempts: number;
-  lastError: string | null;
-  nextRetryAt: string | null;
-  lockedAt: string | null;
-  lockedBy: string | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-  lastAttemptAt: string | null;
-  mappedAt: string | null;
-  match: {
-    utcDate: string | null;
-    competitionName: string | null;
-    homeTeam: string;
-    awayTeam: string;
-  } | null;
+  last_error: string | null;
+  next_retry_at: string | null;
+  updated_at: string | null;
+  mapped_at: string | null;
+  match: MatchDetails | null;
+  mapping: MappingDetails | null;
 };
 
-type ReviewResponse = {
-  ok: true;
-  total: number;
-  limit: number;
-  items: ReviewItem[];
+type RawMatchDetails = {
+  utc_date?: unknown;
+  competition_name?: unknown;
+  home_team?: unknown;
+  away_team?: unknown;
 };
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+type RawQueueRow = {
+  match_id: unknown;
+  status: unknown;
+  attempts: unknown;
+  last_error: unknown;
+  next_retry_at: unknown;
+  updated_at: unknown;
+  mapped_at: unknown;
+  match?: RawMatchDetails | RawMatchDetails[] | null;
+};
 
-  if (!url || !serviceRoleKey) {
-    throw new Error("Brak konfiguracji SUPABASE dla review route.");
-  }
+type RawMappingRow = {
+  match_id?: unknown;
+  sofascore_event_id?: unknown;
+  mapping_method?: unknown;
+  confidence?: unknown;
+};
 
-  return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+function json(status: number, body: unknown) {
+  return NextResponse.json(body, { status });
 }
 
-function getAdminSecret() {
-  return process.env.ADMIN_SECRET ?? process.env.CRON_SECRET ?? null;
+function safeNumber(value: unknown, fallback = 0) {
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : fallback;
 }
 
-function isAuthorized(request: NextRequest) {
-  const expected = getAdminSecret();
-
-  if (!expected) {
-    return true;
-  }
-
-  const headerSecret = request.headers.get("x-admin-secret");
-  const cronSecret = request.headers.get("x-cron-secret");
-  const querySecret = request.nextUrl.searchParams.get("secret");
-
-  return (
-    headerSecret === expected ||
-    cronSecret === expected ||
-    querySecret === expected
-  );
-}
-
-function safeNumber(value: unknown): number | null {
+function safeNullableNumber(value: unknown): number | null {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function safeString(value: unknown, fallback = ""): string {
+function safeString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
@@ -92,128 +80,166 @@ function safeNullableString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function normalizeStatus(value: unknown): QueueStatus {
-  const status = safeString(value, "needs_review");
-
-  if (
-    status === "pending" ||
-    status === "processing" ||
-    status === "mapped" ||
-    status === "failed" ||
-    status === "needs_review"
-  ) {
-    return status;
-  }
-
-  return "needs_review";
-}
-
-function normalizeReviewItem(input: unknown): ReviewItem | null {
+function normalizeMatchDetails(input: unknown): MatchDetails | null {
   if (typeof input !== "object" || input === null) return null;
 
   const row = input as Record<string, unknown>;
-  const matchId = safeNumber(row.match_id);
-
-  if (matchId === null) return null;
-
-  const matchRaw =
-    typeof row.matches === "object" && row.matches !== null
-      ? (row.matches as Record<string, unknown>)
-      : null;
 
   return {
-    matchId,
-    status: normalizeStatus(row.status),
-    attempts: safeNumber(row.attempts) ?? 0,
-    lastError: safeNullableString(row.last_error),
-    nextRetryAt: safeNullableString(row.next_retry_at),
-    lockedAt: safeNullableString(row.locked_at),
-    lockedBy: safeNullableString(row.locked_by),
-    createdAt: safeNullableString(row.created_at),
-    updatedAt: safeNullableString(row.updated_at),
-    lastAttemptAt: safeNullableString(row.last_attempt_at),
-    mappedAt: safeNullableString(row.mapped_at),
-    match: matchRaw
-      ? {
-          utcDate: safeNullableString(matchRaw.utc_date),
-          competitionName: safeNullableString(matchRaw.competition_name),
-          homeTeam: safeString(matchRaw.home_team, "Home"),
-          awayTeam: safeString(matchRaw.away_team, "Away"),
-        }
-      : null,
+    utc_date: safeNullableString(row.utc_date),
+    competition_name: safeNullableString(row.competition_name),
+    home_team: safeString(row.home_team, "Home"),
+    away_team: safeString(row.away_team, "Away"),
   };
 }
 
-export async function GET(request: NextRequest) {
+function normalizeMappingDetails(input: unknown): MappingDetails | null {
+  if (typeof input !== "object" || input === null) return null;
+
+  const row = input as Record<string, unknown>;
+  const eventId = safeNullableNumber(row.sofascore_event_id);
+
+  if (eventId === null) return null;
+
+  return {
+    sofascore_event_id: eventId,
+    mapping_method: safeNullableString(row.mapping_method),
+    confidence: safeNullableNumber(row.confidence),
+  };
+}
+
+function normalizeQueueRow(input: RawQueueRow): Omit<ReviewRow, "mapping"> {
+  const rawMatch = Array.isArray(input.match)
+    ? input.match[0] ?? null
+    : input.match ?? null;
+
+  return {
+    match_id: safeNumber(input.match_id),
+    status: safeString(input.status, "needs_review"),
+    attempts: safeNumber(input.attempts),
+    last_error: safeNullableString(input.last_error),
+    next_retry_at: safeNullableString(input.next_retry_at),
+    updated_at: safeNullableString(input.updated_at),
+    mapped_at: safeNullableString(input.mapped_at),
+    match: normalizeMatchDetails(rawMatch),
+  };
+}
+
+export async function GET(req: Request) {
+  const guard = await requireAdmin(req);
+
+  if (!guard.ok) {
+    return json(guard.status, {
+      ok: false,
+      error: guard.error,
+      items: [],
+    });
+  }
+
   try {
-    if (!isAuthorized(request)) {
-      return NextResponse.json(
-        { error: "Brak autoryzacji." },
-        { status: 401 }
-      );
-    }
+    const supabase = supabaseAdmin();
 
-    const supabase = getSupabaseAdmin();
+    const nowIso = new Date().toISOString();
+    const next24hIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
-    const limitParam = request.nextUrl.searchParams.get("limit");
-    const limitRaw = safeNumber(limitParam);
-    const limit =
-      limitRaw !== null ? Math.max(1, Math.min(200, limitRaw)) : 50;
-
-    const { data, error, count } = await supabase
+    const { data: queueData, error: queueError } = await supabase
       .from("match_mapping_queue")
       .select(
         `
-          match_id,
-          status,
-          attempts,
-          last_error,
-          next_retry_at,
-          locked_at,
-          locked_by,
-          created_at,
-          updated_at,
-          last_attempt_at,
-          mapped_at,
-          matches (
-            utc_date,
-            competition_name,
-            home_team,
-            away_team
-          )
-        `,
-        { count: "exact" }
+        match_id,
+        status,
+        attempts,
+        last_error,
+        next_retry_at,
+        updated_at,
+        mapped_at,
+        match:matches!inner (
+          utc_date,
+          competition_name,
+          home_team,
+          away_team
+        )
+      `
       )
-      .eq("status", "needs_review")
-      .order("updated_at", { ascending: false })
-      .limit(limit);
+      .in("status", ["needs_review", "failed"])
+      .gte("match.utc_date", nowIso)
+      .lte("match.utc_date", next24hIso)
+      .order("utc_date", {
+        referencedTable: "match",
+        ascending: true,
+      })
+      .limit(100);
 
-    if (error) {
-      return NextResponse.json(
-        { error: `Nie udało się pobrać review queue: ${error.message}` },
-        { status: 500 }
-      );
+    if (queueError) {
+      return json(500, {
+        ok: false,
+        error: queueError.message,
+        items: [],
+      });
     }
 
-    const items = (data ?? [])
-      .map(normalizeReviewItem)
-      .filter((item): item is ReviewItem => item !== null);
+    const queueRows = ((queueData ?? []) as unknown as RawQueueRow[])
+      .map(normalizeQueueRow)
+      .filter((row) => row.match_id > 0);
 
-    return NextResponse.json(
-      {
+    if (queueRows.length === 0) {
+      return json(200, {
         ok: true,
-        total: count ?? items.length,
-        limit,
-        items,
-      } satisfies ReviewResponse,
-      { status: 200 }
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Nie udało się pobrać review queue.";
+        items: [],
+        count: 0,
+        window: "next_24h",
+      });
+    }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    const matchIds = queueRows.map((row) => row.match_id);
+
+    const { data: mappingData, error: mappingError } = await supabase
+      .from("match_sofascore_map")
+      .select(
+        `
+        match_id,
+        sofascore_event_id,
+        mapping_method,
+        confidence
+      `
+      )
+      .in("match_id", matchIds);
+
+    if (mappingError) {
+      return json(500, {
+        ok: false,
+        error: mappingError.message,
+        items: [],
+      });
+    }
+
+    const mappingByMatchId = new Map<number, MappingDetails>();
+
+    for (const rawMapping of (mappingData ?? []) as unknown as RawMappingRow[]) {
+      const matchId = safeNullableNumber(rawMapping.match_id);
+      const mapping = normalizeMappingDetails(rawMapping);
+
+      if (matchId !== null && mapping) {
+        mappingByMatchId.set(matchId, mapping);
+      }
+    }
+
+    const items: ReviewRow[] = queueRows.map((row) => ({
+      ...row,
+      mapping: mappingByMatchId.get(row.match_id) ?? null,
+    }));
+
+    return json(200, {
+      ok: true,
+      items,
+      count: items.length,
+      window: "next_24h",
+    });
+  } catch (e: unknown) {
+    return json(500, {
+      ok: false,
+      error: e instanceof Error ? e.message : "Nie udało się pobrać review items.",
+      items: [],
+    });
   }
 }

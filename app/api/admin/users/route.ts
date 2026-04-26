@@ -1,3 +1,4 @@
+//app/api/admin/users/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/requireAdmin";

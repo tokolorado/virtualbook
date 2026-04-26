@@ -1,90 +1,52 @@
 //app/api/admin/match-mapping/assign/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabaseServer";
+import { requireAdmin } from "@/lib/requireAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-type AssignBody = {
-  matchId?: number | string;
-  sofascoreEventId?: number | string;
-  confidence?: number | string;
-  notes?: string;
-  mappingMethod?: string;
-};
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !serviceRoleKey) {
-    throw new Error("Brak konfiguracji SUPABASE dla assign route.");
-  }
-
-  return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+function json(status: number, body: unknown) {
+  return NextResponse.json(body, { status });
 }
 
-function getAdminSecret() {
-  return process.env.ADMIN_SECRET ?? process.env.CRON_SECRET ?? null;
-}
-
-function isAuthorized(request: NextRequest) {
-  const expected = getAdminSecret();
-
-  if (!expected) {
-    return true;
-  }
-
-  const headerSecret = request.headers.get("x-admin-secret");
-  const cronSecret = request.headers.get("x-cron-secret");
-  const querySecret = request.nextUrl.searchParams.get("secret");
-
-  return (
-    headerSecret === expected ||
-    cronSecret === expected ||
-    querySecret === expected
-  );
-}
-
-function safeNumber(value: unknown): number | null {
+function readNumber(value: unknown): number | null {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function safeString(value: unknown, fallback = ""): string {
+function readString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: Request) {
+  const guard = await requireAdmin(req);
+
+  if (!guard.ok) {
+    return json(guard.status, { ok: false, error: guard.error });
+  }
+
   try {
-    if (!isAuthorized(request)) {
-      return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
+    const body = await req.json().catch(() => null);
+
+    const matchId = readNumber(body?.matchId);
+    const sofascoreEventId = readNumber(body?.sofascoreEventId);
+    const confidence = readNumber(body?.confidence) ?? 1;
+    const notes = readString(body?.notes, "manual review assign");
+    const mappingMethod = readString(body?.mappingMethod, "manual");
+
+    if (!matchId || matchId <= 0) {
+      return json(400, { ok: false, error: "Nieprawidłowy matchId." });
     }
 
-    const body = (await request.json()) as AssignBody;
-
-    const matchId = safeNumber(body.matchId);
-    const sofascoreEventId = safeNumber(body.sofascoreEventId);
-    const confidence = safeNumber(body.confidence) ?? 1;
-    const notes = safeString(body.notes, "manual admin assignment");
-    const mappingMethod = safeString(body.mappingMethod, "manual");
-
-    if (matchId === null || sofascoreEventId === null) {
-      return NextResponse.json(
-        { error: "Wymagane: matchId i sofascoreEventId." },
-        { status: 400 }
-      );
+    if (!sofascoreEventId || sofascoreEventId <= 0) {
+      return json(400, { ok: false, error: "Nieprawidłowy SofaScore event ID." });
     }
 
-    const supabase = getSupabaseAdmin();
+    const supabase = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
-    const { error: upsertError } = await supabase
+    const { error: upsertMapError } = await supabase
       .from("match_sofascore_map")
       .upsert(
         {
@@ -99,61 +61,55 @@ export async function POST(request: NextRequest) {
         { onConflict: "match_id" }
       );
 
-    if (upsertError) {
-      return NextResponse.json(
-        { error: `Nie udało się zapisać mapowania: ${upsertError.message}` },
-        { status: 500 }
-      );
+    if (upsertMapError) {
+      return json(500, {
+        ok: false,
+        error: `Nie udało się zapisać mapowania: ${upsertMapError.message}`,
+      });
     }
 
-    const { error: queueError } = await supabase
+    const { error: updateQueueError } = await supabase
       .from("match_mapping_queue")
       .update({
         status: "mapped",
-        mapped_at: nowIso,
+        attempts: 0,
+        last_error: null,
         locked_at: null,
         locked_by: null,
-        last_error: null,
+        mapped_at: nowIso,
         updated_at: nowIso,
       })
       .eq("match_id", matchId);
 
-    if (queueError) {
-      return NextResponse.json(
-        { error: `Mapowanie zapisane, ale kolejka nie została zaktualizowana: ${queueError.message}` },
-        { status: 500 }
-      );
+    if (updateQueueError) {
+      return json(500, {
+        ok: false,
+        error: `Nie udało się zaktualizować kolejki: ${updateQueueError.message}`,
+      });
     }
 
-    return NextResponse.json(
-      {
-        ok: true,
+    await supabase.from("admin_audit_logs").insert({
+      admin_user_id: guard.userId,
+      action: "ADMIN_MATCH_MAPPING_ASSIGN",
+      target_user_id: null,
+      details: {
         matchId,
         sofascoreEventId,
-        mappingMethod,
         confidence,
+        mappingMethod,
         notes,
       },
-      { status: 200 }
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Nie udało się przypisać mapowania.";
+    });
 
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
-
-export async function GET(request: NextRequest) {
-  if (!isAuthorized(request)) {
-    return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
-  }
-
-  return NextResponse.json(
-    {
+    return json(200, {
       ok: true,
-      message: "Użyj POST z matchId i sofascoreEventId.",
-    },
-    { status: 200 }
-  );
+      matchId,
+      sofascoreEventId,
+    });
+  } catch (e: unknown) {
+    return json(500, {
+      ok: false,
+      error: e instanceof Error ? e.message : "Nie udało się przypisać mapowania.",
+    });
+  }
 }

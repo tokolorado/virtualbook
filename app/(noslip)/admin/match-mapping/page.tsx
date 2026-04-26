@@ -1,10 +1,10 @@
 // app/(noslip)/admin/match-mapping/page.tsx
-import type { ReactNode } from "react";
-import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
-import { assignMatchMapping, moveBackToPending } from "./actions";
+"use client";
 
-export const dynamic = "force-dynamic";
+import type { FormEvent, ReactNode } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 type Tone = "neutral" | "green" | "red" | "yellow" | "blue" | "purple";
 
@@ -33,114 +33,20 @@ type ReviewRow = {
   mapping: MappingDetails | null;
 };
 
-type RawMatchDetails = {
-  utc_date?: unknown;
-  competition_name?: unknown;
-  home_team?: unknown;
-  away_team?: unknown;
+type ReviewResponse = {
+  ok: boolean;
+  items?: ReviewRow[];
+  count?: number;
+  error?: string;
 };
 
-type RawQueueRow = {
-  match_id: unknown;
-  status: unknown;
-  attempts: unknown;
-  last_error: unknown;
-  next_retry_at: unknown;
-  updated_at: unknown;
-  mapped_at: unknown;
-  match?: RawMatchDetails | RawMatchDetails[] | null;
-};
-
-type RawMappingRow = {
-  match_id?: unknown;
-  sofascore_event_id?: unknown;
-  mapping_method?: unknown;
-  confidence?: unknown;
+type Notice = {
+  tone: "success" | "error" | "info";
+  message: string;
 };
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
-}
-
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !serviceRoleKey) {
-    throw new Error("Brak konfiguracji SUPABASE dla admin match mapping.");
-  }
-
-  return createClient(url, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-}
-
-function safeNumber(value: unknown, fallback = 0) {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function safeNullableNumber(value: unknown): number | null {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-function safeString(value: unknown, fallback = "") {
-  return typeof value === "string" ? value : fallback;
-}
-
-function safeNullableString(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function normalizeMatchDetails(input: unknown): MatchDetails | null {
-  if (typeof input !== "object" || input === null) return null;
-
-  const row = input as Record<string, unknown>;
-
-  return {
-    utc_date: safeNullableString(row.utc_date),
-    competition_name: safeNullableString(row.competition_name),
-    home_team: safeString(row.home_team, "Home"),
-    away_team: safeString(row.away_team, "Away"),
-  };
-}
-
-function normalizeMappingDetails(input: unknown): MappingDetails | null {
-  if (typeof input !== "object" || input === null) return null;
-
-  const row = input as Record<string, unknown>;
-  const eventId = safeNullableNumber(row.sofascore_event_id);
-
-  if (eventId === null) return null;
-
-  return {
-    sofascore_event_id: eventId,
-    mapping_method: safeNullableString(row.mapping_method),
-    confidence: safeNullableNumber(row.confidence),
-  };
-}
-
-function normalizeQueueRow(input: RawQueueRow): Omit<ReviewRow, "mapping"> {
-  const rawMatch = Array.isArray(input.match)
-    ? input.match[0] ?? null
-    : input.match ?? null;
-
-  return {
-    match_id: safeNumber(input.match_id),
-    status: safeString(input.status, "needs_review"),
-    attempts: safeNumber(input.attempts),
-    last_error: safeNullableString(input.last_error),
-    next_retry_at: safeNullableString(input.next_retry_at),
-    updated_at: safeNullableString(input.updated_at),
-    mapped_at: safeNullableString(input.mapped_at),
-    match: normalizeMatchDetails(rawMatch),
-  };
 }
 
 function formatDate(value: string | null) {
@@ -159,7 +65,8 @@ function formatDate(value: string | null) {
 
 function formatPct(value: number | null) {
   if (value === null) return "—";
-  return `${Math.round(value * 100)}%`;
+  const pct = value <= 1 ? value * 100 : value;
+  return `${Math.round(pct)}%`;
 }
 
 function getStatusTone(status: string): Tone {
@@ -170,6 +77,18 @@ function getStatusTone(status: string): Tone {
   if (s === "mapped") return "green";
 
   return "neutral";
+}
+
+function getNoticeClass(tone: Notice["tone"]) {
+  if (tone === "success") {
+    return "border-green-500/30 bg-green-500/10 text-green-300";
+  }
+
+  if (tone === "error") {
+    return "border-red-500/30 bg-red-500/10 text-red-300";
+  }
+
+  return "border-sky-500/30 bg-sky-500/10 text-sky-300";
 }
 
 function SurfaceCard({
@@ -294,99 +213,224 @@ function InfoField({
   );
 }
 
-async function getReviewItems(): Promise<ReviewRow[]> {
-  const supabase = getSupabaseAdmin();
+export default function AdminMatchMappingPage() {
+  const [items, setItems] = useState<ReviewRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const nowIso = new Date().toISOString();
-  const next24hIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const failedCount = useMemo(
+    () => items.filter((item) => item.status === "failed").length,
+    [items]
+  );
 
-  const { data: queueData, error: queueError } = await supabase
-    .from("match_mapping_queue")
-    .select(
-      `
-      match_id,
-      status,
-      attempts,
-      last_error,
-      next_retry_at,
-      updated_at,
-      mapped_at,
-      match:matches!inner (
-        utc_date,
-        competition_name,
-        home_team,
-        away_team
-      )
-    `
-    )
-    .in("status", ["needs_review", "failed"])
-    .gte("match.utc_date", nowIso)
-    .lte("match.utc_date", next24hIso)
-    .order("utc_date", {
-      referencedTable: "matches",
-      ascending: true,
-    })
-    .limit(100);
+  const reviewCount = useMemo(
+    () => items.filter((item) => item.status === "needs_review").length,
+    [items]
+  );
 
-  if (queueError) {
-    throw new Error(`Nie udało się pobrać review items: ${queueError.message}`);
-  }
+  const mappedCount = useMemo(
+    () => items.filter((item) => !!item.mapping).length,
+    [items]
+  );
 
-  const queueRows = ((queueData ?? []) as unknown as RawQueueRow[])
-    .map(normalizeQueueRow)
-    .filter((row) => row.match_id > 0);
+  const attemptsTotal = useMemo(
+    () => items.reduce((sum, item) => sum + item.attempts, 0),
+    [items]
+  );
 
-  if (queueRows.length === 0) {
-    return [];
-  }
+  const getAccessToken = async () => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
 
-  const matchIds = queueRows.map((row) => row.match_id);
+    if (!token) {
+      throw new Error("Brak aktywnej sesji admina.");
+    }
 
-  const { data: mappingData, error: mappingError } = await supabase
-    .from("match_sofascore_map")
-    .select(
-      `
-      match_id,
-      sofascore_event_id,
-      mapping_method,
-      confidence
-    `
-    )
-    .in("match_id", matchIds);
+    return token;
+  };
 
-  if (mappingError) {
-    throw new Error(
-      `Nie udało się pobrać istniejących mapowań: ${mappingError.message}`
+  const loadItems = async (silent = false) => {
+    try {
+      if (silent) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
+      setError(null);
+
+      const token = await getAccessToken();
+
+      const res = await fetch("/api/admin/match-mapping/review", {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = (await res.json().catch(() => null)) as ReviewResponse | null;
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error ?? "Nie udało się pobrać kolejki review.");
+      }
+
+      setItems(Array.isArray(data.items) ? data.items : []);
+    } catch (e: any) {
+      setItems([]);
+      setError(e?.message ?? "Nie udało się pobrać kolejki review.");
+    } finally {
+      if (silent) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    void loadItems(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+
+    const timer = window.setTimeout(() => {
+      setNotice(null);
+    }, 5000);
+
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  const assignMapping = async (
+    event: FormEvent<HTMLFormElement>,
+    matchId: number
+  ) => {
+    event.preventDefault();
+
+    const formData = new FormData(event.currentTarget);
+    const sofascoreEventId = Number(formData.get("sofascoreEventId"));
+    const confidence = Number(formData.get("confidence") ?? 1);
+    const mappingMethod = String(formData.get("mappingMethod") ?? "manual");
+    const notes = String(formData.get("notes") ?? "manual review assign").trim();
+
+    if (!Number.isFinite(sofascoreEventId) || sofascoreEventId <= 0) {
+      setNotice({
+        tone: "error",
+        message: "Podaj poprawny SofaScore event ID.",
+      });
+      return;
+    }
+
+    try {
+      setActionLoading(`assign:${matchId}`);
+
+      const token = await getAccessToken();
+
+      const res = await fetch("/api/admin/match-mapping/assign", {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          matchId,
+          sofascoreEventId,
+          confidence: Number.isFinite(confidence) ? confidence : 1,
+          mappingMethod,
+          notes: notes || "manual review assign",
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error ?? "Nie udało się przypisać mapowania.");
+      }
+
+      setNotice({
+        tone: "success",
+        message: `Mapowanie przypisane dla matchId ${matchId} ✅`,
+      });
+
+      await loadItems(true);
+    } catch (e: any) {
+      setNotice({
+        tone: "error",
+        message: e?.message ?? "Nie udało się przypisać mapowania.",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const moveToPending = async (
+    event: FormEvent<HTMLFormElement>,
+    matchId: number
+  ) => {
+    event.preventDefault();
+
+    const ok = window.confirm(`Przywrócić matchId ${matchId} do pending?`);
+    if (!ok) return;
+
+    try {
+      setActionLoading(`pending:${matchId}`);
+
+      const token = await getAccessToken();
+
+      const res = await fetch("/api/admin/match-mapping/pending", {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ matchId }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error ?? "Nie udało się przywrócić do pending.");
+      }
+
+      setNotice({
+        tone: "success",
+        message: `MatchId ${matchId} przywrócony do pending ✅`,
+      });
+
+      await loadItems(true);
+    } catch (e: any) {
+      setNotice({
+        tone: "error",
+        message: e?.message ?? "Nie udało się przywrócić do pending.",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="w-full space-y-5 text-white">
+        <SurfaceCard className="overflow-hidden">
+          <div className="h-64 animate-pulse bg-neutral-900/70" />
+        </SurfaceCard>
+
+        <div className="grid gap-5 xl:grid-cols-2">
+          <div className="h-72 animate-pulse rounded-3xl border border-neutral-800 bg-neutral-900/40" />
+          <div className="h-72 animate-pulse rounded-3xl border border-neutral-800 bg-neutral-900/40" />
+        </div>
+      </div>
     );
   }
 
-  const mappingByMatchId = new Map<number, MappingDetails>();
-
-  for (const rawMapping of (mappingData ?? []) as unknown as RawMappingRow[]) {
-    const matchId = safeNullableNumber(rawMapping.match_id);
-    const mapping = normalizeMappingDetails(rawMapping);
-
-    if (matchId !== null && mapping) {
-      mappingByMatchId.set(matchId, mapping);
-    }
-  }
-
-  return queueRows.map((row) => ({
-    ...row,
-    mapping: mappingByMatchId.get(row.match_id) ?? null,
-  }));
-}
-
-export default async function AdminMatchMappingPage() {
-  const items = await getReviewItems();
-
-  const failedCount = items.filter((item) => item.status === "failed").length;
-  const reviewCount = items.filter((item) => item.status === "needs_review").length;
-  const mappedCount = items.filter((item) => !!item.mapping).length;
-  const attemptsTotal = items.reduce((sum, item) => sum + item.attempts, 0);
-
   return (
-    <div className="w-full space-y-5 px-4 text-white sm:px-5 xl:px-6 2xl:px-8">
+    <div className="w-full space-y-5 text-white">
       <SurfaceCard className="overflow-hidden">
         <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.96),rgba(5,5,5,0.98))] p-5 sm:p-6">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -430,12 +474,14 @@ export default async function AdminMatchMappingPage() {
                   Logi cronów
                 </Link>
 
-                <a
-                  href="/admin/match-mapping"
-                  className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900"
+                <button
+                  type="button"
+                  onClick={() => loadItems(true)}
+                  disabled={refreshing}
+                  className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Odśwież
-                </a>
+                  {refreshing ? "Odświeżam..." : "Odśwież"}
+                </button>
               </div>
             </div>
 
@@ -469,7 +515,33 @@ export default async function AdminMatchMappingPage() {
         </div>
       </SurfaceCard>
 
-      {items.length === 0 ? (
+      {notice ? (
+        <div
+          className={cn(
+            "rounded-2xl border px-4 py-3 text-sm font-medium",
+            getNoticeClass(notice.tone)
+          )}
+        >
+          {notice.message}
+        </div>
+      ) : null}
+
+      {error ? (
+        <SurfaceCard className="border-red-500/20 bg-red-500/10 p-5">
+          <div className="text-lg font-semibold text-red-200">
+            Nie udało się pobrać kolejki
+          </div>
+          <div className="mt-2 text-sm text-red-300">{error}</div>
+
+          <button
+            type="button"
+            onClick={() => loadItems(false)}
+            className="mt-4 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900"
+          >
+            Spróbuj ponownie
+          </button>
+        </SurfaceCard>
+      ) : items.length === 0 ? (
         <SurfaceCard className="p-6">
           <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
             <div>
@@ -509,6 +581,9 @@ export default async function AdminMatchMappingPage() {
             const matchTitle = item.match
               ? `${item.match.home_team} vs ${item.match.away_team}`
               : `matchId ${item.match_id}`;
+
+            const assignBusy = actionLoading === `assign:${item.match_id}`;
+            const pendingBusy = actionLoading === `pending:${item.match_id}`;
 
             return (
               <SurfaceCard key={item.match_id} className="overflow-hidden">
@@ -618,8 +693,10 @@ export default async function AdminMatchMappingPage() {
                       meczu.
                     </p>
 
-                    <form action={assignMatchMapping} className="mt-4 space-y-3">
-                      <input type="hidden" name="matchId" value={item.match_id} />
+                    <form
+                      onSubmit={(event) => assignMapping(event, item.match_id)}
+                      className="mt-4 space-y-3"
+                    >
                       <input type="hidden" name="mappingMethod" value="manual" />
                       <input type="hidden" name="confidence" value="1" />
 
@@ -632,6 +709,7 @@ export default async function AdminMatchMappingPage() {
                           type="number"
                           required
                           placeholder="np. 14083330"
+                          defaultValue={item.mapping?.sofascore_event_id ?? ""}
                           className="w-full rounded-2xl border border-neutral-800 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-neutral-600"
                         />
                       </div>
@@ -650,19 +728,23 @@ export default async function AdminMatchMappingPage() {
 
                       <button
                         type="submit"
-                        className="w-full rounded-2xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-300 transition hover:bg-sky-500/20"
+                        disabled={assignBusy || pendingBusy}
+                        className="w-full rounded-2xl border border-sky-500/30 bg-sky-500/15 px-4 py-3 text-sm font-semibold text-sky-300 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Przypisz mapowanie
+                        {assignBusy ? "Przypisuję..." : "Przypisz mapowanie"}
                       </button>
                     </form>
 
-                    <form action={moveBackToPending} className="mt-3">
-                      <input type="hidden" name="matchId" value={item.match_id} />
+                    <form
+                      onSubmit={(event) => moveToPending(event, item.match_id)}
+                      className="mt-3"
+                    >
                       <button
                         type="submit"
-                        className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900"
+                        disabled={assignBusy || pendingBusy}
+                        className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
                       >
-                        Przywróć do pending
+                        {pendingBusy ? "Przywracam..." : "Przywróć do pending"}
                       </button>
                     </form>
                   </div>
