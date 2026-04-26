@@ -508,7 +508,9 @@ export async function GET(request: NextRequest) {
       );
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "SofaScore stats request failed.";
+        error instanceof Error
+          ? `Nie udało się połączyć ze źródłem statystyk SofaScore: ${error.message}`
+          : "Nie udało się połączyć ze źródłem statystyk SofaScore.";
 
       const fallback = await loadCachedStatsResponse(
         supabase,
@@ -525,7 +527,7 @@ export async function GET(request: NextRequest) {
         supabase,
         matchId,
         sofaResponse.status,
-        `SofaScore stats fetch failed: ${sofaResponse.status}`
+        `SofaScore nie udostępnił statystyk przez API (status ${sofaResponse.status}). Pokazujemy zapisany cache, jeśli jest dostępny.`
       );
 
       return NextResponse.json(fallback, { status: 200 });

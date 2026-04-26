@@ -7,7 +7,7 @@ import { resolveSofaScoreEventId } from "@/lib/sofascore/resolveEventId";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SOFASCORE_BASE = "https://virtualbook-sable.vercel.app/api/sofascore?path=";
+const SOFASCORE_API_BASE = "https://api.sofascore.com/api/v1";
 
 type ImportBody = {
   matchId?: number | string;
@@ -47,6 +47,8 @@ type TeamStatsInsert = {
   yellow_cards: number | null;
   red_cards: number | null;
 };
+
+type SofaFetchPathKind = "event" | "lineups" | "statistics";
 
 function jsonError(message: string, status = 400, extra?: unknown) {
   return NextResponse.json({ error: message, extra }, { status });
@@ -130,8 +132,16 @@ async function markMissingSofaScoreMapping(
   };
 }
 
-async function sofaFetch(path: string) {
-  const response = await fetch(`${SOFASCORE_BASE}${encodeURIComponent(path)}`, {
+function buildSofaScoreApiUrl(kind: SofaFetchPathKind, eventId: number) {
+  const suffix =
+    kind === "event" ? "" : kind === "lineups" ? "/lineups" : "/statistics";
+
+  return `${SOFASCORE_API_BASE}/event/${eventId}${suffix}`;
+}
+
+async function sofaFetch(kind: SofaFetchPathKind, eventId: number) {
+  const url = buildSofaScoreApiUrl(kind, eventId);
+  const response = await fetch(url, {
     method: "GET",
     cache: "no-store",
     headers: {
@@ -154,7 +164,9 @@ async function sofaFetch(path: string) {
   }
 
   if (!response.ok) {
-    throw new Error(`SofaScore fetch failed ${path}: ${response.status}`);
+    throw new Error(
+      `SofaScore ${kind} fetch failed for event ${eventId}: ${response.status}`
+    );
   }
 
   return payload;
@@ -246,20 +258,59 @@ function applyStat(
   target: TeamStatsInsert,
   statName: string,
   value: number | null
-) {
-  if (value === null) return;
+): boolean {
+  if (value === null) return false;
 
   const key = normalizeStatName(statName);
 
-  if (["total_shots", "shots"].includes(key)) target.shots = value;
+  if (["total_shots", "shots"].includes(key)) {
+    target.shots = value;
+    return true;
+  }
+
   if (["shots_on_target", "shots_on_goal"].includes(key)) {
     target.shots_on_target = value;
+    return true;
   }
-  if (["ball_possession", "possession"].includes(key)) target.possession = value;
-  if (["corner_kicks", "corners"].includes(key)) target.corners = value;
-  if (["fouls"].includes(key)) target.fouls = value;
-  if (["yellow_cards"].includes(key)) target.yellow_cards = value;
-  if (["red_cards"].includes(key)) target.red_cards = value;
+
+  if (["ball_possession", "possession"].includes(key)) {
+    target.possession = value;
+    return true;
+  }
+
+  if (["corner_kicks", "corners"].includes(key)) {
+    target.corners = value;
+    return true;
+  }
+
+  if (["fouls"].includes(key)) {
+    target.fouls = value;
+    return true;
+  }
+
+  if (["yellow_cards"].includes(key)) {
+    target.yellow_cards = value;
+    return true;
+  }
+
+  if (["red_cards"].includes(key)) {
+    target.red_cards = value;
+    return true;
+  }
+
+  return false;
+}
+
+function hasAnyStatsValue(row: TeamStatsInsert) {
+  return [
+    row.shots,
+    row.shots_on_target,
+    row.possession,
+    row.corners,
+    row.fouls,
+    row.yellow_cards,
+    row.red_cards,
+  ].some((value) => value !== null);
 }
 
 function parseStatsRows(
@@ -274,7 +325,10 @@ function parseStatsRows(
   const away = emptyStats(matchId, awayTeamId);
 
   const root = asRecord(statisticsPayload);
+  if (safeNullableString(root?._error)) return [];
+
   const periods = asArray(root?.statistics);
+  let appliedAnyStat = false;
 
   for (const period of periods) {
     const periodRow = asRecord(period);
@@ -288,10 +342,24 @@ function parseStatsRows(
         const stat = asRecord(item);
         const name = safeString(stat?.name);
 
-        applyStat(home, name, numberFromStat(stat?.homeValue ?? stat?.home));
-        applyStat(away, name, numberFromStat(stat?.awayValue ?? stat?.away));
+        const appliedHome = applyStat(
+          home,
+          name,
+          numberFromStat(stat?.homeValue ?? stat?.home)
+        );
+        const appliedAway = applyStat(
+          away,
+          name,
+          numberFromStat(stat?.awayValue ?? stat?.away)
+        );
+
+        appliedAnyStat = appliedAnyStat || appliedHome || appliedAway;
       }
     }
+  }
+
+  if (!appliedAnyStat || (!hasAnyStatsValue(home) && !hasAnyStatsValue(away))) {
+    return [];
   }
 
   return [home, away];
@@ -321,7 +389,9 @@ export async function POST(req: Request) {
 
     const { data: existingMatch, error: existingMatchError } = await sb
       .from("matches")
-      .select("id, utc_date")
+      .select(
+        "id, utc_date, competition_name, home_team, away_team, home_team_id, away_team_id"
+      )
       .eq("id", matchId)
       .maybeSingle();
 
@@ -356,37 +426,28 @@ export async function POST(req: Request) {
       });
     }
 
-    let eventPayload: unknown;
-
-    try {
-      eventPayload = await sofaFetch(`/event/${sofascoreEventId}`);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "SofaScore event fetch failed";
-
-      return NextResponse.json(
-        {
-          ok: false,
-          matchId,
-          sofascoreEventId,
-          needsExternalImport: true,
-          error: message,
-        },
-        { status: 202 }
-      );
-    }
-
-    const [lineupsPayload, statisticsPayload] = await Promise.all([
-      sofaFetch(`/lineups/${sofascoreEventId}`).catch((error) => ({
+    const [eventPayload, lineupsPayload, statisticsPayload] = await Promise.all([
+      sofaFetch("event", sofascoreEventId).catch((error) => ({
+        _error: error instanceof Error ? error.message : "Event fetch failed",
+      })),
+      sofaFetch("lineups", sofascoreEventId).catch((error) => ({
         _error: error instanceof Error ? error.message : "Lineups fetch failed",
       })),
-      sofaFetch(`/statistics/${sofascoreEventId}`).catch((error) => ({
+      sofaFetch("statistics", sofascoreEventId).catch((error) => ({
         _error:
           error instanceof Error ? error.message : "Statistics fetch failed",
       })),
     ]);
 
-    const eventRoot = asRecord(eventPayload);
+    const eventFetchError = safeNullableString(asRecord(eventPayload)?._error);
+    const lineupsFetchError = safeNullableString(
+      asRecord(lineupsPayload)?._error
+    );
+    const statisticsFetchError = safeNullableString(
+      asRecord(statisticsPayload)?._error
+    );
+
+    const eventRoot = eventFetchError ? null : asRecord(eventPayload);
     const event = asRecord(eventRoot?.event) ?? eventRoot;
 
     const homeTeamRaw = asRecord(event?.homeTeam);
@@ -394,11 +455,19 @@ export async function POST(req: Request) {
     const tournament = asRecord(event?.tournament);
     const uniqueTournament = asRecord(tournament?.uniqueTournament);
 
-    const homeTeamId = safeNumber(homeTeamRaw?.id);
-    const awayTeamId = safeNumber(awayTeamRaw?.id);
+    const homeTeamId =
+      safeNumber(homeTeamRaw?.id) ?? safeNumber(existingMatch.home_team_id);
+    const awayTeamId =
+      safeNumber(awayTeamRaw?.id) ?? safeNumber(existingMatch.away_team_id);
 
-    const homeTeamName = getTeamName(homeTeamRaw, "Home");
-    const awayTeamName = getTeamName(awayTeamRaw, "Away");
+    const homeTeamName = getTeamName(
+      homeTeamRaw,
+      safeString(existingMatch.home_team, "Home")
+    );
+    const awayTeamName = getTeamName(
+      awayTeamRaw,
+      safeString(existingMatch.away_team, "Away")
+    );
 
     const lineupsRoot = asRecord(lineupsPayload);
     const homeLineup = asRecord(lineupsRoot?.home);
@@ -424,12 +493,25 @@ export async function POST(req: Request) {
       ...toPlayerRows(matchId, "away", awayPlayers),
     ];
 
+    const hasLineupData =
+      !lineupsFetchError &&
+      (playerRows.length > 0 ||
+        [
+          headerRow.home_formation,
+          headerRow.away_formation,
+          headerRow.home_status,
+          headerRow.away_status,
+          headerRow.home_coach,
+          headerRow.away_coach,
+        ].some((value) => value !== null));
+
     const statsRows = parseStatsRows(
       matchId,
       homeTeamId,
       awayTeamId,
       statisticsPayload
     );
+    const hasStatsData = !statisticsFetchError && statsRows.length > 0;
 
     const { error: matchPatchError } = await sb
       .from("matches")
@@ -452,55 +534,66 @@ export async function POST(req: Request) {
       );
     }
 
-    const { error: lineupHeaderError } = await sb
-      .from("match_lineups")
-      .upsert(headerRow, { onConflict: "match_id" });
+    let lineupsUpdated = false;
+    let playersInserted = 0;
 
-    if (lineupHeaderError) {
-      return jsonError(
-        `Failed to upsert match_lineups: ${lineupHeaderError.message}`,
-        500
-      );
-    }
+    if (hasLineupData) {
+      const { error: lineupHeaderError } = await sb
+        .from("match_lineups")
+        .upsert(headerRow, { onConflict: "match_id" });
 
-    const { error: deletePlayersError } = await sb
-      .from("match_lineup_players")
-      .delete()
-      .eq("match_id", matchId);
-
-    if (deletePlayersError) {
-      return jsonError(
-        `Failed to clear old match_lineup_players: ${deletePlayersError.message}`,
-        500
-      );
-    }
-
-    if (playerRows.length > 0) {
-      const { error: insertPlayersError } = await sb
-        .from("match_lineup_players")
-        .insert(playerRows);
-
-      if (insertPlayersError) {
+      if (lineupHeaderError) {
         return jsonError(
-          `Failed to insert match_lineup_players: ${insertPlayersError.message}`,
+          `Failed to upsert match_lineups: ${lineupHeaderError.message}`,
           500
         );
       }
+
+      const { error: deletePlayersError } = await sb
+        .from("match_lineup_players")
+        .delete()
+        .eq("match_id", matchId);
+
+      if (deletePlayersError) {
+        return jsonError(
+          `Failed to clear old match_lineup_players: ${deletePlayersError.message}`,
+          500
+        );
+      }
+
+      if (playerRows.length > 0) {
+        const { error: insertPlayersError } = await sb
+          .from("match_lineup_players")
+          .insert(playerRows);
+
+        if (insertPlayersError) {
+          return jsonError(
+            `Failed to insert match_lineup_players: ${insertPlayersError.message}`,
+            500
+          );
+        }
+      }
+
+      lineupsUpdated = true;
+      playersInserted = playerRows.length;
     }
 
-    const { error: deleteStatsError } = await sb
-      .from("match_team_stats")
-      .delete()
-      .eq("match_id", matchId);
+    let statsUpdated = false;
+    let statsInserted = 0;
 
-    if (deleteStatsError) {
-      return jsonError(
-        `Failed to clear old match_team_stats: ${deleteStatsError.message}`,
-        500
-      );
-    }
+    if (hasStatsData) {
+      const { error: deleteStatsError } = await sb
+        .from("match_team_stats")
+        .delete()
+        .eq("match_id", matchId);
 
-    if (statsRows.length > 0) {
+      if (deleteStatsError) {
+        return jsonError(
+          `Failed to clear old match_team_stats: ${deleteStatsError.message}`,
+          500
+        );
+      }
+
       const { error: insertStatsError } = await sb
         .from("match_team_stats")
         .insert(statsRows);
@@ -511,6 +604,9 @@ export async function POST(req: Request) {
           500
         );
       }
+
+      statsUpdated = true;
+      statsInserted = statsRows.length;
     }
 
     return NextResponse.json({
@@ -539,14 +635,17 @@ export async function POST(req: Request) {
         status: headerRow.away_status,
         playersCount: awayPlayers.length,
       },
-      hasLineups: playerRows.length > 0,
-      hasStats: statsRows.length > 0,
-      playersInserted: playerRows.length,
-      statsInserted: statsRows.length,
-      lineupsFetchError: safeNullableString(asRecord(lineupsPayload)?._error),
-      statisticsFetchError: safeNullableString(
-        asRecord(statisticsPayload)?._error
-      ),
+      hasLineups: lineupsUpdated,
+      hasStats: statsUpdated,
+      lineupsUpdated,
+      statsUpdated,
+      playersInserted,
+      statsInserted,
+      preservedExistingLineups: !lineupsUpdated,
+      preservedExistingStats: !statsUpdated,
+      lineupsFetchError,
+      statisticsFetchError,
+      eventFetchError,
     });
   } catch (error) {
     const message =

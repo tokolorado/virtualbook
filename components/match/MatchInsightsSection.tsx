@@ -74,6 +74,9 @@ type StatsResponse = {
   away: StatsSide | null;
   items: StatLikeItem[];
   updatedAt: string | null;
+  source: string | null;
+  upstreamStatus: number | null;
+  message: string | null;
 };
 
 type ComparisonResponse = {
@@ -488,6 +491,9 @@ function normalizeStatsResponse(
     away: normalizeStatsSide(row.away, awayTeam),
     items: Array.isArray(row.items) ? row.items.map(normalizeStatLikeItem) : [],
     updatedAt: safeNullableString(row.updatedAt),
+    source: safeNullableString(row.source),
+    upstreamStatus: safeNumber(row.upstreamStatus),
+    message: safeNullableString(row.message),
   };
 }
 
@@ -1867,8 +1873,11 @@ export default function MatchInsightsSection({
     if (!hasData) {
       return (
         <StateBox
-          title="Brak statystyk live"
-          description="Statystyki meczowe pojawią się, gdy dostawca udostępni dane dla trwającego lub zakończonego spotkania."
+          title="Brak statystyk meczowych"
+          description={
+            liveStats?.message ??
+            "Statystyki meczowe pojawią się, gdy dostawca udostępni dane dla trwającego lub zakończonego spotkania."
+          }
         />
       );
     }
