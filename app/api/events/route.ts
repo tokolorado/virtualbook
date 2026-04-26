@@ -18,7 +18,7 @@ const LEAGUES = [
 const MARKET_ID_1X2 = "1x2";
 
 const FIXTURES_REFRESH_TTL_MS = 15 * 60 * 1000;
-const LIVE_DETAIL_REFRESH_TTL_MS = 25 * 1000;
+const LIVE_DETAIL_REFRESH_TTL_MS = 15 * 1000;
 const PRESTART_DETAIL_REFRESH_TTL_MS = 60 * 1000;
 const LIVE_DETAIL_BATCH_LIMIT = 24;
 
@@ -579,7 +579,7 @@ export async function GET(req: Request) {
     }
 
     const fx = await fetchAndUpsertMatches(lg.code, lg.name);
-    
+
     await writeCache(fxRefreshKey, { refreshedAt: new Date().toISOString() });
 
     if (!fx.ok) {

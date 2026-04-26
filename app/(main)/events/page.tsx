@@ -877,7 +877,7 @@ export default function EventsPage() {
       delete beyondCacheRef.current[selectedDate];
 
       setReloadKey((v) => v + 1);
-    }, 30_000);
+    }, 15_000);
 
     return () => window.clearInterval(id);
   }, [selectedDate, matches]);
