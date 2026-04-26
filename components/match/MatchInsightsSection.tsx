@@ -149,6 +149,26 @@ type TableResponse = {
   updatedAt: string | null;
 };
 
+type TimelineItem = {
+  id: string;
+  minute: number | null;
+  extraMinute: number | null;
+  teamId: number | null;
+  playerName: string | null;
+  eventType: string;
+  detail: string | null;
+};
+
+type TimelineResponse = {
+  matchId: number | null;
+  sofascoreEventId: number | null;
+  externalUrl: string | null;
+  items: TimelineItem[];
+  updatedAt: string | null;
+  source: string | null;
+  message: string | null;
+};
+
 const AUTO_REFRESH_MS = 20_000;
 
 function normalizeMatchStatus(status?: string | null) {
@@ -606,6 +626,40 @@ function normalizeTableResponse(
   };
 }
 
+function normalizeTimelineItem(input: unknown, index: number): TimelineItem {
+  const row =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+
+  return {
+    id: safeString(row.id, `timeline-${index}`),
+    minute: safeNumber(row.minute),
+    extraMinute: safeNumber(row.extraMinute),
+    teamId: safeNumber(row.teamId),
+    playerName: safeNullableString(row.playerName),
+    eventType: safeString(row.eventType, "event"),
+    detail: safeNullableString(row.detail),
+  };
+}
+
+function normalizeTimelineResponse(input: unknown): TimelineResponse {
+  const row =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+
+  return {
+    matchId: safeNumber(row.matchId),
+    sofascoreEventId: safeNumber(row.sofascoreEventId),
+    externalUrl: safeNullableString(row.externalUrl),
+    items: Array.isArray(row.items) ? row.items.map(normalizeTimelineItem) : [],
+    updatedAt: safeNullableString(row.updatedAt),
+    source: safeNullableString(row.source),
+    message: safeNullableString(row.message),
+  };
+}
+
 function statusLabel(status: string | null): string {
   const value = (status ?? "").toLowerCase();
 
@@ -623,6 +677,27 @@ function positionLabel(position: string | null): string {
 
 function numberDisplay(value: number | null): string {
   return value === null ? "—" : String(value);
+}
+
+function formatTimelineMinute(item: TimelineItem) {
+  if (item.minute === null) return "—";
+  if (item.extraMinute !== null && item.extraMinute > 0) {
+    return `${item.minute}+${item.extraMinute}'`;
+  }
+  return `${item.minute}'`;
+}
+
+function timelineEventLabel(eventType: string) {
+  const key = eventType.trim().toLowerCase();
+
+  if (key === "goal") return "Gol";
+  if (key === "card" || key === "yellow_card") return "Kartka";
+  if (key === "red_card") return "Czerwona kartka";
+  if (key === "substitution") return "Zmiana";
+  if (key === "period") return "Faza meczu";
+  if (key === "var") return "VAR";
+
+  return eventType || "Zdarzenie";
 }
 
 function Surface({
@@ -1124,6 +1199,10 @@ export default function MatchInsightsSection({
   const [tableError, setTableError] = useState<string | null>(null);
   const [table, setTable] = useState<TableResponse | null>(null);
 
+  const [timelineLoading, setTimelineLoading] = useState(true);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
+  const [timeline, setTimeline] = useState<TimelineResponse | null>(null);
+
   const subtitle = useMemo(() => {
     const league = competitionCode?.trim() ? ` • ${competitionCode}` : "";
     return `Sekcja informacyjna dla meczu ${homeTeam} vs ${awayTeam}${league}.`;
@@ -1435,12 +1514,65 @@ export default function MatchInsightsSection({
       }
     };
 
+    const loadTimeline = async () => {
+      if (isPreMatch) {
+        setTimeline(null);
+        setTimelineError(null);
+        setTimelineLoading(false);
+        return;
+      }
+
+      if (!isBackgroundRefresh || !timeline) {
+        setTimelineLoading(true);
+      }
+
+      setTimelineError(null);
+
+      if (!isBackgroundRefresh) {
+        setTimeline(null);
+      }
+
+      try {
+        const response = await fetch(
+          `/api/match-center/timeline?matchId=${encodeURIComponent(String(matchId))}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Timeline fetch failed: ${response.status}`);
+        }
+
+        const json: unknown = await response.json();
+        const normalized = normalizeTimelineResponse(json);
+
+        if (!controller.signal.aborted) {
+          setTimeline(normalized);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        const message =
+          error instanceof Error ? error.message : "Błąd ładowania timeline.";
+
+        setTimelineError(message);
+      } finally {
+        if (!controller.signal.aborted) {
+          setTimelineLoading(false);
+        }
+      }
+    };
+
     void Promise.all([
       loadLineups(),
       loadLiveStats(),
       loadComparison(),
       loadH2H(),
       loadTable(),
+      loadTimeline(),
     ]).then(() => {
       if (!controller.signal.aborted) {
         setLastRefreshedAt(new Date().toISOString());
@@ -1472,7 +1604,8 @@ export default function MatchInsightsSection({
     (liveStatsLoading && !!liveStats) ||
     (comparisonLoading && !!comparison) ||
     (h2hLoading && !!h2h) ||
-    (tableLoading && !!table);
+    (tableLoading && !!table) ||
+    (timelineLoading && !!timeline);
 
   const meaningfulLiveStatsItems = useMemo(() => {
     return (liveStats?.items ?? []).filter((item) => {
@@ -1979,6 +2112,117 @@ export default function MatchInsightsSection({
   };
 
   const renderTimeline = () => {
+    if (liveWidgetsAvailable) {
+      const items = timeline?.items ?? [];
+
+      if (timelineLoading && items.length === 0) {
+        return (
+          <StateBox
+            title="Ładowanie timeline..."
+            description="Pobieramy zapisane zdarzenia meczu z naszej bazy."
+          />
+        );
+      }
+
+      if (items.length === 0 && timelineError) {
+        return (
+          <StateBox
+            title="Nie udało się załadować timeline"
+            description={timelineError}
+            tone="error"
+          />
+        );
+      }
+
+      if (items.length === 0) {
+        return (
+          <div className="space-y-4">
+            <StateBox
+              title="Brak osi zdarzeń"
+              description={
+                timeline?.message ??
+                "Dla tego meczu nie mamy jeszcze zapisanych zdarzeń timeline w bazie."
+              }
+            />
+
+            {timeline?.externalUrl ? (
+              <a
+                href={timeline.externalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-neutral-900"
+              >
+                Otwórz mecz w SofaScore
+              </a>
+            ) : null}
+          </div>
+        );
+      }
+
+      return (
+        <div className="space-y-4">
+          <Surface className="p-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-white">Timeline</div>
+                <div className="mt-2 text-sm text-neutral-400">
+                  Zapisane zdarzenia meczu: gole, kartki, zmiany i kluczowe
+                  incydenty.
+                </div>
+              </div>
+
+              <div className="text-xs text-neutral-500">
+                {formatDateTime(timeline?.updatedAt ?? null)}
+              </div>
+            </div>
+          </Surface>
+
+          {timelineError ? (
+            <InlineWarning message="Nie udało się odświeżyć timeline. Pokazujemy ostatnio pobrane dane." />
+          ) : null}
+
+          <Surface className="overflow-hidden">
+            <div className="divide-y divide-neutral-800">
+              {items.map((item) => (
+                <div
+                  key={item.id}
+                  className="grid gap-3 px-4 py-4 md:grid-cols-[72px_1fr]"
+                >
+                  <div className="text-sm font-bold tabular-nums text-sky-300">
+                    {formatTimelineMinute(item)}
+                  </div>
+
+                  <div>
+                    <div className="text-sm font-semibold text-white">
+                      {timelineEventLabel(item.eventType)}
+                    </div>
+                    <div className="mt-1 text-sm text-neutral-400">
+                      {[item.playerName, item.detail].filter(Boolean).join(" · ") ||
+                        "Zdarzenie meczowe"}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Surface>
+
+          {timeline?.externalUrl ? (
+            <div className="text-xs text-neutral-500">
+              Źródło mapowania:{" "}
+              <a
+                href={timeline.externalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-neutral-300 underline underline-offset-4 hover:text-white"
+              >
+                SofaScore
+              </a>
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
     if (!liveWidgetsAvailable) {
       return (
         <StateBox
@@ -1987,25 +2231,6 @@ export default function MatchInsightsSection({
         />
       );
     }
-
-    return (
-      <div className="space-y-4">
-        <Surface className="p-4">
-          <div className="text-sm font-semibold text-white">Timeline</div>
-          <div className="mt-2 text-sm text-neutral-400">
-            Oś zdarzeń meczu z SofaScore: gole, kartki, zmiany i kluczowe
-            incydenty.
-          </div>
-        </Surface>
-
-        <SofaScoreEventWidget
-          matchId={matchId}
-          mode="incidents"
-          height={620}
-          theme="dark"
-        />
-      </div>
-    );
   };
 
   return (
