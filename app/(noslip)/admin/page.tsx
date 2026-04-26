@@ -1,4 +1,4 @@
-//app/(noslip)/admin/page.tsx
+// app/(noslip)/admin/page.tsx
 "use client";
 
 import type { ReactNode } from "react";
@@ -109,7 +109,6 @@ type ViewKey =
   | "bets";
 
 type NoticeTone = "success" | "error" | "info";
-
 type MetricTone = "neutral" | "green" | "yellow" | "red" | "blue";
 
 const NAV_ITEMS: Array<{
@@ -206,7 +205,7 @@ function fmtDate(v?: string | null) {
   if (!v) return "—";
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleString();
+  return d.toLocaleString("pl-PL");
 }
 
 function fmtDateCompact(v?: string | null) {
@@ -259,6 +258,25 @@ function getBetStatusTone(status: string): MetricTone {
   return "neutral";
 }
 
+function SurfaceCard({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={cn(
+        "rounded-3xl border border-neutral-800 bg-neutral-950/70 shadow-[0_18px_80px_rgba(0,0,0,0.35)]",
+        className
+      )}
+    >
+      {children}
+    </section>
+  );
+}
+
 function MetricCard({
   label,
   value,
@@ -274,18 +292,18 @@ function MetricCard({
 }) {
   const toneClass =
     tone === "green"
-      ? "border-green-500/20 bg-green-500/5"
+      ? "border-green-500/20 bg-green-500/10"
       : tone === "yellow"
-        ? "border-yellow-500/20 bg-yellow-500/5"
+        ? "border-yellow-500/20 bg-yellow-500/10"
         : tone === "red"
-          ? "border-red-500/20 bg-red-500/5"
+          ? "border-red-500/20 bg-red-500/10"
           : tone === "blue"
-            ? "border-blue-500/20 bg-blue-500/5"
-            : "border-neutral-800 bg-neutral-950/70";
+            ? "border-sky-500/20 bg-sky-500/10"
+            : "border-neutral-800 bg-neutral-950/80";
 
   return (
     <div className={cn("rounded-3xl border p-4", toneClass)}>
-      <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+      <div className="text-[11px] uppercase tracking-[0.2em] text-neutral-500">
         {label}
       </div>
 
@@ -317,12 +335,7 @@ function Panel({
   className?: string;
 }) {
   return (
-    <section
-      className={cn(
-        "rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 sm:p-5",
-        className
-      )}
-    >
+    <SurfaceCard className={cn("p-4 sm:p-5", className)}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-white">{title}</h2>
@@ -337,7 +350,7 @@ function Panel({
       </div>
 
       <div className="mt-4">{children}</div>
-    </section>
+    </SurfaceCard>
   );
 }
 
@@ -356,7 +369,7 @@ function StatusPill({
         : tone === "red"
           ? "border-red-500/30 bg-red-500/10 text-red-300"
           : tone === "blue"
-            ? "border-blue-500/30 bg-blue-500/10 text-blue-300"
+            ? "border-sky-500/30 bg-sky-500/10 text-sky-300"
             : "border-neutral-700 bg-neutral-950 text-neutral-300";
 
   return (
@@ -382,7 +395,6 @@ function AttentionDot({ show }: { show: boolean }) {
   );
 }
 
-
 function InfoField({
   label,
   value,
@@ -391,7 +403,7 @@ function InfoField({
   value: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3">
+    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-3">
       <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
         {label}
       </div>
@@ -417,12 +429,13 @@ function SidebarItem({
 }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         "w-full rounded-2xl border px-3 py-3 text-left transition",
         active
-          ? "border-white/10 bg-white/[0.06]"
-          : "border-transparent bg-transparent hover:border-neutral-800 hover:bg-neutral-900/60"
+          ? "border-white/15 bg-white text-black shadow-[0_12px_40px_rgba(255,255,255,0.08)]"
+          : "border-neutral-800 bg-neutral-950/80 text-neutral-200 hover:border-neutral-700 hover:bg-neutral-900"
       )}
     >
       <div className="flex items-start gap-3">
@@ -430,7 +443,7 @@ function SidebarItem({
           className={cn(
             "grid h-10 w-10 shrink-0 place-items-center rounded-2xl border text-xs font-semibold",
             active
-              ? "border-white/15 bg-white/[0.08] text-white"
+              ? "border-black/10 bg-black/5 text-black"
               : "border-neutral-800 bg-neutral-950 text-neutral-400"
           )}
         >
@@ -438,13 +451,69 @@ function SidebarItem({
         </div>
 
         <div className="min-w-0">
-          <div className="font-medium text-white">{label}</div>
-          <div className="mt-1 text-xs leading-5 text-neutral-500">
+          <div className="font-semibold">{label}</div>
+          <div
+            className={cn(
+              "mt-1 text-xs leading-5",
+              active ? "text-black/60" : "text-neutral-500"
+            )}
+          >
             {description}
           </div>
         </div>
       </div>
     </button>
+  );
+}
+
+function ActionCard({
+  title,
+  description,
+  children,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  children?: ReactNode;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4 text-left transition hover:border-neutral-700 hover:bg-neutral-900"
+    >
+      <div className="text-sm font-semibold text-white">{title}</div>
+      <div className="mt-1 text-xs leading-5 text-neutral-400">
+        {description}
+      </div>
+      {children ? <div className="mt-3">{children}</div> : null}
+    </button>
+  );
+}
+
+function LinkCard({
+  href,
+  title,
+  description,
+  children,
+}: {
+  href: string;
+  title: string;
+  description: string;
+  children?: ReactNode;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4 transition hover:border-neutral-700 hover:bg-neutral-900"
+    >
+      <div className="text-sm font-semibold text-white">{title}</div>
+      <div className="mt-1 text-xs leading-5 text-neutral-400">
+        {description}
+      </div>
+      {children ? <div className="mt-3">{children}</div> : null}
+    </Link>
   );
 }
 
@@ -529,7 +598,9 @@ export default function AdminPage() {
 
     return bets.filter((b) => {
       const statusMatch =
-        betFilter === "all" ? true : String(b.status).toLowerCase() === betFilter;
+        betFilter === "all"
+          ? true
+          : String(b.status).toLowerCase() === betFilter;
 
       const queryMatch = q
         ? [b.id, b.user_id, b.status, String(b.stake), String(b.total_odds)]
@@ -593,29 +664,29 @@ export default function AdminPage() {
   };
 
   const loadMappingReviewCount = async () => {
-  try {
-    const token = await getAccessToken();
+    try {
+      const token = await getAccessToken();
 
-    const res = await fetch("/api/admin/match-mapping/review-count", {
-      cache: "no-store",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
+      const res = await fetch("/api/admin/match-mapping/review-count", {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
-    const data = await res.json().catch(() => null);
+      const data = await res.json().catch(() => null);
 
-    if (!res.ok) {
+      if (!res.ok) {
+        setMappingReviewCount(0);
+        return;
+      }
+
+      const count = Number(data?.count ?? 0);
+      setMappingReviewCount(Number.isFinite(count) ? count : 0);
+    } catch {
       setMappingReviewCount(0);
-      return;
     }
-
-    const count = Number(data?.count ?? 0);
-    setMappingReviewCount(Number.isFinite(count) ? count : 0);
-  } catch {
-    setMappingReviewCount(0);
-  }
-};
+  };
 
   const load = async () => {
     setLoading(true);
@@ -782,7 +853,9 @@ export default function AdminPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data?.error ?? "Nie udało się pobrać wyników System Check.");
+        throw new Error(
+          data?.error ?? "Nie udało się pobrać wyników System Check."
+        );
       }
 
       setSystemCheckRun((data.run ?? null) as SystemCheckRun | null);
@@ -824,8 +897,7 @@ export default function AdminPage() {
       });
       setActiveView("diagnostics");
     } catch (e: any) {
-      const message =
-        e?.message ?? "Nie udało się uruchomić System Check.";
+      const message = e?.message ?? "Nie udało się uruchomić System Check.";
       setSystemCheckError(message);
       setNotice({
         tone: "error",
@@ -1097,7 +1169,7 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    load();
+    void load();
   }, []);
 
   useEffect(() => {
@@ -1112,6 +1184,7 @@ export default function AdminPage() {
         loadSystemCheckLatest(),
         loadMappingReviewCount(),
       ]);
+
       setLastRefreshAt(new Date().toISOString());
     };
 
@@ -1126,7 +1199,7 @@ export default function AdminPage() {
   }, [notice]);
 
   const renderOverview = () => (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Użytkownicy"
@@ -1136,12 +1209,12 @@ export default function AdminPage() {
         />
         <MetricCard
           label="Wybrany użytkownik"
-          value={
-            selectedUser ? `${formatVB(selectedUser.balance_vb)} VB` : "—"
-          }
+          value={selectedUser ? `${formatVB(selectedUser.balance_vb)} VB` : "—"}
           hint={
             selectedUser
-              ? `${selectedUser.username ?? "brak username"} • ${selectedUser.email ?? "brak email"}`
+              ? `${selectedUser.username ?? "brak username"} • ${
+                  selectedUser.email ?? "brak email"
+                }`
               : "Wybierz konto z sekcji Users"
           }
           tone={selectedUser ? "green" : "neutral"}
@@ -1153,110 +1226,81 @@ export default function AdminPage() {
           tone={healthBad === 0 ? "green" : "yellow"}
         />
         <MetricCard
-          label="Pending bets"
-          value={pendingBetsCount}
-          hint={`Ready matches: ${readyMatches} • ready items: ${readyItems}`}
-          tone={pendingBetsCount > 0 ? "yellow" : "neutral"}
+          label="Match mapping"
+          value={mappingReviewCount}
+          hint={
+            mappingReviewCount > 0
+              ? "Mecze wymagające review"
+              : "Brak aktywnych review"
+          }
+          tone={mappingReviewCount > 0 ? "yellow" : "neutral"}
         />
       </div>
 
-      <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_360px]">
+      <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.15fr)_360px]">
         <Panel
           title="Szybkie ścieżki pracy"
           description="Najczęściej używane obszary panelu i skróty do operacji."
         >
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            <button
+            <ActionCard
+              title="Users workspace"
+              description="Wyszukiwanie users, saldo, ban/unban i szybka niespodzianka."
               onClick={() => setActiveView("users")}
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-left transition hover:bg-neutral-900"
-            >
-              <div className="text-sm font-semibold text-white">Users workspace</div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Wyszukiwanie users, saldo, ban/unban i szybka niespodzianka.
-              </div>
-            </button>
+            />
 
-            <button
+            <ActionCard
+              title="Diagnostyka"
+              description="System Health, System Check i sample błędów."
               onClick={() => setActiveView("diagnostics")}
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-left transition hover:bg-neutral-900"
-            >
-              <div className="text-sm font-semibold text-white">Diagnostyka</div>
-              <div className="mt-1 text-xs text-neutral-400">
-                System Health, System Check i sample błędów.
-              </div>
-            </button>
+            />
 
-            <Link
+            <LinkCard
               href="/admin/match-mapping"
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
+              title="Match mapping review"
+              description="Ręczne przypinanie SofaScore event ID dla meczów wymagających review."
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-white">
-                    Match mapping review
-                  </div>
-                  <div className="mt-1 text-xs text-neutral-400">
-                    Ręczne przypinanie SofaScore event ID dla meczów wymagających review.
-                  </div>
-                </div>
-
-                <div className="shrink-0 pt-1">
-                  <AttentionDot show={mappingReviewCount > 0} />
-                </div>
+              <div className="flex items-center justify-between gap-2">
+                {mappingReviewCount > 0 ? (
+                  <span className="text-xs font-semibold text-yellow-300">
+                    Do review: {mappingReviewCount}
+                  </span>
+                ) : (
+                  <span className="text-xs text-neutral-500">
+                    Brak aktywnych review.
+                  </span>
+                )}
+                <AttentionDot show={mappingReviewCount > 0} />
               </div>
+            </LinkCard>
 
-              {mappingReviewCount > 0 ? (
-                <div className="mt-3 text-xs font-semibold text-yellow-300">
-                  Do review: {mappingReviewCount}
-                </div>
-              ) : (
-                <div className="mt-3 text-xs text-neutral-500">Brak aktywnych review.</div>
-              )}
-            </Link>
-
-            <button
+            <ActionCard
+              title="Settlement"
+              description="Auto-settle i ręczne rozliczanie kuponów."
               onClick={() => setActiveView("settlement")}
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-left transition hover:bg-neutral-900"
-            >
-              <div className="text-sm font-semibold text-white">Settlement</div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Auto-settle i ręczne rozliczanie kuponów.
-              </div>
-            </button>
+            />
 
-            <button
+            <ActionCard
+              title="Audit"
+              description="Ostatnie działania administratorów i szybki podgląd historii."
               onClick={() => setActiveView("audit")}
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-left transition hover:bg-neutral-900"
-            >
-              <div className="text-sm font-semibold text-white">Audit</div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Ostatnie działania administratorów i szybki podgląd historii.
-              </div>
-            </button>
+            />
 
-            <Link
+            <LinkCard
               href="/admin/logs"
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
-            >
-              <div className="text-sm font-semibold text-white">Pełne logi</div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Otwórz dedykowaną stronę z pełną historią.
-              </div>
-            </Link>
+              title="Pełne logi"
+              description="Otwórz dedykowaną stronę z pełną historią."
+            />
 
-            <Link
+            <LinkCard
               href="/admin/surprises"
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
-            >
-              <div className="text-sm font-semibold text-white">Centrum niespodzianek</div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Osobny moduł do wiadomości i akcji specjalnych.
-              </div>
-            </Link>
+              title="Centrum niespodzianek"
+              description="Osobny moduł do wiadomości i akcji specjalnych."
+            />
           </div>
         </Panel>
 
-        <div className="space-y-4">
+        <div className="space-y-5">
           <Panel
             title="Wybrany użytkownik"
             description="Skrócony snapshot aktualnie zaznaczonego konta."
@@ -1267,10 +1311,7 @@ export default function AdminPage() {
               </div>
             ) : (
               <div className="space-y-3">
-                <InfoField
-                  label="Username"
-                  value={selectedUser.username ?? "—"}
-                />
+                <InfoField label="Username" value={selectedUser.username ?? "—"} />
                 <InfoField label="Email" value={selectedUser.email ?? "—"} />
                 <InfoField
                   label="Saldo"
@@ -1298,18 +1339,20 @@ export default function AdminPage() {
             description="Kompaktowy skrót ostatnich wpisów audit log."
           >
             {recentAuditLogs.length === 0 ? (
-              <div className="text-sm text-neutral-500">Brak wpisów audit log.</div>
+              <div className="text-sm text-neutral-500">
+                Brak wpisów audit log.
+              </div>
             ) : (
               <div className="space-y-2">
                 {recentAuditLogs.slice(0, 4).map((log) => (
                   <div
                     key={log.id}
-                    className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3"
+                    className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-3"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="font-medium text-white">{log.action}</div>
-                        <div className="mt-1 text-xs text-neutral-500 break-all">
+                        <div className="mt-1 break-all text-xs text-neutral-500">
                           target: {log.target_user_id ?? "—"}
                         </div>
                       </div>
@@ -1329,12 +1372,13 @@ export default function AdminPage() {
   );
 
   const renderUsers = () => (
-    <div className="grid gap-4 2xl:grid-cols-[minmax(0,1.1fr)_420px]">
+    <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.1fr)_420px]">
       <Panel
         title="Lista users"
         description="Wybierz użytkownika z listy, aby zobaczyć kartę operacyjną po prawej."
         actions={
           <button
+            type="button"
             onClick={loadUsers}
             disabled={usersLoading}
             className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -1344,7 +1388,7 @@ export default function AdminPage() {
         }
       >
         <div className="space-y-4">
-          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-3">
+          <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-3">
             <input
               value={userSearch}
               onChange={(e) => setUserSearch(e.target.value)}
@@ -1362,15 +1406,16 @@ export default function AdminPage() {
               filteredUsers.map((u) => (
                 <button
                   key={u.id}
+                  type="button"
                   onClick={() => {
                     setSelectedUserId(u.id);
                     setSurpriseEmail(u.email ?? "");
                   }}
                   className={cn(
-                    "rounded-2xl border p-4 text-left transition",
+                    "rounded-3xl border p-4 text-left transition",
                     selectedUserId === u.id
-                      ? "border-white/10 bg-white/[0.06]"
-                      : "border-neutral-800 bg-neutral-950/70 hover:bg-neutral-900"
+                      ? "border-white/20 bg-white/[0.07]"
+                      : "border-neutral-800 bg-neutral-950/80 hover:border-neutral-700 hover:bg-neutral-900"
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
@@ -1489,7 +1534,7 @@ export default function AdminPage() {
               />
             </div>
 
-            <div className="rounded-2xl border border-neutral-800 bg-black/20 p-4">
+            <div className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4">
               <div className="text-sm font-semibold text-white">Akcje konta</div>
               <div className="mt-1 text-xs text-neutral-400">
                 Operacje finansowe i statusowe na bieżąco wybranym użytkowniku.
@@ -1507,6 +1552,7 @@ export default function AdminPage() {
 
                 <div className="flex flex-wrap gap-2">
                   <button
+                    type="button"
                     onClick={() => runUserAction("add_vb")}
                     disabled={actionLoading === "add_vb"}
                     className="rounded-2xl border border-green-700/40 bg-green-700 px-4 py-2.5 text-sm text-white transition hover:bg-green-600 disabled:opacity-50"
@@ -1515,14 +1561,18 @@ export default function AdminPage() {
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => runUserAction("reset_balance")}
                     disabled={actionLoading === "reset_balance"}
                     className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
                   >
-                    {actionLoading === "reset_balance" ? "Trwa..." : "Reset salda"}
+                    {actionLoading === "reset_balance"
+                      ? "Trwa..."
+                      : "Reset salda"}
                   </button>
 
                   <button
+                    type="button"
                     onClick={() =>
                       runUserAction(
                         selectedUser.is_banned ? "unban_user" : "ban_user"
@@ -1543,6 +1593,7 @@ export default function AdminPage() {
                   </button>
 
                   <button
+                    type="button"
                     disabled
                     title="Hard delete tymczasowo wyłączony do czasu wdrożenia bezpiecznego RPC"
                     className="cursor-not-allowed rounded-2xl border border-red-900/30 bg-red-900/10 px-4 py-2.5 text-sm text-red-300/70 opacity-60"
@@ -1553,8 +1604,10 @@ export default function AdminPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-neutral-800 bg-black/20 p-4">
-              <div className="text-sm font-semibold text-white">Szybka niespodzianka</div>
+            <div className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4">
+              <div className="text-sm font-semibold text-white">
+                Szybka niespodzianka
+              </div>
               <div className="mt-1 text-xs text-neutral-400">
                 Wiadomość przypięta do aktualnie wybranego użytkownika.
               </div>
@@ -1576,6 +1629,7 @@ export default function AdminPage() {
 
                 <div className="flex flex-wrap gap-2">
                   <button
+                    type="button"
                     onClick={sendSurprise}
                     disabled={sendingSurprise}
                     className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -1610,12 +1664,13 @@ export default function AdminPage() {
   );
 
   const renderDiagnostics = () => (
-    <div className="grid gap-4 2xl:grid-cols-[360px_minmax(0,1fr)]">
-      <div className="space-y-4">
+    <div className="grid gap-5 2xl:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="space-y-5">
         <Panel
           title="System Health"
           actions={
             <button
+              type="button"
               onClick={refreshHealth}
               disabled={healthLoading}
               className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -1640,7 +1695,8 @@ export default function AdminPage() {
                 </StatusPill>
                 <StatusPill>stuck: {hm?.stuckMatches ?? 0}</StatusPill>
                 <StatusPill>
-                  finished+unsettled: {hm?.finishedMatchesWithUnsettledItems ?? 0}
+                  finished+unsettled:{" "}
+                  {hm?.finishedMatchesWithUnsettledItems ?? 0}
                 </StatusPill>
                 <StatusPill>
                   pending-ready: {hm?.pendingButAllItemsSettled ?? 0}
@@ -1671,7 +1727,9 @@ export default function AdminPage() {
                   label="pending ready"
                   value={hm?.pendingButAllItemsSettled ?? 0}
                   tone={
-                    (hm?.pendingButAllItemsSettled ?? 0) > 0 ? "yellow" : "neutral"
+                    (hm?.pendingButAllItemsSettled ?? 0) > 0
+                      ? "yellow"
+                      : "neutral"
                   }
                 />
                 <MetricCard
@@ -1693,67 +1751,39 @@ export default function AdminPage() {
           )}
         </Panel>
 
-        <Panel
-          title="Skróty diagnostyczne"
-        >
+        <Panel title="Skróty diagnostyczne">
           <div className="grid gap-3">
-            <button
-              onClick={runSystemCheck}
-              disabled={systemCheckRunning}
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-left transition hover:bg-neutral-900 disabled:opacity-50"
-            >
-              <div className="text-sm font-semibold text-white">
-                {systemCheckRunning ? "Uruchamianie..." : "Uruchom System Check"}
-              </div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Pakiet kontroli spójności wallet / ledger / bets / settlement.
-              </div>
-            </button>
+            <ActionCard
+              title={systemCheckRunning ? "Uruchamianie..." : "Uruchom System Check"}
+              description="Pakiet kontroli spójności wallet / ledger / bets / settlement."
+              onClick={systemCheckRunning ? undefined : runSystemCheck}
+            />
 
-            <Link
+            <LinkCard
               href="/admin/match-mapping"
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
+              title="Match mapping review"
+              description="Sprawdź mecze z kolejki match_mapping_queue oznaczone jako needs_review albo failed."
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-white">
-                    Match mapping review
-                  </div>
-                  <div className="mt-1 text-xs text-neutral-400">
-                    Sprawdź mecze z kolejki match_mapping_queue oznaczone jako needs_review
-                    albo failed.
-                  </div>
-                </div>
+              {mappingReviewCount > 0 ? (
+                <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2.5 py-1 text-xs font-semibold text-yellow-300">
+                  {mappingReviewCount}
+                </span>
+              ) : (
+                <span className="text-xs text-neutral-500">Brak aktywnych review.</span>
+              )}
+            </LinkCard>
 
-                {mappingReviewCount > 0 ? (
-                  <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2.5 py-1 text-xs font-semibold text-yellow-300">
-                    {mappingReviewCount}
-                  </span>
-                ) : (
-                  <AttentionDot show={false} />
-                )}
-              </div>
-            </Link>
-
-            <button
+            <ActionCard
+              title="Odśwież wszystkie dane"
+              description="Szybki refresh wszystkich modułów dashboardu."
               onClick={refreshEverything}
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-left transition hover:bg-neutral-900"
-            >
-              <div className="text-sm font-semibold text-white">Odśwież wszystkie dane</div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Szybki refresh wszystkich modułów dashboardu.
-              </div>
-            </button>
+            />
 
-            <Link
+            <LinkCard
               href="/admin/logs"
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
-            >
-              <div className="text-sm font-semibold text-white">Przejdź do pełnych logów</div>
-              <div className="mt-1 text-xs text-neutral-400">
-                Dedykowana strona do analizy logów i cronów.
-              </div>
-            </Link>
+              title="Przejdź do pełnych logów"
+              description="Dedykowana strona do analizy logów i cronów."
+            />
           </div>
         </Panel>
       </div>
@@ -1761,8 +1791,9 @@ export default function AdminPage() {
       <Panel
         title="System Check"
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
+              type="button"
               onClick={loadSystemCheckLatest}
               disabled={systemCheckLoading || systemCheckRunning}
               className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -1771,6 +1802,7 @@ export default function AdminPage() {
             </button>
 
             <button
+              type="button"
               onClick={runSystemCheck}
               disabled={systemCheckRunning}
               className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -1826,7 +1858,6 @@ export default function AdminPage() {
               <MetricCard
                 label="Failed"
                 value={systemCheckRun.checks_failed}
-                //hint={`source: ${systemCheckRun.source}`}
                 tone={systemCheckRun.checks_failed > 0 ? "red" : "neutral"}
               />
             </div>
@@ -1835,7 +1866,7 @@ export default function AdminPage() {
               {sortedSystemCheckResults.map((result) => (
                 <div
                   key={result.id}
-                  className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4"
+                  className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4"
                 >
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0">
@@ -1854,7 +1885,8 @@ export default function AdminPage() {
                       </div>
 
                       <div className="mt-2 text-xs text-neutral-400">
-                        rows_count: <b className="text-white">{result.rows_count}</b>
+                        rows_count:{" "}
+                        <b className="text-white">{result.rows_count}</b>
                       </div>
                     </div>
 
@@ -1863,7 +1895,8 @@ export default function AdminPage() {
                     </div>
                   </div>
 
-                  {((Array.isArray(result.sample) && result.sample.length > 0) ||
+                  {((Array.isArray(result.sample) &&
+                    result.sample.length > 0) ||
                     (result.details &&
                       Object.keys(result.details ?? {}).length > 0)) && (
                     <details className="mt-4 text-xs">
@@ -1871,7 +1904,8 @@ export default function AdminPage() {
                         Pokaż szczegóły
                       </summary>
 
-                      {Array.isArray(result.sample) && result.sample.length > 0 ? (
+                      {Array.isArray(result.sample) &&
+                      result.sample.length > 0 ? (
                         <pre className="mt-2 overflow-auto rounded-xl border border-neutral-800 bg-black/30 p-3">
                           {JSON.stringify(result.sample, null, 2)}
                         </pre>
@@ -1895,7 +1929,7 @@ export default function AdminPage() {
   );
 
   const renderSettlement = () => (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard
           label="Do rozliczenia"
@@ -1913,7 +1947,9 @@ export default function AdminPage() {
           label="Buffer"
           value={`${settleStats?.bufferMinutes ?? 10} min`}
           hint={
-            settleStats?.cutoffIso ? `cutoff: ${fmtDate(settleStats.cutoffIso)}` : "Brak cutoff"
+            settleStats?.cutoffIso
+              ? `cutoff: ${fmtDate(settleStats.cutoffIso)}`
+              : "Brak cutoff"
           }
           tone="neutral"
         />
@@ -1929,8 +1965,9 @@ export default function AdminPage() {
         title="Auto-settlement engine"
         description="Pobiera wyniki z football-data, zapisuje do match_results i uruchamia rozliczenie."
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
+              type="button"
               onClick={refreshStats}
               disabled={statsLoading}
               className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -1939,6 +1976,7 @@ export default function AdminPage() {
             </button>
 
             <button
+              type="button"
               onClick={runAutoSettle}
               disabled={autoLoading || readyMatches <= 0}
               title={
@@ -1994,14 +2032,14 @@ export default function AdminPage() {
           {bets.slice(0, 12).map((b) => (
             <div
               key={b.id}
-              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4"
+              className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white break-all">
+                  <div className="break-all text-sm font-semibold text-white">
                     {b.id}
                   </div>
-                  <div className="mt-1 text-xs text-neutral-500 break-all">
+                  <div className="mt-1 break-all text-xs text-neutral-500">
                     user: {b.user_id}
                   </div>
                   <div className="mt-1 text-xs text-neutral-500">
@@ -2025,6 +2063,7 @@ export default function AdminPage() {
 
               <div className="mt-4 flex flex-wrap gap-2">
                 <button
+                  type="button"
                   disabled={b.settled}
                   onClick={() => settle(b.id, "won")}
                   className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -2032,6 +2071,7 @@ export default function AdminPage() {
                   WON
                 </button>
                 <button
+                  type="button"
                   disabled={b.settled}
                   onClick={() => settle(b.id, "lost")}
                   className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -2039,6 +2079,7 @@ export default function AdminPage() {
                   LOST
                 </button>
                 <button
+                  type="button"
                   disabled={b.settled}
                   onClick={() => settle(b.id, "void")}
                   className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -2061,8 +2102,9 @@ export default function AdminPage() {
       title="Audit log"
       description="Kompaktowy podgląd ostatnich działań admina. Pełne logi są dostępne na osobnej stronie."
       actions={
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
+            type="button"
             onClick={loadAuditLogs}
             disabled={auditLoading}
             className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -2088,7 +2130,7 @@ export default function AdminPage() {
           {auditLogs.map((log) => (
             <details
               key={log.id}
-              className="group rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4"
+              className="group rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4"
             >
               <summary className="flex cursor-pointer list-none flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
@@ -2121,7 +2163,7 @@ export default function AdminPage() {
   );
 
   const renderBets = () => (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <Panel
         title="Filtry kuponów"
         description="Szukaj po ID, user ID, statusie lub parametrach kuponu."
@@ -2135,20 +2177,23 @@ export default function AdminPage() {
           />
 
           <div className="flex flex-wrap gap-2">
-            {(["all", "pending", "won", "lost", "void"] as const).map((filter) => (
-              <button
-                key={filter}
-                onClick={() => setBetFilter(filter)}
-                className={cn(
-                  "rounded-2xl border px-4 py-2 text-sm transition",
-                  betFilter === filter
-                    ? "border-white/15 bg-white/[0.08] text-white"
-                    : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-800"
-                )}
-              >
-                {filter.toUpperCase()}
-              </button>
-            ))}
+            {(["all", "pending", "won", "lost", "void"] as const).map(
+              (filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  onClick={() => setBetFilter(filter)}
+                  className={cn(
+                    "rounded-2xl border px-4 py-2 text-sm transition",
+                    betFilter === filter
+                      ? "border-white/15 bg-white text-black"
+                      : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-800"
+                  )}
+                >
+                  {filter.toUpperCase()}
+                </button>
+              )
+            )}
           </div>
         </div>
       </Panel>
@@ -2166,7 +2211,7 @@ export default function AdminPage() {
             {filteredBets.map((b) => (
               <div
                 key={b.id}
-                className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4"
+                className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -2202,6 +2247,7 @@ export default function AdminPage() {
 
                 <div className="mt-4 flex flex-wrap gap-2">
                   <button
+                    type="button"
                     disabled={b.settled}
                     onClick={() => settle(b.id, "won")}
                     className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -2209,6 +2255,7 @@ export default function AdminPage() {
                     WON
                   </button>
                   <button
+                    type="button"
                     disabled={b.settled}
                     onClick={() => settle(b.id, "lost")}
                     className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -2216,6 +2263,7 @@ export default function AdminPage() {
                     LOST
                   </button>
                   <button
+                    type="button"
                     disabled={b.settled}
                     onClick={() => settle(b.id, "void")}
                     className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
@@ -2252,7 +2300,7 @@ export default function AdminPage() {
 
   if (loading) {
     return (
-      <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-8 text-neutral-400">
+      <div className="rounded-3xl border border-neutral-800 bg-neutral-950/70 p-8 text-neutral-400">
         Ładowanie...
       </div>
     );
@@ -2260,72 +2308,198 @@ export default function AdminPage() {
 
   if (!isAdmin) {
     return (
-      <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-8 text-neutral-300">
+      <div className="rounded-3xl border border-neutral-800 bg-neutral-950/70 p-8 text-neutral-300">
         Brak dostępu. To jest panel admina.
       </div>
     );
   }
 
   return (
-    <div className="h-[calc(100dvh-76px)] w-full overflow-hidden text-white md:h-[calc(100dvh-82px)]">
-      <div className="grid h-full min-h-0 gap-4 lg:grid-cols-[252px_minmax(0,1fr)]">
-        <aside className="hidden h-full min-h-0 overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-900/40 lg:flex lg:flex-col">
-          <div className="border-b border-neutral-800 p-5">
-            <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-              VirtualBook Admin
+    <div className="space-y-5 pb-10 text-white">
+      <SurfaceCard className="overflow-hidden">
+        <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.96),rgba(5,5,5,0.98))] p-5 sm:p-6">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
+                VirtualBook Admin
+              </div>
+
+              <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+                Admin Center
+              </h1>
+
+              <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
+                Premium control room do użytkowników, settlementu, diagnostyki,
+                logów i operacji wymagających ręcznej uwagi.
+              </p>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <StatusPill tone={healthBad === 0 ? "green" : "yellow"}>
+                  {healthBad === 0 ? "System healthy" : `Attention ${healthBad}`}
+                </StatusPill>
+
+                <StatusPill tone={readyMatches > 0 ? "yellow" : "neutral"}>
+                  Ready matches: {readyMatches}
+                </StatusPill>
+
+                <StatusPill tone={mappingReviewCount > 0 ? "yellow" : "neutral"}>
+                  Mapping review: {mappingReviewCount}
+                </StatusPill>
+
+                {lastRefreshAt ? (
+                  <StatusPill>Refresh: {fmtDateCompact(lastRefreshAt)}</StatusPill>
+                ) : null}
+              </div>
             </div>
-            <div className="mt-2 text-2xl font-semibold text-white">
-              Control Center
-            </div>
-            <div className="mt-2 text-sm leading-6 text-neutral-400">
-              Panel operacyjno-diagnostyczny do krytycznych funkcji aplikacji.
+
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 xl:hidden"
+              >
+                Sekcje
+              </button>
+
+              <button
+                type="button"
+                onClick={refreshEverything}
+                className="rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200"
+              >
+                Odśwież wszystko
+              </button>
             </div>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
-            <div className="space-y-2">
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard
+              label="Użytkownicy"
+              value={users.length}
+              hint={`confirmed: ${confirmedUsersCount} • banned: ${bannedUsersCount}`}
+              tone="blue"
+            />
+            <MetricCard
+              label="Pending bets"
+              value={pendingBetsCount}
+              hint={`ready matches: ${readyMatches} • items: ${readyItems}`}
+              tone={pendingBetsCount > 0 ? "yellow" : "neutral"}
+            />
+            <MetricCard
+              label="System health"
+              value={healthBad === 0 ? "HEALTHY" : `ALERT ${healthBad}`}
+              hint="wallet / ledger / bets / settlement"
+              tone={healthBad === 0 ? "green" : "yellow"}
+            />
+            <MetricCard
+              label="Match mapping"
+              value={mappingReviewCount}
+              hint={
+                mappingReviewCount > 0
+                  ? "needs review / failed"
+                  : "brak aktywnych review"
+              }
+              tone={mappingReviewCount > 0 ? "yellow" : "neutral"}
+            />
+          </div>
+
+          <div className="mt-5 overflow-x-auto pb-1 xl:hidden">
+            <div className="flex w-max gap-2">
               {NAV_ITEMS.map((item) => (
-                <SidebarItem
+                <button
                   key={item.key}
-                  active={activeView === item.key}
-                  label={item.label}
-                  short={item.short}
-                  description={item.description}
+                  type="button"
                   onClick={() => setActiveView(item.key)}
-                />
+                  className={cn(
+                    "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                    activeView === item.key
+                      ? "border-white bg-white text-black"
+                      : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                  )}
+                >
+                  {item.label}
+                </button>
               ))}
             </div>
+          </div>
+        </div>
 
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+        {notice ? (
+          <div className="p-4 sm:p-5">
+            <div
+              className={cn(
+                "rounded-2xl border px-4 py-3 text-sm",
+                getNoticeToneClass(notice.tone)
+              )}
+            >
+              {notice.message}
+            </div>
+          </div>
+        ) : null}
+      </SurfaceCard>
+
+      <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
+        <aside className="hidden xl:block">
+          <div className="sticky top-24 space-y-5">
+            <SurfaceCard className="p-4">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                Sekcje admina
+              </div>
+
+              <div className="mt-3 text-2xl font-semibold text-white">
+                Control Center
+              </div>
+
+              <p className="mt-3 text-sm leading-6 text-neutral-400">
+                Wybierz moduł roboczy i przejdź do konkretnej operacji.
+              </p>
+
+              <div className="mt-5 space-y-2">
+                {NAV_ITEMS.map((item) => (
+                  <SidebarItem
+                    key={item.key}
+                    active={activeView === item.key}
+                    label={item.label}
+                    short={item.short}
+                    description={item.description}
+                    onClick={() => setActiveView(item.key)}
+                  />
+                ))}
+              </div>
+            </SurfaceCard>
+
+            <SurfaceCard className="p-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                 Quick links
               </div>
+
               <div className="mt-3 grid gap-2">
                 <Link
                   href="/admin/logs"
-                  className="rounded-2xl border border-neutral-800 bg-black/20 px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
+                  className="rounded-2xl border border-neutral-800 bg-neutral-950/80 px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
                 >
                   Pełne logi
                 </Link>
+
                 <Link
                   href="/admin/surprises"
-                  className="rounded-2xl border border-neutral-800 bg-black/20 px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
+                  className="rounded-2xl border border-neutral-800 bg-neutral-950/80 px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
                 >
                   Centrum niespodzianek
                 </Link>
-                <Link
-                href="/admin/match-mapping"
-                className="rounded-2xl border border-neutral-800 bg-black/20 px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
-              >
-                <span className="flex items-center justify-between gap-2">
-                  <span>Match mapping</span>
-                  <AttentionDot show={mappingReviewCount > 0} />
-                </span>
-              </Link>
-              </div>
-            </div>
 
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
+                <Link
+                  href="/admin/match-mapping"
+                  className="rounded-2xl border border-neutral-800 bg-neutral-950/80 px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span>Match mapping</span>
+                    <AttentionDot show={mappingReviewCount > 0} />
+                  </span>
+                </Link>
+              </div>
+            </SurfaceCard>
+
+            <SurfaceCard className="p-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                 Live state
               </div>
@@ -2337,6 +2511,9 @@ export default function AdminPage() {
                 <StatusPill tone={readyMatches > 0 ? "yellow" : "neutral"}>
                   ready matches: {readyMatches}
                 </StatusPill>
+                <StatusPill tone={mappingReviewCount > 0 ? "yellow" : "neutral"}>
+                  mapping: {mappingReviewCount}
+                </StatusPill>
               </div>
 
               <div className="mt-3 text-xs text-neutral-500">
@@ -2344,87 +2521,47 @@ export default function AdminPage() {
                   ? `Ostatni refresh: ${fmtDate(lastRefreshAt)}`
                   : "Brak refreshu"}
               </div>
-            </div>
+            </SurfaceCard>
           </div>
         </aside>
 
-        <div className="flex min-h-0 flex-col overflow-hidden">
-          <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4">
-            <div className="flex items-start justify-between gap-3">
+        <main className="min-w-0 space-y-5">
+          <SurfaceCard className="p-4 sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
                   {activeMeta.helper}
                 </div>
-                <h1 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">
                   {activeMeta.title}
-                </h1>
+                </h2>
                 <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
                   {activeMeta.description}
                 </p>
               </div>
 
-              <div className="flex shrink-0 gap-2">
-                <button
-                  onClick={() => setSidebarOpen(true)}
-                  className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800 lg:hidden"
-                >
-                  Sekcje
-                </button>
-
-                <button
-                  onClick={refreshEverything}
-                  className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800"
-                >
-                  Odśwież wszystko
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-4 flex flex-wrap gap-2 lg:hidden">
-              {NAV_ITEMS.map((item) => (
-                <button
-                  key={item.key}
-                  onClick={() => setActiveView(item.key)}
-                  className={cn(
-                    "rounded-full border px-3 py-1.5 text-xs font-medium transition",
-                    activeView === item.key
-                      ? "border-white/15 bg-white/[0.08] text-white"
-                      : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-800"
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            {notice ? (
-              <div
-                className={cn(
-                  "mt-4 rounded-2xl border px-4 py-3 text-sm",
-                  getNoticeToneClass(notice.tone)
-                )}
+              <button
+                type="button"
+                onClick={refreshEverything}
+                className="shrink-0 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800"
               >
-                {notice.message}
-              </div>
-            ) : null}
-          </div>
-
-          <main className="mt-4 min-h-0 flex-1 overflow-hidden rounded-3xl">
-            <div className="h-full overflow-y-auto pr-1">
-              {renderCurrentView()}
+                Odśwież
+              </button>
             </div>
-          </main>
-        </div>
+          </SurfaceCard>
+
+          {renderCurrentView()}
+        </main>
       </div>
 
       {sidebarOpen ? (
-        <div className="fixed inset-0 z-50 lg:hidden">
+        <div className="fixed inset-0 z-50 xl:hidden">
           <div
             className="absolute inset-0 bg-black/70"
             onClick={() => setSidebarOpen(false)}
           />
 
-          <div className="absolute inset-y-0 left-0 w-[86vw] max-w-[340px] overflow-hidden border-r border-neutral-800 bg-neutral-950">
+          <div className="absolute inset-y-0 left-0 w-[86vw] max-w-[360px] overflow-hidden border-r border-neutral-800 bg-neutral-950">
             <div className="flex items-center justify-between border-b border-neutral-800 p-4">
               <div>
                 <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
@@ -2436,6 +2573,7 @@ export default function AdminPage() {
               </div>
 
               <button
+                type="button"
                 onClick={() => setSidebarOpen(false)}
                 className="rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm text-white transition hover:bg-neutral-800"
               >
@@ -2473,6 +2611,7 @@ export default function AdminPage() {
                   >
                     Pełne logi
                   </Link>
+
                   <Link
                     href="/admin/surprises"
                     onClick={() => setSidebarOpen(false)}
@@ -2480,6 +2619,7 @@ export default function AdminPage() {
                   >
                     Centrum niespodzianek
                   </Link>
+
                   <Link
                     href="/admin/match-mapping"
                     onClick={() => setSidebarOpen(false)}
@@ -2489,7 +2629,7 @@ export default function AdminPage() {
                       <span>Match mapping</span>
                       <AttentionDot show={mappingReviewCount > 0} />
                     </span>
-                </Link>
+                  </Link>
                 </div>
               </div>
             </div>
