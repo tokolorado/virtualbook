@@ -18,9 +18,9 @@ const LEAGUES = [
 const MARKET_ID_1X2 = "1x2";
 
 const FIXTURES_REFRESH_TTL_MS = 15 * 60 * 1000;
-const ACTIVE_FIXTURES_REFRESH_TTL_MS = 60 * 1000;
-const PRE_KICKOFF_REFRESH_WINDOW_MS = 10 * 60 * 1000;
-const LIVE_INFERENCE_WINDOW_MS = 3 * 60 * 60 * 1000;
+const LIVE_DETAIL_REFRESH_TTL_MS = 25 * 1000;
+const PRESTART_DETAIL_REFRESH_TTL_MS = 60 * 1000;
+const LIVE_DETAIL_BATCH_LIMIT = 24;
 
 function jsonError(message: string, status = 500, extra?: any) {
   return NextResponse.json({ error: message, ...extra }, { status });
@@ -39,6 +39,12 @@ function safeScore(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function safeInt(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.trunc(n);
+}
+
 function pickMatchScore(match: any, side: "home" | "away"): number | null {
   const fullTime = safeScore(match?.score?.fullTime?.[side]);
   if (fullTime !== null) return fullTime;
@@ -52,14 +58,49 @@ function pickMatchScore(match: any, side: "home" | "away"): number | null {
   return null;
 }
 
+function pickMatchMinute(match: any): number | null {
+  const direct = safeInt(match?.minute);
+  if (direct !== null && direct >= 0) return direct;
+
+  const statusMinute = safeInt(match?.status?.minute);
+  if (statusMinute !== null && statusMinute >= 0) return statusMinute;
+
+  return null;
+}
+
+function pickInjuryTime(match: any): number | null {
+  const direct = safeInt(match?.injuryTime);
+  if (direct !== null && direct >= 0) return direct;
+
+  const statusInjuryTime = safeInt(match?.status?.injuryTime);
+  if (statusInjuryTime !== null && statusInjuryTime >= 0) {
+    return statusInjuryTime;
+  }
+
+  return null;
+}
+
 function normalizeStatus(status: string | null | undefined) {
-  const s = String(status ?? "").trim().toUpperCase();
+  const s = String(status ?? "").toUpperCase();
+
+  if (s === "LIVE") return "IN_PLAY";
+  if (s === "IN_PLAY") return "IN_PLAY";
+  if (s === "PAUSED") return "PAUSED";
+  if (s === "FINISHED") return "FINISHED";
+  if (s === "CANCELED") return "CANCELED";
+  if (s === "CANCELLED") return "CANCELLED";
+  if (s === "POSTPONED") return "POSTPONED";
+  if (s === "SUSPENDED") return "SUSPENDED";
+  if (s === "AWARDED") return "AWARDED";
+  if (s === "TIMED") return "TIMED";
+  if (s === "SCHEDULED") return "SCHEDULED";
+
   return s || "SCHEDULED";
 }
 
 function isLiveStatus(status: string | null | undefined) {
   const s = normalizeStatus(status);
-  return s === "LIVE" || s === "IN_PLAY" || s === "PAUSED";
+  return s === "IN_PLAY" || s === "PAUSED" || s === "LIVE";
 }
 
 function isFinishedStatus(status: string | null | undefined) {
@@ -77,27 +118,6 @@ function isTerminalStatus(status: string | null | undefined) {
     s === "SUSPENDED" ||
     s === "AWARDED"
   );
-}
-
-function inferDisplayStatus(status: string | null | undefined, utcDate: string) {
-  const normalized = normalizeStatus(status);
-
-  if (isLiveStatus(normalized) || isTerminalStatus(normalized)) {
-    return normalized;
-  }
-
-  const kickoffTs = Date.parse(utcDate);
-  if (!Number.isFinite(kickoffTs)) {
-    return normalized;
-  }
-
-  const nowMs = Date.now();
-
-  if (nowMs >= kickoffTs && nowMs <= kickoffTs + LIVE_INFERENCE_WINDOW_MS) {
-    return "IN_PLAY";
-  }
-
-  return normalized;
 }
 
 async function fetchFD(url: string, apiKey: string) {
@@ -124,7 +144,7 @@ function isoStartOfNextUtcDay(dateYYYYMMDD: string) {
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + 1);
 
-  return `${dt.toISOString().slice(0, 10)}T00:00:00.000Z`;
+  return dt.toISOString().slice(0, 10) + "T00:00:00.000Z";
 }
 
 type DbMatchRow = {
@@ -137,6 +157,8 @@ type DbMatchRow = {
   away_team: string;
   home_score: number | null;
   away_score: number | null;
+  minute: number | null;
+  injury_time: number | null;
   competition_id: string;
   competition_name: string | null;
   home_team_id: number | null;
@@ -144,38 +166,29 @@ type DbMatchRow = {
   last_sync_at: string | null;
 };
 
-function getLastSyncAgeMs(lastSyncAt: string | null) {
-  if (!lastSyncAt) return Number.POSITIVE_INFINITY;
+function shouldRefreshMatchDetails(row: DbMatchRow, nowMs: number) {
+  if (isTerminalStatus(row.status)) return false;
 
-  const ts = Date.parse(lastSyncAt);
-  if (!Number.isFinite(ts)) return Number.POSITIVE_INFINITY;
+  const kickoffMs = Date.parse(row.utc_date);
+  if (!Number.isFinite(kickoffMs)) return false;
 
-  return Date.now() - ts;
-}
+  const statusIsLive = isLiveStatus(row.status);
+  const startsSoonOrStarted = nowMs >= kickoffMs - 2 * 60 * 1000;
+  const stillRelevant = nowMs <= kickoffMs + 4 * 60 * 60 * 1000;
 
-function shouldActivelyRefreshMatch(match: DbMatchRow) {
-  if (isTerminalStatus(match.status)) return false;
-
-  const kickoffTs = Date.parse(match.utc_date);
-  if (!Number.isFinite(kickoffTs)) return false;
-
-  const nowMs = Date.now();
-  const lastSyncAgeMs = getLastSyncAgeMs(match.last_sync_at);
-
-  if (lastSyncAgeMs < ACTIVE_FIXTURES_REFRESH_TTL_MS) {
+  if (!statusIsLive && !(startsSoonOrStarted && stillRelevant)) {
     return false;
   }
 
-  if (isLiveStatus(match.status)) {
-    return true;
-  }
+  const lastSyncMs = row.last_sync_at ? Date.parse(row.last_sync_at) : NaN;
+  if (!Number.isFinite(lastSyncMs)) return true;
 
-  const startsSoonOrStarted =
-    nowMs >= kickoffTs - PRE_KICKOFF_REFRESH_WINDOW_MS;
+  const ageMs = nowMs - lastSyncMs;
+  const ttl = statusIsLive
+    ? LIVE_DETAIL_REFRESH_TTL_MS
+    : PRESTART_DETAIL_REFRESH_TTL_MS;
 
-  const stillRelevant = nowMs <= kickoffTs + LIVE_INFERENCE_WINDOW_MS;
-
-  return startsSoonOrStarted && stillRelevant;
+  return ageMs >= ttl;
 }
 
 export async function GET(req: Request) {
@@ -232,7 +245,11 @@ export async function GET(req: Request) {
     if (error || !data?.updated_at) return null;
 
     const age = Date.now() - new Date(data.updated_at).getTime();
-    return { age, payload: data.payload as any };
+
+    return {
+      age,
+      payload: data.payload as any,
+    };
   };
 
   const writeCache = async (key: string, payload: any) => {
@@ -247,7 +264,7 @@ export async function GET(req: Request) {
     const { data, error } = await supabase
       .from("matches")
       .select(
-        "id, utc_date, status, matchday, season, home_team, away_team, home_score, away_score, competition_id, competition_name, home_team_id, away_team_id, last_sync_at"
+        "id, utc_date, status, matchday, season, home_team, away_team, home_score, away_score, minute, injury_time, competition_id, competition_name, home_team_id, away_team_id, last_sync_at"
       )
       .in(
         "competition_id",
@@ -337,9 +354,7 @@ export async function GET(req: Request) {
         const utc = m?.utcDate ? new Date(String(m.utcDate)).toISOString() : null;
         if (!utc) return null;
 
-        const statusRaw = m?.status ? String(m.status) : "SCHEDULED";
-        const status = normalizeStatus(statusRaw);
-
+        const status = normalizeStatus(m?.status);
         const matchday = Number.isFinite(Number(m?.matchday))
           ? Number(m.matchday)
           : null;
@@ -354,19 +369,20 @@ export async function GET(req: Request) {
         const homeTeamId = Number.isFinite(Number(m?.homeTeam?.id))
           ? Number(m.homeTeam.id)
           : null;
-
         const awayTeamId = Number.isFinite(Number(m?.awayTeam?.id))
           ? Number(m.awayTeam.id)
           : null;
 
         const hs = pickMatchScore(m, "home");
         const as = pickMatchScore(m, "away");
+        const minute = isLiveStatus(status) ? pickMatchMinute(m) : null;
+        const injuryTime = isLiveStatus(status) ? pickInjuryTime(m) : null;
 
         const row: Record<string, any> = {
           id,
           competition_id: String(leagueCode),
           competition_name: String(leagueName),
-          utc_date: utc,
+          utc_date: utc ?? nowIso,
           status,
           matchday,
           season,
@@ -374,6 +390,8 @@ export async function GET(req: Request) {
           away_team: away,
           home_team_id: homeTeamId,
           away_team_id: awayTeamId,
+          minute,
+          injury_time: injuryTime,
           last_sync_at: nowIso,
         };
 
@@ -395,6 +413,88 @@ export async function GET(req: Request) {
     }
 
     return { ok: true, status: 200, data: fx.data };
+  }
+
+  async function refreshMatchDetailsFromFootballData(matchRows: DbMatchRow[]) {
+    const nowMs = Date.now();
+    const candidates = matchRows
+      .filter((row) => shouldRefreshMatchDetails(row, nowMs))
+      .sort((a, b) => {
+        const aLive = isLiveStatus(a.status) ? 0 : 1;
+        const bLive = isLiveStatus(b.status) ? 0 : 1;
+        if (aLive !== bLive) return aLive - bLive;
+
+        return Date.parse(a.utc_date) - Date.parse(b.utc_date);
+      })
+      .slice(0, LIVE_DETAIL_BATCH_LIMIT);
+
+    const refreshed: number[] = [];
+    const detailErrors: any[] = [];
+
+    for (const row of candidates) {
+      const detailUrl = `${BASE}/matches/${encodeURIComponent(String(row.id))}`;
+      const detail = await fetchFD(detailUrl, apiKeySafe);
+
+      if (!detail.ok) {
+        detailErrors.push({
+          type: "match_detail_fetch",
+          matchId: row.id,
+          status: detail.status,
+          data: detail.data,
+        });
+        continue;
+      }
+
+      const upstreamMatch =
+        (detail.data as any)?.match && typeof (detail.data as any).match === "object"
+          ? (detail.data as any).match
+          : detail.data;
+
+      if (!upstreamMatch || typeof upstreamMatch !== "object") {
+        detailErrors.push({
+          type: "match_detail_shape",
+          matchId: row.id,
+          data: detail.data,
+        });
+        continue;
+      }
+
+      const status = normalizeStatus((upstreamMatch as any)?.status);
+      const hs = pickMatchScore(upstreamMatch, "home");
+      const as = pickMatchScore(upstreamMatch, "away");
+      const isLive = isLiveStatus(status);
+
+      const updatePayload: Record<string, any> = {
+        status,
+        minute: isLive ? pickMatchMinute(upstreamMatch) : null,
+        injury_time: isLive ? pickInjuryTime(upstreamMatch) : null,
+        last_sync_at: new Date().toISOString(),
+      };
+
+      if (hs !== null) updatePayload.home_score = hs;
+      if (as !== null) updatePayload.away_score = as;
+
+      const { error } = await supabase
+        .from("matches")
+        .update(updatePayload)
+        .eq("id", row.id);
+
+      if (error) {
+        detailErrors.push({
+          type: "match_detail_update",
+          matchId: row.id,
+          error: error.message,
+        });
+        continue;
+      }
+
+      refreshed.push(row.id);
+    }
+
+    return {
+      refreshed,
+      errors: detailErrors,
+    };
   }
 
   const results: any[] = [];
@@ -426,33 +526,23 @@ export async function GET(req: Request) {
 
   for (const lg of LEAGUES) {
     const leagueMatches = matchesByLeague.get(lg.code) ?? [];
-
-    const hasNoMatches = leagueMatches.length === 0;
-    const needsActiveRefresh = leagueMatches.some(shouldActivelyRefreshMatch);
-    const needsRefresh = hasNoMatches || needsActiveRefresh;
+    const needsRefresh = leagueMatches.length === 0;
 
     if (!needsRefresh) continue;
 
     const fxRefreshKey = `fx_refresh:${lg.code}:${dateFrom}:${dateTo}`;
-    const refreshTtl = needsActiveRefresh
-      ? ACTIVE_FIXTURES_REFRESH_TTL_MS
-      : FIXTURES_REFRESH_TTL_MS;
-
     let canRefresh = true;
 
     const fxHit = await readCache(fxRefreshKey);
-    if (fxHit && fxHit.age < refreshTtl) {
+
+    if (fxHit && fxHit.age < FIXTURES_REFRESH_TTL_MS) {
       canRefresh = false;
     }
 
     if (!canRefresh) continue;
 
     const fx = await fetchAndUpsertMatches(lg.code, lg.name);
-
-    await writeCache(fxRefreshKey, {
-      refreshedAt: new Date().toISOString(),
-      reason: needsActiveRefresh ? "active_window" : "empty_league",
-    });
+    await writeCache(fxRefreshKey, { refreshedAt: new Date().toISOString() });
 
     if (!fx.ok) {
       errors.push({
@@ -472,6 +562,24 @@ export async function GET(req: Request) {
       error: e?.message ?? String(e),
     });
     allDbMatches = [];
+  }
+
+  const liveRefresh = await refreshMatchDetailsFromFootballData(allDbMatches);
+
+  if (liveRefresh.errors.length > 0) {
+    errors.push(...liveRefresh.errors);
+  }
+
+  if (liveRefresh.refreshed.length > 0) {
+    try {
+      allDbMatches = await readAllMatchesFromDb();
+    } catch (e: any) {
+      errors.push({
+        type: "db_matches_read_after_live_refresh",
+        error: e?.message ?? String(e),
+      });
+      allDbMatches = [];
+    }
   }
 
   const finalMatchesByLeague = new Map<string, DbMatchRow[]>();
@@ -510,23 +618,26 @@ export async function GET(req: Request) {
     const fixtures = {
       competition: { name: lg.name, code: lg.code },
       matches: leagueMatches.map((m) => {
+        const status = normalizeStatus(m.status);
+        const isLive = isLiveStatus(status);
+        const isFinished = isFinishedStatus(status);
+
         const odds = oddsMap.get(Number(m.id)) ?? {
           "1": null,
           X: null,
           "2": null,
         };
 
-        const displayStatus = inferDisplayStatus(m.status, m.utc_date);
-
         return {
           id: m.id,
           utcDate: m.utc_date,
-          status: displayStatus,
-          rawStatus: m.status,
+          status,
           live: {
-            isLive: isLiveStatus(displayStatus),
-            isFinished: isFinishedStatus(displayStatus),
+            isLive,
+            isFinished,
           },
+          minute: isLive ? m.minute : null,
+          injuryTime: isLive ? m.injury_time : null,
           matchday: m.matchday,
           season: m.season ? { startDate: `${m.season}-01-01` } : null,
           homeTeam: { id: m.home_team_id ?? null, name: m.home_team },
@@ -549,6 +660,7 @@ export async function GET(req: Request) {
     horizonDays: HORIZON_DAYS,
     horizonTo: horizonToYmd,
     isBeyondHorizon: false,
+    liveDetailsRefreshed: liveRefresh.refreshed,
     results,
     errors,
   });
