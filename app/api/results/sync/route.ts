@@ -1,3 +1,4 @@
+// app/api/results/sync/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { requireCronSecret } from "@/lib/requireCronSecret";
@@ -11,8 +12,9 @@ const DEFAULT_LEAGUES = ["CL", "PL", "BL1", "FL1", "SA", "PD", "WC"] as const;
 const RESULTS_LOCK_KEY = "lock:results_sync";
 const RESULTS_LOCK_TTL_MS = 60 * 1000;
 
-const LOOKBACK_HOURS_DEFAULT = 48;
-const BATCH_LIMIT_DEFAULT = 30;
+const LOOKBACK_HOURS_DEFAULT = 12;
+const LOOKAHEAD_HOURS_DEFAULT = 6;
+const BATCH_LIMIT_DEFAULT = 80;
 
 function jsonError(message: string, status = 500, extra?: any) {
   return NextResponse.json({ error: message, ...extra }, { status });
@@ -61,6 +63,7 @@ function extractWaitSecondsFromMessage(msg: string): number | null {
 function isRateLimitMessage(msg: unknown): msg is string {
   if (typeof msg !== "string") return false;
   const s = msg.toLowerCase();
+
   return (
     s.includes("request limit") ||
     s.includes("rate limit") ||
@@ -76,9 +79,11 @@ async function globalThrottle(throttleMs: number) {
 
   const now = Date.now();
   const delta = now - lastFdCallAt;
+
   if (delta < throttleMs) {
     await sleep(throttleMs - delta);
   }
+
   lastFdCallAt = Date.now();
 }
 
@@ -118,6 +123,7 @@ async function fetchFD(
       const retryAfterMs = parseRetryAfterMs(r.headers.get("retry-after"));
       const backoff = 1000 * attempt;
       const waitMs = Math.max(retryAfterMs ?? 0, backoff, opts.throttleMs);
+
       await sleep(waitMs);
       continue;
     }
@@ -129,6 +135,7 @@ async function fetchFD(
         1000 * attempt,
         opts.throttleMs
       );
+
       await sleep(waitMs);
       continue;
     }
@@ -154,6 +161,7 @@ async function tryAcquireLock(
 
   if (data?.updated_at) {
     const ageMs = Date.now() - new Date(data.updated_at).getTime();
+
     if (ageMs >= 0 && ageMs < RESULTS_LOCK_TTL_MS) {
       return { ok: false, ageMs };
     }
@@ -180,6 +188,8 @@ function mapFdStatusToLocal(fdStatus: string | null | undefined): string {
   if (s === "IN_PLAY") return "IN_PLAY";
   if (s === "PAUSED") return "PAUSED";
   if (s === "TIMED") return "TIMED";
+  if (s === "SCHEDULED") return "SCHEDULED";
+
   return "SCHEDULED";
 }
 
@@ -196,18 +206,20 @@ type SyncBody = {
   leagues?: string[];
   batchLimit?: number;
   lookbackHours?: number;
+  lookaheadHours?: number;
   throttleMs?: number;
   maxRetries?: number;
 };
 
 export async function POST(req: Request) {
-
   const unauthorized = requireCronSecret(req);
   if (unauthorized) return unauthorized;
 
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
 
-  if (!apiKey) return jsonError("Missing FOOTBALL_DATA_API_KEY in env", 500);
+  if (!apiKey) {
+    return jsonError("Missing FOOTBALL_DATA_API_KEY in env", 500);
+  }
 
   const supabase = supabaseAdmin() as any;
 
@@ -234,6 +246,10 @@ export async function POST(req: Request) {
       ? clamp(Math.floor(Number(body.lookbackHours)), 1, 168)
       : LOOKBACK_HOURS_DEFAULT;
 
+    const lookaheadHours = Number.isFinite(Number(body.lookaheadHours))
+      ? clamp(Math.floor(Number(body.lookaheadHours)), 1, 48)
+      : LOOKAHEAD_HOURS_DEFAULT;
+
     const throttleMs = Number.isFinite(Number(body.throttleMs))
       ? Math.max(0, Number(body.throttleMs))
       : 1200;
@@ -246,6 +262,7 @@ export async function POST(req: Request) {
     const nowIso = now.toISOString();
 
     const lock = await tryAcquireLock(supabase, nowIso);
+
     if (!lock.ok) {
       return NextResponse.json({
         ok: true,
@@ -256,7 +273,10 @@ export async function POST(req: Request) {
     }
 
     const lookbackStart = new Date(Date.now() - lookbackHours * 60 * 60 * 1000);
+    const lookaheadEnd = new Date(Date.now() + lookaheadHours * 60 * 60 * 1000);
+
     const lookbackIso = lookbackStart.toISOString();
+    const lookaheadIso = lookaheadEnd.toISOString();
 
     const { data: candidates, error: candidatesErr } = await supabase
       .from("matches")
@@ -265,7 +285,8 @@ export async function POST(req: Request) {
       )
       .in("competition_id", leagues)
       .gte("utc_date", lookbackIso)
-      .in("status", ["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED"])
+      .lte("utc_date", lookaheadIso)
+      .in("status", ["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED", "LIVE"])
       .order("utc_date", { ascending: true })
       .limit(batchLimit);
 
@@ -294,12 +315,18 @@ export async function POST(req: Request) {
         eloApplied: 0,
         batchLimit,
         lookbackHours,
+        lookaheadHours,
+        window: {
+          from: lookbackIso,
+          to: lookaheadIso,
+        },
         updatedAt: nowIso,
         reason: "no_pending_matches",
       });
     }
 
     const byLeague = new Map<string, typeof pendingMatches>();
+
     for (const m of pendingMatches) {
       const arr = byLeague.get(m.competition_id) ?? [];
       arr.push(m);
@@ -319,6 +346,7 @@ export async function POST(req: Request) {
       const minUtcMs = Math.min(
         ...leagueMatches.map((m) => new Date(m.utc_date).getTime())
       );
+
       const maxUtcMs = Math.max(
         ...leagueMatches.map((m) => new Date(m.utc_date).getTime())
       );
@@ -326,7 +354,10 @@ export async function POST(req: Request) {
       const dateFrom = isoDateOnlyUTC(new Date(minUtcMs - 24 * 60 * 60 * 1000));
       const dateTo = isoDateOnlyUTC(new Date(maxUtcMs + 24 * 60 * 60 * 1000));
 
-      const url = new URL(`${BASE}/competitions/${encodeURIComponent(leagueCode)}/matches`);
+      const url = new URL(
+        `${BASE}/competitions/${encodeURIComponent(leagueCode)}/matches`
+      );
+
       url.searchParams.set("dateFrom", dateFrom);
       url.searchParams.set("dateTo", dateTo);
 
@@ -335,6 +366,7 @@ export async function POST(req: Request) {
       if (!upstream.ok) {
         for (const m of leagueMatches) {
           processed += 1;
+
           results.push({
             matchId: m.id,
             ok: false,
@@ -343,6 +375,7 @@ export async function POST(req: Request) {
             error: upstream.message,
           });
         }
+
         continue;
       }
 
@@ -351,8 +384,10 @@ export async function POST(req: Request) {
         : [];
 
       const upstreamById = new Map<number, any>();
+
       for (const um of upstreamMatches) {
         const id = Number(um?.id);
+
         if (Number.isFinite(id)) {
           upstreamById.set(id, um);
         }
@@ -371,17 +406,24 @@ export async function POST(req: Request) {
               stage: "upstream_missing_match",
               league: leagueCode,
             });
+
             continue;
           }
 
           const nextStatus = mapFdStatusToLocal(upstreamMatch?.status);
-          const nextHomeScore = toIntOrNull(upstreamMatch?.score?.fullTime?.home);
-          const nextAwayScore = toIntOrNull(upstreamMatch?.score?.fullTime?.away);
+          const nextHomeScore = toIntOrNull(
+            upstreamMatch?.score?.fullTime?.home
+          );
+          const nextAwayScore = toIntOrNull(
+            upstreamMatch?.score?.fullTime?.away
+          );
 
           const statusChanged = nextStatus !== localMatch.status;
           const scoreChanged =
             nextHomeScore !== localMatch.home_score ||
             nextAwayScore !== localMatch.away_score;
+
+          const syncAt = new Date().toISOString();
 
           if (statusChanged || scoreChanged) {
             const { error: updateErr } = await supabase
@@ -390,7 +432,7 @@ export async function POST(req: Request) {
                 status: nextStatus,
                 home_score: nextHomeScore,
                 away_score: nextAwayScore,
-                last_sync_at: new Date().toISOString(),
+                last_sync_at: syncAt,
               })
               .eq("id", localMatch.id);
 
@@ -401,6 +443,7 @@ export async function POST(req: Request) {
                 stage: "db_match_update_failed",
                 error: updateErr.message,
               });
+
               continue;
             }
 
@@ -408,7 +451,7 @@ export async function POST(req: Request) {
           } else {
             await supabase
               .from("matches")
-              .update({ last_sync_at: new Date().toISOString() })
+              .update({ last_sync_at: syncAt })
               .eq("id", localMatch.id);
           }
 
@@ -439,6 +482,7 @@ export async function POST(req: Request) {
               ok: true,
               stage: "finished_processed",
               status: nextStatus,
+              previousStatus: localMatch.status,
               updatedMatch: statusChanged || scoreChanged,
               settled: settleOk,
               eloApplied: eloOk,
@@ -449,6 +493,7 @@ export async function POST(req: Request) {
               ok: true,
               stage: "match_updated",
               status: nextStatus,
+              previousStatus: localMatch.status,
               updatedMatch: statusChanged || scoreChanged,
             });
           }
@@ -472,6 +517,11 @@ export async function POST(req: Request) {
       eloApplied,
       batchLimit,
       lookbackHours,
+      lookaheadHours,
+      window: {
+        from: lookbackIso,
+        to: lookaheadIso,
+      },
       updatedAt: nowIso,
       results,
     });

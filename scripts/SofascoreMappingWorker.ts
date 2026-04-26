@@ -1,3 +1,4 @@
+//scripts/SofascoreMappingWorker.ts
 import { createClient } from "@supabase/supabase-js";
 
 type QueueRow = {
@@ -626,21 +627,23 @@ async function main() {
       const message =
         error instanceof Error ? error.message : "Unknown mapping worker error";
 
-      if (isSofaScore403Error(message)) {
-        const matchRow = await loadMatch(row.match_id);
+            if (isSofaScore403Error(message)) {
+            const matchRow = await loadMatch(row.match_id);
 
-        if (matchRow && isMatchTooOldForReview(matchRow.utc_date)) {
-          await markExpired(
-            row,
-            "SofaScore blocked and match is already too old"
-          );
-          console.error(`[expired] ${row.match_id} -> ${message}`);
-          continue;
-        }
+            if (matchRow && isMatchTooOldForReview(matchRow.utc_date)) {
+                await markExpired(row, "SofaScore blocked and match is already too old");
+                continue;
+            }
 
-        await markNeedsReview(row, message);
-        continue;
-      }
+            // 👉 NOWY WARUNEK
+            if (!matchRow || isMatchTooOldForReview(matchRow.utc_date)) {
+                await markExpired(row, "Blocked and irrelevant");
+                continue;
+            }
+
+            await markNeedsReview(row, message);
+            continue;
+            }
 
       await markRetry(row, message);
       console.error(`[retry] ${row.match_id} -> ${message}`);

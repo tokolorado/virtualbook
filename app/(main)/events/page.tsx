@@ -749,8 +749,20 @@ export default function EventsPage() {
     const isToday = selectedDate === todayLocalYYYYMMDD();
     if (!isToday) return;
 
-    const hasLiveNow = matches.some((m) => m.isLive || isLiveStatus(m.status));
-    if (!hasLiveNow) return;
+    const shouldRefreshToday = matches.some((m) => {
+      if (m.isLive || isLiveStatus(m.status)) return true;
+      if (m.isFinished || isFinishedStatus(m.status)) return false;
+
+      const kickoffTs = Date.parse(m.kickoffUtc);
+      if (!Number.isFinite(kickoffTs)) return false;
+
+      const startsSoonOrStarted = nowMs >= kickoffTs - 2 * 60 * 1000;
+      const stillRelevant = nowMs <= kickoffTs + 4 * 60 * 60 * 1000;
+
+      return startsSoonOrStarted && stillRelevant;
+    });
+
+    if (!shouldRefreshToday) return;
 
     const id = window.setInterval(() => {
       delete matchesCacheRef.current[selectedDate];
@@ -761,7 +773,7 @@ export default function EventsPage() {
     }, 30_000);
 
     return () => window.clearInterval(id);
-  }, [selectedDate, matches]);
+  }, [selectedDate, matches, nowMs]);
 
   const selectedLeagueLabel = useMemo(() => {
     if (selectedLeague === "ALL") return "Wszystkie ligi";
