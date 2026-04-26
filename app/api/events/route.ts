@@ -570,23 +570,16 @@ export async function GET(req: Request) {
   }
 
   for (const lg of LEAGUES) {
-    const leagueMatches = matchesByLeague.get(lg.code) ?? [];
-    const needsRefresh = leagueMatches.length === 0;
-
-    if (!needsRefresh) continue;
-
     const fxRefreshKey = `fx_refresh:${lg.code}:${dateFrom}:${dateTo}`;
-    let canRefresh = true;
 
     const fxHit = await readCache(fxRefreshKey);
 
     if (fxHit && fxHit.age < FIXTURES_REFRESH_TTL_MS) {
-      canRefresh = false;
+      continue;
     }
 
-    if (!canRefresh) continue;
-
     const fx = await fetchAndUpsertMatches(lg.code, lg.name);
+    
     await writeCache(fxRefreshKey, { refreshedAt: new Date().toISOString() });
 
     if (!fx.ok) {
