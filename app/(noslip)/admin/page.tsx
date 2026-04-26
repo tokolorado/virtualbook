@@ -371,6 +371,18 @@ function StatusPill({
   );
 }
 
+function AttentionDot({ show }: { show: boolean }) {
+  if (!show) return null;
+
+  return (
+    <span
+      className="inline-flex h-2.5 w-2.5 rounded-full bg-yellow-400 shadow-[0_0_18px_rgba(250,204,21,0.65)]"
+      title="Są mecze wymagające review"
+    />
+  );
+}
+
+
 function InfoField({
   label,
   value,
@@ -445,6 +457,7 @@ export default function AdminPage() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [settleStats, setSettleStats] = useState<SettleStats | null>(null);
   const [health, setHealth] = useState<SystemHealth | null>(null);
+  const [mappingReviewCount, setMappingReviewCount] = useState(0);
 
   const [usersLoading, setUsersLoading] = useState(false);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -578,6 +591,31 @@ export default function AdminPage() {
     if (!token) throw new Error("No session token");
     return token;
   };
+
+  const loadMappingReviewCount = async () => {
+  try {
+    const token = await getAccessToken();
+
+    const res = await fetch("/api/admin/match-mapping/review-count", {
+      cache: "no-store",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok) {
+      setMappingReviewCount(0);
+      return;
+    }
+
+    const count = Number(data?.count ?? 0);
+    setMappingReviewCount(Number.isFinite(count) ? count : 0);
+  } catch {
+    setMappingReviewCount(0);
+  }
+};
 
   const load = async () => {
     setLoading(true);
@@ -1048,6 +1086,7 @@ export default function AdminPage() {
       loadUsers(),
       loadAuditLogs(),
       loadSystemCheckLatest(),
+      loadMappingReviewCount(),
     ]);
 
     setLastRefreshAt(new Date().toISOString());
@@ -1071,6 +1110,7 @@ export default function AdminPage() {
         loadUsers(),
         loadAuditLogs(),
         loadSystemCheckLatest(),
+        loadMappingReviewCount(),
       ]);
       setLastRefreshAt(new Date().toISOString());
     };
@@ -1145,6 +1185,34 @@ export default function AdminPage() {
                 System Health, System Check i sample błędów.
               </div>
             </button>
+
+            <Link
+              href="/admin/match-mapping"
+              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-white">
+                    Match mapping review
+                  </div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    Ręczne przypinanie SofaScore event ID dla meczów wymagających review.
+                  </div>
+                </div>
+
+                <div className="shrink-0 pt-1">
+                  <AttentionDot show={mappingReviewCount > 0} />
+                </div>
+              </div>
+
+              {mappingReviewCount > 0 ? (
+                <div className="mt-3 text-xs font-semibold text-yellow-300">
+                  Do review: {mappingReviewCount}
+                </div>
+              ) : (
+                <div className="mt-3 text-xs text-neutral-500">Brak aktywnych review.</div>
+              )}
+            </Link>
 
             <button
               onClick={() => setActiveView("settlement")}
@@ -1641,6 +1709,31 @@ export default function AdminPage() {
                 Pakiet kontroli spójności wallet / ledger / bets / settlement.
               </div>
             </button>
+
+            <Link
+              href="/admin/match-mapping"
+              className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:bg-neutral-900"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-white">
+                    Match mapping review
+                  </div>
+                  <div className="mt-1 text-xs text-neutral-400">
+                    Sprawdź mecze z kolejki match_mapping_queue oznaczone jako needs_review
+                    albo failed.
+                  </div>
+                </div>
+
+                {mappingReviewCount > 0 ? (
+                  <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2.5 py-1 text-xs font-semibold text-yellow-300">
+                    {mappingReviewCount}
+                  </span>
+                ) : (
+                  <AttentionDot show={false} />
+                )}
+              </div>
+            </Link>
 
             <button
               onClick={refreshEverything}
@@ -2220,6 +2313,15 @@ export default function AdminPage() {
                 >
                   Centrum niespodzianek
                 </Link>
+                <Link
+                href="/admin/match-mapping"
+                className="rounded-2xl border border-neutral-800 bg-black/20 px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span>Match mapping</span>
+                  <AttentionDot show={mappingReviewCount > 0} />
+                </span>
+              </Link>
               </div>
             </div>
 
@@ -2378,6 +2480,16 @@ export default function AdminPage() {
                   >
                     Centrum niespodzianek
                   </Link>
+                  <Link
+                    href="/admin/match-mapping"
+                    onClick={() => setSidebarOpen(false)}
+                    className="rounded-2xl border border-neutral-800 bg-black/20 px-3 py-2.5 text-sm text-neutral-300 transition hover:bg-neutral-900"
+                  >
+                    <span className="flex items-center justify-between gap-2">
+                      <span>Match mapping</span>
+                      <AttentionDot show={mappingReviewCount > 0} />
+                    </span>
+                </Link>
                 </div>
               </div>
             </div>

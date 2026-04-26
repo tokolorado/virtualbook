@@ -58,24 +58,33 @@ function NavLinkItem({
   label,
   active,
   compact = false,
+  hasAttention = false,
 }: {
   href: string;
   label: string;
   active: boolean;
   compact?: boolean;
+  hasAttention?: boolean;
 }) {
   return (
     <Link
       href={href}
       className={cx(
-        "rounded-2xl border text-sm font-medium transition",
-        compact ? "px-3 py-2 whitespace-nowrap" : "px-4 py-2.5",
+        "relative rounded-2xl border text-sm font-medium transition",
+        compact ? "whitespace-nowrap px-3 py-2" : "px-4 py-2.5",
         active
           ? "border-white/15 bg-white text-black"
           : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800 hover:text-white"
       )}
     >
       {label}
+
+      {hasAttention ? (
+        <span
+          className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-yellow-400 ring-2 ring-neutral-950"
+          title="Są mecze wymagające review"
+        />
+      ) : null}
     </Link>
   );
 }
@@ -87,6 +96,7 @@ export default function Topbar() {
   const [balanceVb, setBalanceVb] = useState<number | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const [mappingReviewCount, setMappingReviewCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,6 +191,56 @@ export default function Topbar() {
     };
   }, [session?.user?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let intervalId: number | null = null;
+
+    const loadMappingReviewCount = async () => {
+      if (!session?.access_token || checkingAdmin || !isAdmin) {
+        if (!cancelled) setMappingReviewCount(0);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/admin/match-mapping/review-count", {
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          if (!cancelled) setMappingReviewCount(0);
+          return;
+        }
+
+        const count = Number(data?.count ?? 0);
+
+        if (!cancelled) {
+          setMappingReviewCount(Number.isFinite(count) ? count : 0);
+        }
+      } catch {
+        if (!cancelled) setMappingReviewCount(0);
+      }
+    };
+
+    void loadMappingReviewCount();
+
+    if (session?.access_token && !checkingAdmin && isAdmin) {
+      intervalId = window.setInterval(loadMappingReviewCount, 60_000);
+    }
+
+    return () => {
+      cancelled = true;
+
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [session?.access_token, checkingAdmin, isAdmin]);
+
   const logout = async () => {
     await supabase.auth.signOut();
     window.location.href = "/login";
@@ -220,13 +280,16 @@ export default function Topbar() {
                 </div>
               </Link>
 
-              <nav className="hidden lg:flex items-center gap-2">
+              <nav className="hidden items-center gap-2 lg:flex">
                 {visibleNav.map((item) => (
                   <NavLinkItem
                     key={item.href}
                     href={item.href}
                     label={item.label}
                     active={isPathActive(pathname, item.href)}
+                    hasAttention={
+                      item.href === "/admin" && mappingReviewCount > 0
+                    }
                   />
                 ))}
               </nav>
@@ -235,13 +298,15 @@ export default function Topbar() {
             <div className="flex shrink-0 items-center gap-2">
               {loading ? null : session ? (
                 <>
-                  <div className="hidden md:flex items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-2.5">
+                  <div className="hidden items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-4 py-2.5 md:flex">
                     <div className="text-right">
                       <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                         Saldo
                       </div>
                       <div className="text-sm font-semibold text-white">
-                        {balanceVb === null ? "..." : `${formatVB(balanceVb)} VB`}
+                        {balanceVb === null
+                          ? "..."
+                          : `${formatVB(balanceVb)} VB`}
                       </div>
                     </div>
                   </div>
@@ -299,6 +364,9 @@ export default function Topbar() {
                     href={item.href}
                     label={item.label}
                     active={isPathActive(pathname, item.href)}
+                    hasAttention={
+                      item.href === "/admin" && mappingReviewCount > 0
+                    }
                     compact
                   />
                 ))}
@@ -307,7 +375,9 @@ export default function Topbar() {
                   <div className="ml-1 shrink-0 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-xs text-neutral-300 md:hidden">
                     Saldo:{" "}
                     <span className="font-semibold text-white">
-                      {balanceVb === null ? "..." : `${formatVB(balanceVb)} VB`}
+                      {balanceVb === null
+                        ? "..."
+                        : `${formatVB(balanceVb)} VB`}
                     </span>
                   </div>
                 ) : null}
