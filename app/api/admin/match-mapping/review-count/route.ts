@@ -1,4 +1,4 @@
-//app/(noslip)/admin/match-mapping/review-count/route.ts
+//app/api/admin/match-mapping/review-count/route.ts
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
@@ -62,7 +62,7 @@ export async function GET(req: Request) {
     }
 
     const nowIso = new Date().toISOString();
-    const next72hIso = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+    const next120hIso = new Date(Date.now() + 120 * 60 * 60 * 1000).toISOString();
 
     const { count, error } = await supabase
       .from("match_mapping_queue")
@@ -77,7 +77,7 @@ export async function GET(req: Request) {
       )
       .in("status", ["needs_review", "failed"])
       .gte("match.utc_date", nowIso)
-      .lte("match.utc_date", next72hIso);
+      .lte("match.utc_date", next120hIso);
 
     if (error) {
       return NextResponse.json(
@@ -91,7 +91,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       count: safeCount,
       hasReview: safeCount > 0,
-      window: "next_72h",
+      window: "next_120h",
     });
   } catch (error) {
     return NextResponse.json(

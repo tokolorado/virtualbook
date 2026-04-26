@@ -140,7 +140,7 @@ export async function GET(req: Request) {
     const supabase = supabaseAdmin();
 
     const nowIso = new Date().toISOString();
-    const next72hIso = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
+    const next120hIso = new Date(Date.now() + 120 * 60 * 60 * 1000).toISOString();
 
     const { data: queueData, error: queueError } = await supabase
       .from("match_mapping_queue")
@@ -163,7 +163,7 @@ export async function GET(req: Request) {
       )
       .in("status", ["needs_review", "failed"])
       .gte("match.utc_date", nowIso)
-      .lte("match.utc_date", next72hIso)
+      .lte("match.utc_date", next120hIso)
       .order("utc_date", {
         referencedTable: "match",
         ascending: true,
@@ -187,7 +187,7 @@ export async function GET(req: Request) {
         ok: true,
         items: [],
         count: 0,
-        window: "next_24h",
+        window: "next_120h",
       });
     }
 
@@ -233,7 +233,7 @@ export async function GET(req: Request) {
       ok: true,
       items,
       count: items.length,
-      window: "next_24h",
+      window: "next_72h",
     });
   } catch (e: unknown) {
     return json(500, {
