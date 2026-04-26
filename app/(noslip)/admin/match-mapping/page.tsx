@@ -456,7 +456,7 @@ export default function AdminMatchMappingPage() {
                   Failed: {failedCount}
                 </StatusPill>
                 <StatusPill tone="blue">Needs review: {reviewCount}</StatusPill>
-                <StatusPill>Okno: najbliższe 24h</StatusPill>
+                <StatusPill>Okno: najbliższe 72h</StatusPill>
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -552,7 +552,7 @@ export default function AdminMatchMappingPage() {
                 Brak meczów w kolejce review
               </h2>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-400">
-                Aktualnie nie ma meczów z najbliższych 24 godzin oznaczonych jako
+                Aktualnie nie ma meczów z najbliższych 72 godzin oznaczonych jako
                 needs_review albo failed. Kropka w Admin Center powinna pozostać
                 niewidoczna.
               </p>

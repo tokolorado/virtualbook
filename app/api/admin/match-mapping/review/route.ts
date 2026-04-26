@@ -140,7 +140,7 @@ export async function GET(req: Request) {
     const supabase = supabaseAdmin();
 
     const nowIso = new Date().toISOString();
-    const next24hIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const next72hIso = new Date(Date.now() + 72 * 60 * 60 * 1000).toISOString();
 
     const { data: queueData, error: queueError } = await supabase
       .from("match_mapping_queue")
@@ -163,7 +163,7 @@ export async function GET(req: Request) {
       )
       .in("status", ["needs_review", "failed"])
       .gte("match.utc_date", nowIso)
-      .lte("match.utc_date", next24hIso)
+      .lte("match.utc_date", next72hIso)
       .order("utc_date", {
         referencedTable: "match",
         ascending: true,
