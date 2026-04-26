@@ -1,3 +1,4 @@
+//app/api/admin/match-mapping/search-sofascore/route.ts
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/requireAdmin";
@@ -160,6 +161,21 @@ function getCandidateDates(matchUtcDate: string | null) {
   return Array.from(dates);
 }
 
+function buildManualSearchUrls(match: MatchRow) {
+  const home = match.home_team ?? "";
+  const away = match.away_team ?? "";
+  const date = match.utc_date ? dateKeyFromIso(match.utc_date) : "";
+  const query = [home, away, date].filter(Boolean).join(" ");
+
+  return {
+    query,
+    google: `https://www.google.com/search?q=${encodeURIComponent(
+      `site:sofascore.com ${query}`
+    )}`,
+    sofascore: `https://www.sofascore.com/search?q=${encodeURIComponent(query)}`,
+  };
+}
+
 async function fetchSofaJson(path: string) {
   const url = `https://www.sofascore.com/api/v1${path}`;
 
@@ -282,6 +298,7 @@ export async function GET(req: Request) {
 
     const matchRow = match as MatchRow;
     const candidateDates = getCandidateDates(matchRow.utc_date);
+    const manualSearch = buildManualSearchUrls(matchRow);
 
     const candidatesByEventId = new Map<number, SofaCandidate>();
     const errors: string[] = [];
@@ -326,13 +343,9 @@ export async function GET(req: Request) {
       })
       .slice(0, 8);
 
-    if (candidates.length === 0 && errors.length > 0) {
-      return json(502, {
-        ok: false,
-        error: errors.join(" | "),
-        candidates: [],
-      });
-    }
+    const blockedBySofaScore =
+      candidates.length === 0 &&
+      errors.some((error) => error.includes("HTTP 403"));
 
     return json(200, {
       ok: true,
@@ -345,6 +358,13 @@ export async function GET(req: Request) {
       },
       dates: candidateDates,
       candidates,
+      manualSearch,
+      blockedBySofaScore,
+      warning: blockedBySofaScore
+        ? "SofaScore blokuje automatyczne wyszukiwanie z serwera HTTP 403. Wpisz event ID ręcznie albo użyj wyszukiwarki."
+        : candidates.length === 0 && errors.length > 0
+          ? errors.join(" | ")
+          : null,
     });
   } catch (e: unknown) {
     return json(500, {
