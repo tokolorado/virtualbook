@@ -35,13 +35,18 @@ function safeJson(text: string) {
 }
 
 function safeScore(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
 function safeInt(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+
   const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return null;
+
   return Math.trunc(n);
 }
 
@@ -395,8 +400,17 @@ export async function GET(req: Request) {
           last_sync_at: nowIso,
         };
 
-        if (hs !== null) row.home_score = hs;
-        if (as !== null) row.away_score = as;
+        if (hs !== null) {
+          row.home_score = hs;
+        } else if (status === "SCHEDULED" || status === "TIMED") {
+          row.home_score = null;
+        }
+
+        if (as !== null) {
+          row.away_score = as;
+        } else if (status === "SCHEDULED" || status === "TIMED") {
+          row.away_score = null;
+        }
 
         return row;
       })
@@ -460,6 +474,28 @@ export async function GET(req: Request) {
       }
 
       const status = normalizeStatus((upstreamMatch as any)?.status);
+
+      if (isTerminalStatus(status)) {
+        const { error } = await supabase
+          .from("matches")
+          .update({
+            last_sync_at: new Date().toISOString(),
+          })
+          .eq("id", row.id);
+
+        if (error) {
+          detailErrors.push({
+            type: "match_detail_terminal_touch",
+            matchId: row.id,
+            error: error.message,
+          });
+          continue;
+        }
+
+        refreshed.push(row.id);
+        continue;
+      }
+
       const hs = pickMatchScore(upstreamMatch, "home");
       const as = pickMatchScore(upstreamMatch, "away");
       const isLive = isLiveStatus(status);
@@ -471,8 +507,17 @@ export async function GET(req: Request) {
         last_sync_at: new Date().toISOString(),
       };
 
-      if (hs !== null) updatePayload.home_score = hs;
-      if (as !== null) updatePayload.away_score = as;
+      if (hs !== null) {
+        updatePayload.home_score = hs;
+      } else if (status === "SCHEDULED" || status === "TIMED") {
+        updatePayload.home_score = null;
+      }
+
+      if (as !== null) {
+        updatePayload.away_score = as;
+      } else if (status === "SCHEDULED" || status === "TIMED") {
+        updatePayload.away_score = null;
+      }
 
       const { error } = await supabase
         .from("matches")

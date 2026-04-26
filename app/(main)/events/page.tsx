@@ -29,6 +29,8 @@ type Match = {
   isFinished: boolean;
   homeScore: number | null;
   awayScore: number | null;
+  minute: number | null;
+  injuryTime: number | null;
   odds: { "1": number | null; X: number | null; "2": number | null };
 };
 
@@ -96,6 +98,13 @@ function safeNum(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function safeInt(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.trunc(n);
 }
 
 function formatForm(form?: string | null) {
@@ -239,6 +248,43 @@ function isEffectivelyLiveMatch(m: Match, nowMs: number) {
     explicitFinished: m.isFinished,
     nowMs,
   });
+}
+
+function estimateLiveMinute(kickoffUtc: string, nowMs: number): number | null {
+  const kickoffTs = Date.parse(kickoffUtc);
+  if (!Number.isFinite(kickoffTs)) return null;
+
+  const elapsed = Math.floor((nowMs - kickoffTs) / 60_000) + 1;
+  if (elapsed < 1) return null;
+
+  if (elapsed <= 45) return elapsed;
+  if (elapsed <= 60) return 45;
+
+  const secondHalfMinute = elapsed - 15;
+  if (secondHalfMinute <= 90) return Math.max(46, secondHalfMinute);
+
+  return 90;
+}
+
+function formatLiveClock(m: Match, nowMs: number) {
+  if (!isEffectivelyLiveMatch(m, nowMs)) return null;
+
+  const minute =
+    typeof m.minute === "number" && Number.isFinite(m.minute) && m.minute >= 0
+      ? m.minute
+      : estimateLiveMinute(m.kickoffUtc, nowMs);
+
+  if (minute === null) return null;
+
+  const injuryTime =
+    typeof m.injuryTime === "number" &&
+    Number.isFinite(m.injuryTime) &&
+    m.injuryTime > 0
+      ? m.injuryTime
+      : null;
+
+  if (injuryTime !== null) return `${minute}+${injuryTime}'`;
+  return `${minute}'`;
 }
 
 function getMatchAvailability(m: Match, nowMs: number): MatchAvailability {
@@ -419,6 +465,8 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
           typeof m?.score?.fullTime?.away === "number"
             ? m.score.fullTime.away
             : null,
+        minute: safeInt(m?.minute),
+        injuryTime: safeInt(m?.injuryTime ?? m?.injury_time),
         odds: {
           "1": m?.odds?.["1"] ?? null,
           X: m?.odds?.X ?? null,
@@ -802,34 +850,37 @@ export default function EventsPage() {
   }, []);
 
   useEffect(() => {
-    const isToday = selectedDate === todayLocalYYYYMMDD();
-    if (!isToday) return;
-
-    const shouldRefreshToday = matches.some((m) => {
-      if (isEffectivelyLiveMatch(m, nowMs)) return true;
-      if (m.isFinished || isFinishedStatus(m.status)) return false;
-
-      const kickoffTs = Date.parse(m.kickoffUtc);
-      if (!Number.isFinite(kickoffTs)) return false;
-
-      const startsSoonOrStarted = nowMs >= kickoffTs - 2 * 60 * 1000;
-      const stillRelevant = nowMs <= kickoffTs + 4 * 60 * 60 * 1000;
-
-      return startsSoonOrStarted && stillRelevant;
-    });
-
-    if (!shouldRefreshToday) return;
-
     const id = window.setInterval(() => {
+      const currentNowMs = Date.now();
+      const isToday = selectedDate === todayLocalYYYYMMDD();
+
+      if (!isToday) return;
+
+      const shouldRefreshToday = matches.some((m) => {
+        if (isEffectivelyLiveMatch(m, currentNowMs)) return true;
+        if (m.isFinished || isFinishedStatus(m.status)) return false;
+
+        const kickoffTs = Date.parse(m.kickoffUtc);
+        if (!Number.isFinite(kickoffTs)) return false;
+
+        const startsSoonOrStarted = currentNowMs >= kickoffTs - 2 * 60 * 1000;
+        const stillRelevant = currentNowMs <= kickoffTs + 4 * 60 * 60 * 1000;
+
+        return startsSoonOrStarted && stillRelevant;
+      });
+
+      if (!shouldRefreshToday) return;
+
       delete matchesCacheRef.current[selectedDate];
       delete matchesLoadedAtCacheRef.current[selectedDate];
       delete horizonCacheRef.current[selectedDate];
       delete beyondCacheRef.current[selectedDate];
+
       setReloadKey((v) => v + 1);
     }, 30_000);
 
     return () => window.clearInterval(id);
-  }, [selectedDate, matches, nowMs]);
+  }, [selectedDate, matches]);
 
   const selectedLeagueLabel = useMemo(() => {
     if (selectedLeague === "ALL") return "Wszystkie ligi";
@@ -1503,6 +1554,7 @@ export default function EventsPage() {
 
   const renderFeaturedMatchCard = (m: Match) => {
     const distance = formatKickoffDistance(m.kickoffUtc, nowMs);
+    const liveClock = formatLiveClock(m, nowMs);
 
     return (
       <button
@@ -1523,8 +1575,9 @@ export default function EventsPage() {
             ) : null}
           </div>
 
-          <div className="shrink-0">
+          <div className="flex shrink-0 flex-col items-end gap-2">
             <MatchStatusPill match={m} nowMs={nowMs} />
+            {liveClock ? <SmallPill tone="red">{liveClock}</SmallPill> : null}
           </div>
         </div>
 
@@ -1552,6 +1605,7 @@ export default function EventsPage() {
 
   const renderMatchCard = (m: Match) => {
     const distance = formatKickoffDistance(m.kickoffUtc, nowMs);
+    const liveClock = formatLiveClock(m, nowMs);
 
     return (
       <div
@@ -1577,6 +1631,7 @@ export default function EventsPage() {
               </span>
 
               <MatchStatusPill match={m} nowMs={nowMs} />
+              {liveClock ? <SmallPill tone="red">{liveClock}</SmallPill> : null}
 
               {distance ? (
                 <span className="text-xs text-neutral-500">{distance}</span>

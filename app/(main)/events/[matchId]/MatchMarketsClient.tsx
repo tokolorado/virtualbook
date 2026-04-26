@@ -27,6 +27,8 @@ type MatchUI = {
   isFinished: boolean;
   homeScore: number | null;
   awayScore: number | null;
+  minute: number | null;
+  injuryTime: number | null;
 };
 
 type MarketCatalogRow = {
@@ -461,8 +463,17 @@ function cn(...classes: Array<string | false | null | undefined>) {
 }
 
 function safeNum(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function safeInt(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.trunc(n);
 }
 
 function isBettingClosed(kickoffUtc: string, nowMs: number) {
@@ -519,6 +530,50 @@ function isEffectivelyLiveByClock(args: {
     args.nowMs >= kickoffTs &&
     args.nowMs <= kickoffTs + ESTIMATED_LIVE_AFTER_KICKOFF_MS
   );
+}
+
+function estimateLiveMinute(kickoffUtc: string, nowMs: number): number | null {
+  const kickoffTs = Date.parse(kickoffUtc);
+  if (!Number.isFinite(kickoffTs)) return null;
+
+  const elapsed = Math.floor((nowMs - kickoffTs) / 60_000) + 1;
+  if (elapsed < 1) return null;
+
+  if (elapsed <= 45) return elapsed;
+  if (elapsed <= 60) return 45;
+
+  const secondHalfMinute = elapsed - 15;
+  if (secondHalfMinute <= 90) return Math.max(46, secondHalfMinute);
+
+  return 90;
+}
+
+function formatLiveClock(args: {
+  match: MatchUI;
+  kickoffIso: string;
+  nowMs: number;
+  effectiveIsLive: boolean;
+}) {
+  if (!args.effectiveIsLive) return null;
+
+  const minute =
+    typeof args.match.minute === "number" &&
+    Number.isFinite(args.match.minute) &&
+    args.match.minute >= 0
+      ? args.match.minute
+      : estimateLiveMinute(args.kickoffIso, args.nowMs);
+
+  if (minute === null) return null;
+
+  const injuryTime =
+    typeof args.match.injuryTime === "number" &&
+    Number.isFinite(args.match.injuryTime) &&
+    args.match.injuryTime > 0
+      ? args.match.injuryTime
+      : null;
+
+  if (injuryTime !== null) return `${minute}+${injuryTime}'`;
+  return `${minute}'`;
 }
 
 function resolveTemplate(template: string, home: string, away: string) {
@@ -658,6 +713,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     isFinished: false,
     homeScore: null,
     awayScore: null,
+    minute: null,
+    injuryTime: null,
   });
 
   const [kickoffIso, setKickoffIso] = useState<string>(kickoffUtcQS || "");
@@ -691,6 +748,14 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   ]);
 
   const effectiveMatchStatus = effectiveIsLive ? "LIVE" : matchUI.status;
+  const liveClockLabel = useMemo(() => {
+    return formatLiveClock({
+      match: matchUI,
+      kickoffIso,
+      nowMs,
+      effectiveIsLive,
+    });
+  }, [effectiveIsLive, kickoffIso, matchUI, nowMs]);
 
   const closed = useMemo(() => {
     if (effectiveIsLive || matchUI.isFinished) return true;
@@ -747,7 +812,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           supabase
             .from("matches")
             .select(
-              "home_team, away_team, competition_name, utc_date, status, home_score, away_score"
+              "home_team, away_team, competition_name, utc_date, status, home_score, away_score, minute, injury_time"
             )
             .eq("id", matchIdNum)
             .maybeSingle(),
@@ -808,6 +873,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
               status?: string | null;
               home_score?: number | null;
               away_score?: number | null;
+              minute?: number | null;
+              injury_time?: number | null;
             }
           | null;
 
@@ -841,6 +908,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
               typeof row?.home_score === "number" ? row.home_score : null,
             awayScore:
               typeof row?.away_score === "number" ? row.away_score : null,
+            minute: safeInt(row?.minute),
+            injuryTime: safeInt(row?.injury_time),
           });
           setKickoffIso(kickoff);
           setOddsRows((oRows ?? []) as OddsRow[]);
@@ -992,6 +1061,12 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {statusPill}
+
+                  {liveClockLabel ? (
+                    <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-300">
+                      {liveClockLabel}
+                    </span>
+                  ) : null}
 
                   {matchUI.kickoffLocal ? (
                     <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-300">

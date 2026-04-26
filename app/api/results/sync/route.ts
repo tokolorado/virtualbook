@@ -194,8 +194,52 @@ function mapFdStatusToLocal(fdStatus: string | null | undefined): string {
 }
 
 function toIntOrNull(x: any): number | null {
-  if (typeof x === "number" && Number.isFinite(x)) return x;
+  if (x === null || x === undefined || x === "") return null;
+
+  const n = typeof x === "number" ? x : Number(x);
+  if (!Number.isFinite(n)) return null;
+
+  return Math.trunc(n);
+}
+
+function pickMatchScore(match: any, side: "home" | "away"): number | null {
+  const fullTime = toIntOrNull(match?.score?.fullTime?.[side]);
+  if (fullTime !== null) return fullTime;
+
+  const regularTime = toIntOrNull(match?.score?.regularTime?.[side]);
+  if (regularTime !== null) return regularTime;
+
+  const halfTime = toIntOrNull(match?.score?.halfTime?.[side]);
+  if (halfTime !== null) return halfTime;
+
   return null;
+}
+
+function pickMatchMinute(match: any): number | null {
+  const direct = toIntOrNull(match?.minute);
+  if (direct !== null && direct >= 0) return direct;
+
+  const statusMinute = toIntOrNull(match?.status?.minute);
+  if (statusMinute !== null && statusMinute >= 0) return statusMinute;
+
+  return null;
+}
+
+function pickInjuryTime(match: any): number | null {
+  const direct = toIntOrNull(match?.injuryTime);
+  if (direct !== null && direct >= 0) return direct;
+
+  const statusInjuryTime = toIntOrNull(match?.status?.injuryTime);
+  if (statusInjuryTime !== null && statusInjuryTime >= 0) {
+    return statusInjuryTime;
+  }
+
+  return null;
+}
+
+function isLiveLocalStatus(status: string) {
+  const s = status.toUpperCase();
+  return s === "LIVE" || s === "IN_PLAY" || s === "PAUSED";
 }
 
 function isoDateOnlyUTC(date: Date) {
@@ -281,7 +325,7 @@ export async function POST(req: Request) {
     const { data: candidates, error: candidatesErr } = await supabase
       .from("matches")
       .select(
-        "id, competition_id, utc_date, status, home_score, away_score, home_team_id, away_team_id"
+        "id, competition_id, utc_date, status, home_score, away_score, minute, injury_time, home_team_id, away_team_id"
       )
       .in("competition_id", leagues)
       .gte("utc_date", lookbackIso)
@@ -301,6 +345,8 @@ export async function POST(req: Request) {
       status: string;
       home_score: number | null;
       away_score: number | null;
+      minute: number | null;
+      injury_time: number | null;
       home_team_id: number | null;
       away_team_id: number | null;
     }>;
@@ -411,27 +457,49 @@ export async function POST(req: Request) {
           }
 
           const nextStatus = mapFdStatusToLocal(upstreamMatch?.status);
-          const nextHomeScore = toIntOrNull(
-            upstreamMatch?.score?.fullTime?.home
-          );
-          const nextAwayScore = toIntOrNull(
-            upstreamMatch?.score?.fullTime?.away
-          );
+
+          const upstreamHomeScore = pickMatchScore(upstreamMatch, "home");
+          const upstreamAwayScore = pickMatchScore(upstreamMatch, "away");
+
+          const shouldClearScore = nextStatus === "SCHEDULED" || nextStatus === "TIMED";
+
+          const nextHomeScore =
+            upstreamHomeScore !== null || shouldClearScore
+              ? upstreamHomeScore
+              : localMatch.home_score;
+
+          const nextAwayScore =
+            upstreamAwayScore !== null || shouldClearScore
+              ? upstreamAwayScore
+              : localMatch.away_score;
+
+          const nextIsLive = isLiveLocalStatus(nextStatus);
+          const nextMinute = nextIsLive ? pickMatchMinute(upstreamMatch) : null;
+          const nextInjuryTime = nextIsLive
+            ? pickInjuryTime(upstreamMatch)
+            : null;
 
           const statusChanged = nextStatus !== localMatch.status;
+
           const scoreChanged =
             nextHomeScore !== localMatch.home_score ||
             nextAwayScore !== localMatch.away_score;
 
+          const minuteChanged =
+            nextMinute !== localMatch.minute ||
+            nextInjuryTime !== localMatch.injury_time;
+
           const syncAt = new Date().toISOString();
 
-          if (statusChanged || scoreChanged) {
+          if (statusChanged || scoreChanged || minuteChanged) {
             const { error: updateErr } = await supabase
               .from("matches")
               .update({
                 status: nextStatus,
                 home_score: nextHomeScore,
                 away_score: nextAwayScore,
+                minute: nextMinute,
+                injury_time: nextInjuryTime,
                 last_sync_at: syncAt,
               })
               .eq("id", localMatch.id);
@@ -451,7 +519,11 @@ export async function POST(req: Request) {
           } else {
             await supabase
               .from("matches")
-              .update({ last_sync_at: syncAt })
+              .update({
+                minute: nextMinute,
+                injury_time: nextInjuryTime,
+                last_sync_at: syncAt,
+              })
               .eq("id", localMatch.id);
           }
 
@@ -483,7 +555,11 @@ export async function POST(req: Request) {
               stage: "finished_processed",
               status: nextStatus,
               previousStatus: localMatch.status,
-              updatedMatch: statusChanged || scoreChanged,
+              homeScore: nextHomeScore,
+              awayScore: nextAwayScore,
+              minute: nextMinute,
+              injuryTime: nextInjuryTime,
+              updatedMatch: statusChanged || scoreChanged || minuteChanged,
               settled: settleOk,
               eloApplied: eloOk,
             });
@@ -494,7 +570,11 @@ export async function POST(req: Request) {
               stage: "match_updated",
               status: nextStatus,
               previousStatus: localMatch.status,
-              updatedMatch: statusChanged || scoreChanged,
+              homeScore: nextHomeScore,
+              awayScore: nextAwayScore,
+              minute: nextMinute,
+              injuryTime: nextInjuryTime,
+              updatedMatch: statusChanged || scoreChanged || minuteChanged,
             });
           }
         } catch (e: any) {
