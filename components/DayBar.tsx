@@ -35,7 +35,9 @@ export default function DayBar({
 }: Props) {
   const [open, setOpen] = useState(false);
 
-  const enabledSet = useMemo(() => new Set(enabledDates), [enabledDates]);
+  const sortedEnabledDates = useMemo(() => {
+    return [...enabledDates].sort();
+  }, [enabledDates]);
 
   const label = useMemo(() => {
     const today = todayLocalYYYYMMDD();
@@ -48,14 +50,33 @@ export default function DayBar({
 
     const d = parseLocalYYYYMMDD(value);
     const dd = String(d.getDate()).padStart(2, "0");
+
     return `${weekdayShortPL(d)} ${dd} ${monthShortPL(d)} ${d.getFullYear()}`;
   }, [value]);
 
+  const previousEnabledDate = useMemo(() => {
+    if (!enabledDatesLoaded || sortedEnabledDates.length === 0) return null;
+
+    for (let i = sortedEnabledDates.length - 1; i >= 0; i--) {
+      if (sortedEnabledDates[i] < value) {
+        return sortedEnabledDates[i];
+      }
+    }
+
+    return null;
+  }, [enabledDatesLoaded, sortedEnabledDates, value]);
+
+  const nextEnabledDate = useMemo(() => {
+    if (!enabledDatesLoaded || sortedEnabledDates.length === 0) return null;
+
+    return sortedEnabledDates.find((date) => date > value) ?? null;
+  }, [enabledDatesLoaded, sortedEnabledDates, value]);
+
   const canGoPrev =
-    enabledDates.length === 0 || enabledSet.has(addDaysLocal(value, -1));
+    !enabledDatesLoaded || sortedEnabledDates.length === 0 || !!previousEnabledDate;
 
   const canGoNext =
-    enabledDates.length === 0 || enabledSet.has(addDaysLocal(value, 1));
+    !enabledDatesLoaded || sortedEnabledDates.length === 0 || !!nextEnabledDate;
 
   const handleCenterClick = () => {
     if (showCalendarInline) {
@@ -66,15 +87,35 @@ export default function DayBar({
     setOpen(true);
   };
 
+  const goPrev = () => {
+    if (!canGoPrev) return;
+
+    if (previousEnabledDate) {
+      onChange(previousEnabledDate);
+      return;
+    }
+
+    onChange(addDaysLocal(value, -1));
+  };
+
+  const goNext = () => {
+    if (!canGoNext) return;
+
+    if (nextEnabledDate) {
+      onChange(nextEnabledDate);
+      return;
+    }
+
+    onChange(addDaysLocal(value, 1));
+  };
+
   return (
     <>
       <div className={showCalendarInline ? "space-y-3" : ""}>
         <div className="flex items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-900/40 p-3">
           <button
             type="button"
-            onClick={() => {
-              if (canGoPrev) onChange(addDaysLocal(value, -1));
-            }}
+            onClick={goPrev}
             disabled={!canGoPrev}
             className={[
               "rounded-xl border px-2.5 py-1.5 text-sm transition",
@@ -82,7 +123,7 @@ export default function DayBar({
                 ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
                 : "cursor-not-allowed border-neutral-900 bg-neutral-950/40 text-neutral-600",
             ].join(" ")}
-            aria-label="Poprzedni dzień"
+            aria-label="Poprzedni dzień z meczami"
           >
             ←
           </button>
@@ -98,9 +139,7 @@ export default function DayBar({
 
           <button
             type="button"
-            onClick={() => {
-              if (canGoNext) onChange(addDaysLocal(value, 1));
-            }}
+            onClick={goNext}
             disabled={!canGoNext}
             className={[
               "rounded-xl border px-2.5 py-1.5 text-sm transition",
@@ -108,7 +147,7 @@ export default function DayBar({
                 ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
                 : "cursor-not-allowed border-neutral-900 bg-neutral-950/40 text-neutral-600",
             ].join(" ")}
-            aria-label="Następny dzień"
+            aria-label="Następny dzień z meczami"
           >
             →
           </button>

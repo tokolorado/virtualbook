@@ -138,18 +138,35 @@ function formatKickoffDistance(kickoffUtc: string, nowMs: number) {
   const diffMs = ts - nowMs;
   const absMin = Math.abs(Math.round(diffMs / 60_000));
 
+  const formatLongDistance = (minutes: number) => {
+    const days = Math.floor(minutes / 1440);
+    const hours = Math.floor((minutes % 1440) / 60);
+    const mins = minutes % 60;
+
+    const dayLabel = days === 1 ? "dzień" : "dni";
+
+    if (days > 0) {
+      if (hours > 0) return `${days} ${dayLabel} ${hours}h`;
+      return `${days} ${dayLabel}`;
+    }
+
+    if (hours > 0) {
+      return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    }
+
+    return `${minutes} min`;
+  };
+
   if (diffMs >= 0) {
     if (absMin < 1) return "start za chwilę";
     if (absMin < 60) return `start za ${absMin} min`;
-    const hours = Math.floor(absMin / 60);
-    const mins = absMin % 60;
-    return mins > 0 ? `start za ${hours}h ${mins}m` : `start za ${hours}h`;
+
+    return `start za ${formatLongDistance(absMin)}`;
   }
 
   if (absMin < 60) return `w toku od ${absMin} min`;
-  const hours = Math.floor(absMin / 60);
-  const mins = absMin % 60;
-  return mins > 0 ? `po starcie ${hours}h ${mins}m` : `po starcie ${hours}h`;
+
+  return `po starcie ${formatLongDistance(absMin)}`;
 }
 
 function isBettingClosed(kickoffUtc: string, nowMs: number) {
