@@ -347,7 +347,7 @@ function QuickAction({
 
 function LoadingShell() {
   return (
-    <div className="mx-auto max-w-7xl space-y-5 animate-pulse">
+    <div className="w-full space-y-5 px-4 sm:px-5 xl:px-6 2xl:px-8 animate-pulse">
       <div className="h-64 rounded-3xl border border-neutral-800 bg-neutral-900/50" />
       <div className="h-20 rounded-3xl border border-neutral-800 bg-neutral-900/40" />
       <div className="grid gap-4 xl:grid-cols-2">
@@ -664,7 +664,7 @@ export default function AccountPage() {
   if (!userId) return null;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5">
+    <div className="w-full space-y-5 px-4 sm:px-5 xl:px-6 2xl:px-8">
       <SurfaceCard className="overflow-hidden">
         <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-7">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -696,7 +696,7 @@ export default function AccountPage() {
 
                 <StatusPill>
                   ID:{" "}
-                  <span className="ml-1 max-w-[220px] truncate font-semibold text-white">
+                  <span className="ml-1 inline-block max-w-[220px] truncate align-bottom font-semibold text-white">
                     {userId}
                   </span>
                 </StatusPill>

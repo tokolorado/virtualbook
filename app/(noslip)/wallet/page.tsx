@@ -1,3 +1,4 @@
+//app/(noslip)/wallet/page.tsx
 "use client";
 
 import type { ReactNode } from "react";
@@ -377,7 +378,7 @@ function EmptyChartState() {
 
 function LoadingShell() {
   return (
-    <div className="mx-auto max-w-[1520px] space-y-5 text-white">
+    <div className="w-full space-y-5 px-4 text-white sm:px-5 xl:px-6 2xl:px-8">
       <div className="animate-pulse overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/70">
         <div className="h-64 bg-neutral-900/70" />
       </div>
@@ -649,12 +650,14 @@ export default function WalletPage() {
 
   const latestRow = rows.length > 0 ? rows[rows.length - 1] : null;
   const recentRows = useMemo(() => rows.slice().reverse(), [rows]);
+  const cumulativeBetPnl =
+  chartData.length > 0 ? chartData[chartData.length - 1].cumulativePnl : 0;
 
   if (loading) return <LoadingShell />;
 
   if (error) {
     return (
-      <div className="mx-auto max-w-4xl text-white">
+      <div className="w-full px-4 text-white sm:px-5 xl:px-6 2xl:px-8">
         <SurfaceCard className="border-red-500/20 bg-red-500/10 p-6">
           <div className="text-lg font-semibold text-red-200">
             Nie udało się załadować portfela
@@ -673,7 +676,7 @@ export default function WalletPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1520px] space-y-5 text-white">
+    <div className="w-full space-y-5 px-4 text-white sm:px-5 xl:px-6 2xl:px-8">
       <SurfaceCard className="overflow-hidden">
         <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.96),rgba(5,5,5,0.98))] p-5 sm:p-6">
           <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -869,7 +872,11 @@ export default function WalletPage() {
           <ChartCard
             title="Profit z kuponów"
             subtitle="PnL kumulacyjny liczy tylko ruchy bukmacherskie: postawione kupony i wypłaty."
-            badge={<StatusPill tone={quick.net >= 0 ? "green" : "red"}>{quick.net >= 0 ? "Plus" : "Minus"}</StatusPill>}
+            badge={
+              <StatusPill tone={cumulativeBetPnl >= 0 ? "green" : "red"}>
+                {cumulativeBetPnl >= 0 ? "Plus" : "Minus"}
+              </StatusPill>
+            }
           >
             {chartData.length === 0 ? (
               <EmptyChartState />
