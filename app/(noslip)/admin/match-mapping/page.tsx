@@ -40,6 +40,33 @@ type ReviewResponse = {
   error?: string;
 };
 
+type SofaCandidate = {
+  eventId: number;
+  homeTeam: string;
+  awayTeam: string;
+  tournament: string | null;
+  category: string | null;
+  startTimestamp: number | null;
+  startTime: string | null;
+  status: string | null;
+  score: number;
+  sourceQuery: string;
+  url: string;
+};
+
+type SearchSofaResponse = {
+  ok: boolean;
+  candidates?: SofaCandidate[];
+  error?: string;
+};
+
+type CandidateState = {
+  loading: boolean;
+  searched: boolean;
+  error: string | null;
+  candidates: SofaCandidate[];
+};
+
 type Notice = {
   tone: "success" | "error" | "info";
   message: string;
@@ -220,6 +247,11 @@ export default function AdminMatchMappingPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [candidateStates, setCandidateStates] = useState<
+    Record<number, CandidateState>
+  >({});
+
+  const [manualEventIds, setManualEventIds] = useState<Record<number, string>>({});
 
   const failedCount = useMemo(
     () => items.filter((item) => item.status === "failed").length,
@@ -304,6 +336,90 @@ export default function AdminMatchMappingPage() {
 
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  const setCandidateState = (
+    matchId: number,
+    patch: Partial<CandidateState>
+  ) => {
+    setCandidateStates((prev) => {
+      const current: CandidateState = prev[matchId] ?? {
+        loading: false,
+        searched: false,
+        error: null,
+        candidates: [],
+      };
+
+      return {
+        ...prev,
+        [matchId]: {
+          ...current,
+          ...patch,
+        },
+      };
+    });
+  };
+
+  const searchSofascoreCandidates = async (item: ReviewRow) => {
+    try {
+      setCandidateState(item.match_id, {
+        loading: true,
+        searched: true,
+        error: null,
+        candidates: [],
+      });
+
+      const token = await getAccessToken();
+
+      const res = await fetch(
+        `/api/admin/match-mapping/search-sofascore?matchId=${item.match_id}`,
+        {
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = (await res.json().catch(() => null)) as SearchSofaResponse | null;
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error ?? "Nie udało się wyszukać kandydatów.");
+      }
+
+      setCandidateState(item.match_id, {
+        loading: false,
+        searched: true,
+        error: null,
+        candidates: Array.isArray(data.candidates) ? data.candidates : [],
+      });
+
+      if (!data.candidates?.length) {
+        setNotice({
+          tone: "info",
+          message: `Nie znaleziono kandydatów SofaScore dla matchId ${item.match_id}.`,
+        });
+      }
+    } catch (e: any) {
+      setCandidateState(item.match_id, {
+        loading: false,
+        searched: true,
+        error: e?.message ?? "Nie udało się wyszukać kandydatów.",
+        candidates: [],
+      });
+    }
+  };
+
+  const useSofaCandidate = (matchId: number, candidate: SofaCandidate) => {
+    setManualEventIds((prev) => ({
+      ...prev,
+      [matchId]: String(candidate.eventId),
+    }));
+
+    setNotice({
+      tone: "success",
+      message: `Wybrano SofaScore event ID ${candidate.eventId} dla matchId ${matchId}.`,
+    });
+  };
 
   const assignMapping = async (
     event: FormEvent<HTMLFormElement>,
@@ -574,16 +690,17 @@ export default function AdminMatchMappingPage() {
       ) : (
         <div className="space-y-5">
           {items.map((item) => {
-            const searchQuery = `${item.match?.home_team ?? ""} ${
-              item.match?.away_team ?? ""
-            }`.trim();
-
             const matchTitle = item.match
               ? `${item.match.home_team} vs ${item.match.away_team}`
               : `matchId ${item.match_id}`;
 
             const assignBusy = actionLoading === `assign:${item.match_id}`;
             const pendingBusy = actionLoading === `pending:${item.match_id}`;
+            const candidateState = candidateStates[item.match_id];
+            const searchBusy = !!candidateState?.loading;
+            const selectedEventId =
+              manualEventIds[item.match_id] ??
+              String(item.mapping?.sofascore_event_id ?? "");
 
             return (
               <SurfaceCard key={item.match_id} className="overflow-hidden">
@@ -626,16 +743,14 @@ export default function AdminMatchMappingPage() {
                           Otwórz SofaScore
                         </a>
                       ) : (
-                        <a
-                          href={`https://www.sofascore.com/search?q=${encodeURIComponent(
-                            searchQuery
-                          )}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900"
+                        <button
+                          type="button"
+                          onClick={() => searchSofascoreCandidates(item)}
+                          disabled={searchBusy}
+                          className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          Szukaj na SofaScore
-                        </a>
+                          {searchBusy ? "Szukam..." : "Znajdź kandydatów"}
+                        </button>
                       )}
                     </div>
                   </div>
@@ -693,6 +808,98 @@ export default function AdminMatchMappingPage() {
                       meczu.
                     </p>
 
+                    {candidateState?.searched ? (
+                      <div className="mt-4 rounded-3xl border border-neutral-800 bg-black/20 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                              Kandydaci SofaScore
+                            </div>
+                            <div className="mt-1 text-xs text-neutral-400">
+                              Kliknij „Użyj ID”, żeby uzupełnić formularz.
+                            </div>
+                          </div>
+
+                          {candidateState.loading ? (
+                            <StatusPill tone="blue">searching</StatusPill>
+                          ) : (
+                            <StatusPill tone={candidateState.candidates.length > 0 ? "green" : "yellow"}>
+                              {candidateState.candidates.length} wyników
+                            </StatusPill>
+                          )}
+                        </div>
+
+                        {candidateState.error ? (
+                          <div className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-200">
+                            {candidateState.error}
+                          </div>
+                        ) : null}
+
+                        {!candidateState.loading &&
+                        !candidateState.error &&
+                        candidateState.candidates.length === 0 ? (
+                          <div className="mt-3 rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-3 text-xs text-yellow-200">
+                            Brak kandydatów. Wpisz event ID ręcznie albo spróbuj wyszukać na podstawie krótszej nazwy drużyny.
+                          </div>
+                        ) : null}
+
+                        {candidateState.candidates.length > 0 ? (
+                          <div className="mt-3 space-y-2">
+                            {candidateState.candidates.map((candidate) => (
+                              <div
+                                key={candidate.eventId}
+                                className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-3"
+                              >
+                                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap gap-2">
+                                      <StatusPill tone={candidate.score >= 70 ? "green" : candidate.score >= 45 ? "yellow" : "neutral"}>
+                                        match: {candidate.score}%
+                                      </StatusPill>
+                                      <StatusPill tone="blue">ID: {candidate.eventId}</StatusPill>
+                                    </div>
+
+                                    <div className="mt-2 break-words text-sm font-semibold text-white">
+                                      {candidate.homeTeam} vs {candidate.awayTeam}
+                                    </div>
+
+                                    <div className="mt-1 text-xs leading-5 text-neutral-400">
+                                      {candidate.tournament ?? "—"}
+                                      {candidate.category ? ` · ${candidate.category}` : ""}
+                                      {candidate.startTime ? ` · ${candidate.startTime}` : ""}
+                                    </div>
+
+                                    <div className="mt-1 text-[11px] text-neutral-500">
+                                      Query: {candidate.sourceQuery}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex shrink-0 flex-wrap gap-2">
+                                    <a
+                                      href={candidate.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-xs font-semibold text-neutral-200 transition hover:bg-neutral-900"
+                                    >
+                                      Otwórz
+                                    </a>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => useSofaCandidate(item.match_id, candidate)}
+                                      className="rounded-xl border border-sky-500/30 bg-sky-500/15 px-3 py-2 text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20"
+                                    >
+                                      Użyj ID
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+
                     <form
                       onSubmit={(event) => assignMapping(event, item.match_id)}
                       className="mt-4 space-y-3"
@@ -709,7 +916,13 @@ export default function AdminMatchMappingPage() {
                           type="number"
                           required
                           placeholder="np. 14083330"
-                          defaultValue={item.mapping?.sofascore_event_id ?? ""}
+                          value={selectedEventId}
+                          onChange={(e) => {
+                            setManualEventIds((prev) => ({
+                              ...prev,
+                              [item.match_id]: e.target.value,
+                            }));
+                          }}
                           className="w-full rounded-2xl border border-neutral-800 bg-black/30 px-4 py-3 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-neutral-600"
                         />
                       </div>
