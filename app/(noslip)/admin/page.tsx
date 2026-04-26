@@ -1200,42 +1200,6 @@ export default function AdminPage() {
 
   const renderOverview = () => (
     <div className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label="Użytkownicy"
-          value={users.length}
-          hint={`mail confirmed: ${confirmedUsersCount} • banned: ${bannedUsersCount}`}
-          tone="blue"
-        />
-        <MetricCard
-          label="Wybrany użytkownik"
-          value={selectedUser ? `${formatVB(selectedUser.balance_vb)} VB` : "—"}
-          hint={
-            selectedUser
-              ? `${selectedUser.username ?? "brak username"} • ${
-                  selectedUser.email ?? "brak email"
-                }`
-              : "Wybierz konto z sekcji Users"
-          }
-          tone={selectedUser ? "green" : "neutral"}
-        />
-        <MetricCard
-          label="System health"
-          value={healthBad === 0 ? "HEALTHY" : `ALERT ${healthBad}`}
-          hint="Szybki stan spójności systemu"
-          tone={healthBad === 0 ? "green" : "yellow"}
-        />
-        <MetricCard
-          label="Match mapping"
-          value={mappingReviewCount}
-          hint={
-            mappingReviewCount > 0
-              ? "Mecze wymagające review"
-              : "Brak aktywnych review"
-          }
-          tone={mappingReviewCount > 0 ? "yellow" : "neutral"}
-        />
-      </div>
 
       <div className="grid gap-5 2xl:grid-cols-[minmax(0,1.15fr)_360px]">
         <Panel
@@ -2526,29 +2490,31 @@ export default function AdminPage() {
         </aside>
 
         <main className="min-w-0 space-y-5">
-          <SurfaceCard className="p-4 sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-                  {activeMeta.helper}
+          {activeView !== "overview" ? (
+            <SurfaceCard className="p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                    {activeMeta.helper}
+                  </div>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">
+                    {activeMeta.title}
+                  </h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
+                    {activeMeta.description}
+                  </p>
                 </div>
-                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white md:text-3xl">
-                  {activeMeta.title}
-                </h2>
-                <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-                  {activeMeta.description}
-                </p>
-              </div>
 
-              <button
-                type="button"
-                onClick={refreshEverything}
-                className="shrink-0 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800"
-              >
-                Odśwież
-              </button>
-            </div>
-          </SurfaceCard>
+                <button
+                  type="button"
+                  onClick={refreshEverything}
+                  className="shrink-0 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2 text-sm text-white transition hover:bg-neutral-800"
+                >
+                  Odśwież
+                </button>
+              </div>
+            </SurfaceCard>
+          ) : null}
 
           {renderCurrentView()}
         </main>
