@@ -742,16 +742,27 @@ export default function AdminMatchMappingPage() {
                         >
                           Otwórz SofaScore
                         </a>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => searchSofascoreCandidates(item)}
-                          disabled={searchBusy}
-                          className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {searchBusy ? "Szukam..." : "Znajdź kandydatów"}
-                        </button>
-                      )}
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      <a
+                        href="https://www.sofascore.com/pl"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900"
+                      >
+                        Szukaj na SofaScore
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={() => searchSofascoreCandidates(item)}
+                        disabled={searchBusy}
+                        className="rounded-2xl border border-sky-500/30 bg-sky-500/15 px-4 py-2.5 text-sm font-semibold text-sky-300 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {searchBusy ? "Szukam..." : "Znajdź kandydatów"}
+                      </button>
+                    </div>
+                  )}
                     </div>
                   </div>
                 </div>
