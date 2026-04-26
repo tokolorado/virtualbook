@@ -17,6 +17,11 @@ const LEAGUES = [
 
 const MARKET_ID_1X2 = "1x2";
 
+const FIXTURES_REFRESH_TTL_MS = 15 * 60 * 1000;
+const ACTIVE_FIXTURES_REFRESH_TTL_MS = 60 * 1000;
+const PRE_KICKOFF_REFRESH_WINDOW_MS = 10 * 60 * 1000;
+const LIVE_INFERENCE_WINDOW_MS = 3 * 60 * 60 * 1000;
+
 function jsonError(message: string, status = 500, extra?: any) {
   return NextResponse.json({ error: message, ...extra }, { status });
 }
@@ -34,10 +39,7 @@ function safeScore(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function pickMatchScore(
-  match: any,
-  side: "home" | "away"
-): number | null {
+function pickMatchScore(match: any, side: "home" | "away"): number | null {
   const fullTime = safeScore(match?.score?.fullTime?.[side]);
   if (fullTime !== null) return fullTime;
 
@@ -50,13 +52,52 @@ function pickMatchScore(
   return null;
 }
 
+function normalizeStatus(status: string | null | undefined) {
+  const s = String(status ?? "").trim().toUpperCase();
+  return s || "SCHEDULED";
+}
+
 function isLiveStatus(status: string | null | undefined) {
-  const s = String(status ?? "").toUpperCase();
+  const s = normalizeStatus(status);
   return s === "LIVE" || s === "IN_PLAY" || s === "PAUSED";
 }
 
 function isFinishedStatus(status: string | null | undefined) {
-  return String(status ?? "").toUpperCase() === "FINISHED";
+  return normalizeStatus(status) === "FINISHED";
+}
+
+function isTerminalStatus(status: string | null | undefined) {
+  const s = normalizeStatus(status);
+
+  return (
+    s === "FINISHED" ||
+    s === "CANCELED" ||
+    s === "CANCELLED" ||
+    s === "POSTPONED" ||
+    s === "SUSPENDED" ||
+    s === "AWARDED"
+  );
+}
+
+function inferDisplayStatus(status: string | null | undefined, utcDate: string) {
+  const normalized = normalizeStatus(status);
+
+  if (isLiveStatus(normalized) || isTerminalStatus(normalized)) {
+    return normalized;
+  }
+
+  const kickoffTs = Date.parse(utcDate);
+  if (!Number.isFinite(kickoffTs)) {
+    return normalized;
+  }
+
+  const nowMs = Date.now();
+
+  if (nowMs >= kickoffTs && nowMs <= kickoffTs + LIVE_INFERENCE_WINDOW_MS) {
+    return "IN_PLAY";
+  }
+
+  return normalized;
 }
 
 async function fetchFD(url: string, apiKey: string) {
@@ -64,8 +105,14 @@ async function fetchFD(url: string, apiKey: string) {
     headers: { "X-Auth-Token": apiKey },
     cache: "no-store",
   });
+
   const text = await r.text();
-  return { ok: r.ok, status: r.status, data: safeJson(text) };
+
+  return {
+    ok: r.ok,
+    status: r.status,
+    data: safeJson(text),
+  };
 }
 
 function isoStartOfUtcDay(dateYYYYMMDD: string) {
@@ -76,7 +123,8 @@ function isoStartOfNextUtcDay(dateYYYYMMDD: string) {
   const [y, m, d] = dateYYYYMMDD.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + 1);
-  return dt.toISOString().slice(0, 10) + "T00:00:00.000Z";
+
+  return `${dt.toISOString().slice(0, 10)}T00:00:00.000Z`;
 }
 
 type DbMatchRow = {
@@ -95,6 +143,40 @@ type DbMatchRow = {
   away_team_id: number | null;
   last_sync_at: string | null;
 };
+
+function getLastSyncAgeMs(lastSyncAt: string | null) {
+  if (!lastSyncAt) return Number.POSITIVE_INFINITY;
+
+  const ts = Date.parse(lastSyncAt);
+  if (!Number.isFinite(ts)) return Number.POSITIVE_INFINITY;
+
+  return Date.now() - ts;
+}
+
+function shouldActivelyRefreshMatch(match: DbMatchRow) {
+  if (isTerminalStatus(match.status)) return false;
+
+  const kickoffTs = Date.parse(match.utc_date);
+  if (!Number.isFinite(kickoffTs)) return false;
+
+  const nowMs = Date.now();
+  const lastSyncAgeMs = getLastSyncAgeMs(match.last_sync_at);
+
+  if (lastSyncAgeMs < ACTIVE_FIXTURES_REFRESH_TTL_MS) {
+    return false;
+  }
+
+  if (isLiveStatus(match.status)) {
+    return true;
+  }
+
+  const startsSoonOrStarted =
+    nowMs >= kickoffTs - PRE_KICKOFF_REFRESH_WINDOW_MS;
+
+  const stillRelevant = nowMs <= kickoffTs + LIVE_INFERENCE_WINDOW_MS;
+
+  return startsSoonOrStarted && stillRelevant;
+}
 
 export async function GET(req: Request) {
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
@@ -134,9 +216,6 @@ export async function GET(req: Request) {
     });
   }
 
-  const FIXTURES_REFRESH_TTL_MS = 15 * 60 * 1000;
-
-  // okno 3 dni (UTC safety), UI i tak filtruje na selectedDate
   const dateFrom = addDaysLocal(date, -1);
   const dateTo = addDaysLocal(date, +1);
 
@@ -239,6 +318,7 @@ export async function GET(req: Request) {
     fxUrl.searchParams.set("dateTo", dateTo);
 
     const fx = await fetchFD(fxUrl.toString(), apiKeySafe);
+
     if (!fx.ok) {
       return { ok: false, status: fx.status, data: fx.data };
     }
@@ -258,7 +338,7 @@ export async function GET(req: Request) {
         if (!utc) return null;
 
         const statusRaw = m?.status ? String(m.status) : "SCHEDULED";
-        const status = statusRaw.toUpperCase();
+        const status = normalizeStatus(statusRaw);
 
         const matchday = Number.isFinite(Number(m?.matchday))
           ? Number(m.matchday)
@@ -274,6 +354,7 @@ export async function GET(req: Request) {
         const homeTeamId = Number.isFinite(Number(m?.homeTeam?.id))
           ? Number(m.homeTeam.id)
           : null;
+
         const awayTeamId = Number.isFinite(Number(m?.awayTeam?.id))
           ? Number(m.awayTeam.id)
           : null;
@@ -285,7 +366,7 @@ export async function GET(req: Request) {
           id,
           competition_id: String(leagueCode),
           competition_name: String(leagueName),
-          utc_date: utc ?? nowIso,
+          utc_date: utc,
           status,
           matchday,
           season,
@@ -296,7 +377,6 @@ export async function GET(req: Request) {
           last_sync_at: nowIso,
         };
 
-        // Nie nadpisujemy istniejącego score nullem.
         if (hs !== null) row.home_score = hs;
         if (as !== null) row.away_score = as;
 
@@ -320,8 +400,8 @@ export async function GET(req: Request) {
   const results: any[] = [];
   const errors: any[] = [];
 
-  // 1) Jedno zbiorcze czytanie z DB
   let allDbMatches: DbMatchRow[] = [];
+
   try {
     allDbMatches = await readAllMatchesFromDb();
   } catch (e: any) {
@@ -333,34 +413,46 @@ export async function GET(req: Request) {
   }
 
   const matchesByLeague = new Map<string, DbMatchRow[]>();
+
   for (const lg of LEAGUES) {
     matchesByLeague.set(lg.code, []);
   }
+
   for (const m of allDbMatches) {
     const arr = matchesByLeague.get(m.competition_id) ?? [];
     arr.push(m);
     matchesByLeague.set(m.competition_id, arr);
   }
 
-  // 2) Refresh tylko dla lig, które nie mają żadnych meczów w DB
   for (const lg of LEAGUES) {
     const leagueMatches = matchesByLeague.get(lg.code) ?? [];
-    const needsRefresh = leagueMatches.length === 0;
+
+    const hasNoMatches = leagueMatches.length === 0;
+    const needsActiveRefresh = leagueMatches.some(shouldActivelyRefreshMatch);
+    const needsRefresh = hasNoMatches || needsActiveRefresh;
 
     if (!needsRefresh) continue;
 
     const fxRefreshKey = `fx_refresh:${lg.code}:${dateFrom}:${dateTo}`;
+    const refreshTtl = needsActiveRefresh
+      ? ACTIVE_FIXTURES_REFRESH_TTL_MS
+      : FIXTURES_REFRESH_TTL_MS;
+
     let canRefresh = true;
 
     const fxHit = await readCache(fxRefreshKey);
-    if (fxHit && fxHit.age < FIXTURES_REFRESH_TTL_MS) {
+    if (fxHit && fxHit.age < refreshTtl) {
       canRefresh = false;
     }
 
     if (!canRefresh) continue;
 
     const fx = await fetchAndUpsertMatches(lg.code, lg.name);
-    await writeCache(fxRefreshKey, { refreshedAt: new Date().toISOString() });
+
+    await writeCache(fxRefreshKey, {
+      refreshedAt: new Date().toISOString(),
+      reason: needsActiveRefresh ? "active_window" : "empty_league",
+    });
 
     if (!fx.ok) {
       errors.push({
@@ -372,7 +464,6 @@ export async function GET(req: Request) {
     }
   }
 
-  // 3) Drugie, końcowe czytanie z DB po ewentualnych refreshach
   try {
     allDbMatches = await readAllMatchesFromDb();
   } catch (e: any) {
@@ -384,16 +475,17 @@ export async function GET(req: Request) {
   }
 
   const finalMatchesByLeague = new Map<string, DbMatchRow[]>();
+
   for (const lg of LEAGUES) {
     finalMatchesByLeague.set(lg.code, []);
   }
+
   for (const m of allDbMatches) {
     const arr = finalMatchesByLeague.get(m.competition_id) ?? [];
     arr.push(m);
     finalMatchesByLeague.set(m.competition_id, arr);
   }
 
-  // 4) Jedno zbiorcze czytanie odds
   let oddsMap = new Map<
     number,
     { "1": number | null; X: number | null; "2": number | null }
@@ -412,7 +504,6 @@ export async function GET(req: Request) {
     });
   }
 
-  // 5) Składanie odpowiedzi bez standings
   for (const lg of LEAGUES) {
     const leagueMatches = finalMatchesByLeague.get(lg.code) ?? [];
 
@@ -425,13 +516,16 @@ export async function GET(req: Request) {
           "2": null,
         };
 
+        const displayStatus = inferDisplayStatus(m.status, m.utc_date);
+
         return {
           id: m.id,
           utcDate: m.utc_date,
-          status: m.status,
+          status: displayStatus,
+          rawStatus: m.status,
           live: {
-            isLive: isLiveStatus(m.status),
-            isFinished: isFinishedStatus(m.status),
+            isLive: isLiveStatus(displayStatus),
+            isFinished: isFinishedStatus(displayStatus),
           },
           matchday: m.matchday,
           season: m.season ? { startDate: `${m.season}-01-01` } : null,
