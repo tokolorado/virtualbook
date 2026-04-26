@@ -331,7 +331,14 @@ export async function POST(req: Request) {
       .in("competition_id", leagues)
       .gte("utc_date", lookbackIso)
       .lte("utc_date", lookaheadIso)
-      .in("status", ["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED", "LIVE", "FINISHED"])
+      .in("status", [
+        "SCHEDULED",
+        "TIMED",
+        "IN_PLAY",
+        "PAUSED",
+        "LIVE",
+        "FINISHED",
+      ])
       .order("utc_date", { ascending: true })
       .limit(batchLimit);
 
@@ -462,7 +469,8 @@ export async function POST(req: Request) {
           const upstreamHomeScore = pickMatchScore(upstreamMatch, "home");
           const upstreamAwayScore = pickMatchScore(upstreamMatch, "away");
 
-          const shouldClearScore = nextStatus === "SCHEDULED" || nextStatus === "TIMED";
+          const shouldClearScore =
+            nextStatus === "SCHEDULED" || nextStatus === "TIMED";
 
           const nextHomeScore =
             upstreamHomeScore !== null || shouldClearScore
@@ -528,10 +536,10 @@ export async function POST(req: Request) {
               .eq("id", localMatch.id);
           }
 
-          let settleOk = false;
-          let eloOk = false;
-
           if (nextStatus === "FINISHED") {
+            let settleOk = false;
+            let settleError: string | null = null;
+
             const { error: settleErr } = await supabase.rpc("settle_match", {
               p_match_id: localMatch.id,
             });
@@ -539,22 +547,37 @@ export async function POST(req: Request) {
             if (!settleErr) {
               settled += 1;
               settleOk = true;
+            } else {
+              settleError = settleErr.message;
             }
 
-            if (localMatch.status !== "FINISHED") {
-              const { error: eloErr } = await supabase.rpc("apply_elo_for_match", {
-                p_match_id: localMatch.id,
-              });
+            let eloOk = false;
+            let eloAppliedNow = false;
+            let eloAlreadyApplied = false;
+            let eloError: string | null = null;
 
-              if (!eloErr) {
-                eloApplied += 1;
-                eloOk = true;
+            const { data: eloData, error: eloErr } = await supabase.rpc(
+              "apply_elo_for_match",
+              {
+                p_match_id: localMatch.id,
               }
+            );
+
+            if (!eloErr) {
+              eloOk = true;
+              eloAppliedNow = eloData === true;
+              eloAlreadyApplied = eloData === false;
+
+              if (eloAppliedNow) {
+                eloApplied += 1;
+              }
+            } else {
+              eloError = eloErr.message;
             }
 
             results.push({
               matchId: localMatch.id,
-              ok: true,
+              ok: settleOk && eloOk,
               stage: "finished_processed",
               status: nextStatus,
               previousStatus: localMatch.status,
@@ -564,7 +587,11 @@ export async function POST(req: Request) {
               injuryTime: nextInjuryTime,
               updatedMatch: statusChanged || scoreChanged || minuteChanged,
               settled: settleOk,
-              eloApplied: eloOk,
+              settleError,
+              eloOk,
+              eloApplied: eloAppliedNow,
+              eloAlreadyApplied,
+              eloError,
             });
           } else {
             results.push({
