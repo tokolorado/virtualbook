@@ -10,9 +10,14 @@ export function requireCronSecret(req: Request) {
     );
   }
 
-  const got = req.headers.get("x-cron-secret") || "";
+  const gotCustom = req.headers.get("x-cron-secret") || "";
+  const gotAuth = req.headers.get("authorization") || "";
 
-  if (got !== expected) {
+  const ok =
+    gotCustom === expected ||
+    gotAuth === `Bearer ${expected}`;
+
+  if (!ok) {
     return NextResponse.json(
       { ok: false, error: "Unauthorized" },
       { status: 401 }

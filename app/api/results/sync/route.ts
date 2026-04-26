@@ -57,11 +57,13 @@ function extractWaitSecondsFromMessage(msg: string): number | null {
 
   const s = Number(m[1]);
   if (!Number.isFinite(s) || s < 0) return null;
+
   return s;
 }
 
 function isRateLimitMessage(msg: unknown): msg is string {
   if (typeof msg !== "string") return false;
+
   const s = msg.toLowerCase();
 
   return (
@@ -256,7 +258,25 @@ type SyncBody = {
   maxRetries?: number;
 };
 
-export async function POST(req: Request) {
+async function readSyncBody(req: Request): Promise<SyncBody | NextResponse> {
+  if (req.method === "GET") {
+    return {};
+  }
+
+  const raw = await req.text();
+
+  if (!raw.trim()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(raw) as SyncBody;
+  } catch {
+    return jsonError("Invalid JSON body", 400);
+  }
+}
+
+async function runResultsSync(req: Request) {
   const unauthorized = requireCronSecret(req);
   if (unauthorized) return unauthorized;
 
@@ -269,14 +289,13 @@ export async function POST(req: Request) {
   const supabase = supabaseAdmin() as any;
 
   try {
-    const raw = await req.text();
-    let body: SyncBody = {};
+    const parsedBody = await readSyncBody(req);
 
-    try {
-      body = raw ? (JSON.parse(raw) as SyncBody) : {};
-    } catch {
-      return jsonError("Invalid JSON body", 400);
+    if (parsedBody instanceof NextResponse) {
+      return parsedBody;
     }
+
+    const body = parsedBody;
 
     const leagues =
       Array.isArray(body.leagues) && body.leagues.length
@@ -526,7 +545,7 @@ export async function POST(req: Request) {
 
             updated += 1;
           } else {
-            await supabase
+            const { error: touchErr } = await supabase
               .from("matches")
               .update({
                 minute: nextMinute,
@@ -534,6 +553,17 @@ export async function POST(req: Request) {
                 last_sync_at: syncAt,
               })
               .eq("id", localMatch.id);
+
+            if (touchErr) {
+              results.push({
+                matchId: localMatch.id,
+                ok: false,
+                stage: "db_match_touch_failed",
+                error: touchErr.message,
+              });
+
+              continue;
+            }
           }
 
           if (nextStatus === "FINISHED") {
@@ -644,4 +674,12 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+}
+
+export async function POST(req: Request) {
+  return runResultsSync(req);
+}
+
+export async function GET(req: Request) {
+  return runResultsSync(req);
 }
