@@ -185,6 +185,7 @@ function mapFdStatusToLocal(fdStatus: string | null | undefined): string {
   if (s === "POSTPONED") return "POSTPONED";
   if (s === "SUSPENDED") return "SUSPENDED";
   if (s === "AWARDED") return "AWARDED";
+  if (s === "LIVE") return "IN_PLAY";
   if (s === "IN_PLAY") return "IN_PLAY";
   if (s === "PAUSED") return "PAUSED";
   if (s === "TIMED") return "TIMED";
@@ -330,7 +331,7 @@ export async function POST(req: Request) {
       .in("competition_id", leagues)
       .gte("utc_date", lookbackIso)
       .lte("utc_date", lookaheadIso)
-      .in("status", ["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED", "LIVE"])
+      .in("status", ["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED", "LIVE", "FINISHED"])
       .order("utc_date", { ascending: true })
       .limit(batchLimit);
 
@@ -532,7 +533,7 @@ export async function POST(req: Request) {
 
           if (nextStatus === "FINISHED") {
             const { error: settleErr } = await supabase.rpc("settle_match", {
-              p_match_id: String(localMatch.id),
+              p_match_id: localMatch.id,
             });
 
             if (!settleErr) {
@@ -540,13 +541,15 @@ export async function POST(req: Request) {
               settleOk = true;
             }
 
-            const { error: eloErr } = await supabase.rpc("apply_elo_for_match", {
-              p_match_id: localMatch.id,
-            });
+            if (localMatch.status !== "FINISHED") {
+              const { error: eloErr } = await supabase.rpc("apply_elo_for_match", {
+                p_match_id: localMatch.id,
+              });
 
-            if (!eloErr) {
-              eloApplied += 1;
-              eloOk = true;
+              if (!eloErr) {
+                eloApplied += 1;
+                eloOk = true;
+              }
             }
 
             results.push({
