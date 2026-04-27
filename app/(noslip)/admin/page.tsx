@@ -155,6 +155,8 @@ const NAV_ITEMS: Array<{
   },
 ];
 
+const ADMIN_HEALTH_REFRESH_MS = 30_000;
+
 const VIEW_META: Record<
   ViewKey,
   { title: string; description: string; helper: string }
@@ -1197,6 +1199,44 @@ export default function AdminPage() {
     const timer = window.setTimeout(() => setNotice(null), 5000);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    let cancelled = false;
+
+    const refreshOperationalStatus = async () => {
+      if (document.visibilityState !== "visible") return;
+
+      await Promise.allSettled([refreshStats(), refreshHealth()]);
+
+      if (!cancelled) {
+        setLastRefreshAt(new Date().toISOString());
+      }
+    };
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshOperationalStatus();
+      }
+    };
+
+    const timer = window.setInterval(
+      () => void refreshOperationalStatus(),
+      ADMIN_HEALTH_REFRESH_MS
+    );
+
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin]);
 
   const renderOverview = () => (
     <div className="space-y-5">
