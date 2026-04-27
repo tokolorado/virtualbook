@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { formatOdd, formatVB } from "@/lib/format";
+import { formatBetSelectionLabels } from "@/lib/odds/labels";
 import { supabase } from "@/lib/supabase";
 
 type BetStatus = "all" | "pending" | "won" | "lost" | "void";
@@ -80,16 +81,6 @@ function fmtDate(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
-}
-
-function pickLabel(pick: string, home: string, away: string) {
-  const p = String(pick || "").toUpperCase();
-
-  if (p === "1") return home;
-  if (p === "2") return away;
-  if (p === "X") return "Remis";
-
-  return pick;
 }
 
 function labelStatus(status: string) {
@@ -697,15 +688,24 @@ export default function BetsPage() {
                         </div>
                       ) : (
                         <div className="grid gap-3 xl:grid-cols-2">
-                          {items.map((item) => (
-                            <div
+                          {items.map((item) => {
+                            const labels = formatBetSelectionLabels({
+                              market: item.market,
+                              pick: item.pick,
+                              home: item.home,
+                              away: item.away,
+                            });
+
+                            return (
+                              <div
                               key={item.id}
                               className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4"
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <div className="text-xs text-neutral-500">
-                                    {item.league || "Liga"} • {item.market}
+                                    {item.league || "Liga"} •{" "}
+                                    {labels.marketLabel}
                                   </div>
 
                                   <div className="mt-2 text-sm font-semibold text-white">
@@ -731,11 +731,12 @@ export default function BetsPage() {
                               <div className="mt-3 rounded-2xl border border-neutral-800 bg-black/20 p-3 text-sm text-neutral-300">
                                 Typ:{" "}
                                 <span className="font-semibold text-white">
-                                  {pickLabel(item.pick, item.home, item.away)}
+                                  {labels.selectionLabel}
                                 </span>
                               </div>
-                            </div>
-                          ))}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

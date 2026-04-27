@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { formatBetSelectionLabels } from "@/lib/odds/labels";
 import { supabase } from "@/lib/supabase";
 
 type BetRow = {
@@ -37,16 +38,6 @@ type BetItemRow = {
 };
 
 const fmt2 = (n: number | null | undefined) => Number(n ?? 0).toFixed(2);
-
-function pickLabel(pick: string, home: string, away: string) {
-  const p = String(pick || "").toUpperCase();
-
-  if (p === "1") return home;
-  if (p === "2") return away;
-  if (p === "X") return "Remis";
-
-  return pick;
-}
 
 function badgeClass(status: string) {
   const s = String(status || "").toLowerCase();
@@ -156,9 +147,11 @@ export default function BetDetailsPage() {
       if (itemsErr) throw itemsErr;
 
       setItems((itemRows ?? []) as BetItemRow[]);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      setError(e?.message ?? "Nie udało się pobrać kuponu.");
+      setError(
+        e instanceof Error ? e.message : "Nie udało się pobrać kuponu."
+      );
       setBet(null);
       setItems([]);
     } finally {
@@ -299,8 +292,16 @@ export default function BetDetailsPage() {
               </thead>
 
               <tbody>
-                {items.map((it) => (
-                  <tr key={it.id} className="border-b border-neutral-800/70 hover:bg-neutral-950/40">
+                {items.map((it) => {
+                  const labels = formatBetSelectionLabels({
+                    market: it.market,
+                    pick: it.pick,
+                    home: it.home,
+                    away: it.away,
+                  });
+
+                  return (
+                    <tr key={it.id} className="border-b border-neutral-800/70 hover:bg-neutral-950/40">
                     <td className="px-4 py-3">
                       <div className="font-medium text-neutral-200">
                         {it.home} — {it.away}
@@ -313,9 +314,11 @@ export default function BetDetailsPage() {
                       </div>
                     </td>
 
-                    <td className="px-4 py-3 text-neutral-200">{it.market}</td>
                     <td className="px-4 py-3 text-neutral-200">
-                      {pickLabel(it.pick, it.home, it.away)}
+                      {labels.marketLabel}
+                    </td>
+                    <td className="px-4 py-3 text-neutral-200">
+                      {labels.selectionLabel}
                     </td>
 
                     <td className="px-4 py-3 text-right font-semibold text-neutral-200">
@@ -335,8 +338,9 @@ export default function BetDetailsPage() {
                     <td className="px-4 py-3 text-neutral-300 whitespace-nowrap">
                       {it.kickoff_at ? new Date(it.kickoff_at).toLocaleString() : "—"}
                     </td>
-                  </tr>
-                ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

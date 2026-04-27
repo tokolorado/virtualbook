@@ -6,6 +6,7 @@ import { formatOdd, formatVB } from "@/lib/format";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useBetSlip, type SlipItem } from "@/lib/BetSlipContext";
+import { formatBetSelectionLabels } from "@/lib/odds/labels";
 
 const MIN_STAKE = 1;
 const MAX_STAKE = 10000;
@@ -35,20 +36,21 @@ function parseStake(raw: string): number | null {
   return n;
 }
 
-function keyOf(it: SlipItem) {
-  return `${it.matchId}__${it.market}`;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function pickLabel(it: SlipItem) {
-  const p = String(it.pick || "").toUpperCase();
-
-  if (it.market === "1x2") {
-    if (p === "1") return it.home;
-    if (p === "2") return it.away;
-    if (p === "X") return "Remis";
+function messageFromUnknown(value: unknown, fallback: string) {
+  if (value instanceof Error) return value.message;
+  if (isRecord(value) && typeof value.message === "string") {
+    return value.message;
   }
+  if (typeof value === "string" && value.trim()) return value;
+  return fallback;
+}
 
-  return it.pick;
+function keyOf(it: SlipItem) {
+  return `${it.matchId}__${it.market}`;
 }
 
 function buildAttemptFingerprint(items: SlipItem[], stakeNum: number | null) {
@@ -316,23 +318,26 @@ export default function BetSlip({ variant }: { variant?: string }) {
       });
 
       const text = await r.text();
-      let j: any = null;
+      let j: Record<string, unknown> = {};
       try {
-        j = JSON.parse(text);
+        const parsed: unknown = JSON.parse(text);
+        j = isRecord(parsed) ? parsed : {};
       } catch {
         j = { error: text?.slice(0, 300) || "Non-JSON response" };
       }
 
       if (!r.ok) {
-        throw new Error(j?.error || `Błąd /api/bets (HTTP ${r.status})`);
+        throw new Error(
+          messageFromUnknown(j.error, `Błąd /api/bets (HTTP ${r.status})`)
+        );
       }
 
-      const betId = j?.betId ? String(j.betId) : null;
+      const betId = j.betId ? String(j.betId) : null;
 
-      const totalOddsServer = Number(j?.totalOdds ?? j?.total_odds);
-      const potentialWinServer = Number(j?.potentialWin ?? j?.potential_win);
+      const totalOddsServer = Number(j.totalOdds ?? j.total_odds);
+      const potentialWinServer = Number(j.potentialWin ?? j.potential_win);
       const balanceAfterServer = Number(
-        j?.balanceAfter ?? j?.balance_after ?? j?.balance_vb
+        j.balanceAfter ?? j.balance_after ?? j.balance_vb
       );
 
       const totalOddsFinal =
@@ -394,8 +399,8 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
       resetSlipState();
       setOpen(false);
-    } catch (e: any) {
-      const msg = e?.message || "Nie udało się postawić kuponu.";
+    } catch (e: unknown) {
+      const msg = messageFromUnknown(e, "Nie udało się postawić kuponu.");
       setSubmitError(msg);
       setShake(true);
       window.setTimeout(() => setShake(false), 260);
@@ -545,6 +550,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
             <div className="mt-3 max-h-[40vh] space-y-2 overflow-auto pr-1">
               {successModal.slipSnapshot.map((it) => {
                 const started = isStarted(it.kickoffUtc);
+                const labels = formatBetSelectionLabels({
+                  market: it.market,
+                  pick: it.pick,
+                  home: it.home,
+                  away: it.away,
+                });
+
                 return (
                   <div
                     key={`${it.matchId}__${it.market}`}
@@ -561,11 +573,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
                     <div className="mt-2 text-sm text-neutral-200">
                       Rynek:{" "}
                       <span className="font-semibold text-neutral-100">
-                        {it.market}
+                        {labels.marketLabel}
                       </span>{" "}
                       • Typ:{" "}
                       <span className="font-semibold text-neutral-100">
-                        {pickLabel(it)}
+                        {labels.selectionLabel}
                       </span>
                     </div>
 
@@ -719,6 +731,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
             const k = keyOf(it);
             const flash = flashKey === k;
             const started = isStarted(it.kickoffUtc);
+            const labels = formatBetSelectionLabels({
+              market: it.market,
+              pick: it.pick,
+              home: it.home,
+              away: it.away,
+            });
 
             return (
               <div
@@ -750,13 +768,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
                     <div>
                       Rynek:{" "}
                       <span className="font-semibold text-neutral-100">
-                        {it.market}
+                        {labels.marketLabel}
                       </span>
                     </div>
                     <div>
                       Typ:{" "}
                       <span className="font-semibold text-neutral-100">
-                        {pickLabel(it)}
+                        {labels.selectionLabel}
                       </span>
                     </div>
                   </div>
