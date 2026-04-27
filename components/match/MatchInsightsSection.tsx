@@ -2282,14 +2282,6 @@ export default function MatchInsightsSection({
               onClick={() => setActiveTab(tab.key)}
             />
           ))}
-
-          <button
-            type="button"
-            onClick={() => setRefreshTick((v) => v + 1)}
-            className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-neutral-900"
-          >
-            Odśwież
-          </button>
         </div>
       </div>
 
