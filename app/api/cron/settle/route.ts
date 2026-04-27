@@ -21,14 +21,181 @@ type PendingBetBackfillResult = {
   error: string | null;
 };
 
-function json(status: number, body: any) {
+type MatchResultsBackfillResult = {
+  checked: number;
+  missing: number;
+  inserted: number;
+  skipped: number;
+  matchIds: number[];
+};
+
+type MatchResultIdRow = {
+  match_id: number | string | null;
+};
+
+type MatchRepairSourceRow = {
+  id: number | string | null;
+  utc_date: string | null;
+  home_score: number | string | null;
+  away_score: number | string | null;
+};
+
+type MatchResultRepairRow = {
+  match_id: number;
+  status: "FINISHED";
+  home_score: number;
+  away_score: number;
+  ht_home_score: null;
+  ht_away_score: null;
+  sh_home_score: null;
+  sh_away_score: null;
+  home_goals_ht: null;
+  away_goals_ht: null;
+  started_at: string | null;
+  finished_at: string;
+  updated_at: string;
+};
+
+type CandidateRow = {
+  match_id_bigint: number | string | null;
+};
+
+type FinishedMatchRow = {
+  id: number | string | null;
+};
+
+type SettleMatchOnceResponse = {
+  skipped?: boolean;
+  reason?: string | null;
+};
+
+type BetIdRow = {
+  bet_id: string | null;
+};
+
+type PendingBetRow = {
+  id: string | null;
+};
+
+type ResolvedBetItemRow = {
+  bet_id?: string | null;
+  settled?: boolean | null;
+  result?: string | null;
+};
+
+function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
-function isResolvedBetItem(row: any) {
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isResolvedBetItem(row: ResolvedBetItemRow) {
   const settled = row?.settled === true;
   const result = String(row?.result ?? "").toLowerCase();
   return settled && (result === "won" || result === "lost" || result === "void");
+}
+
+async function backfillMissingMatchResults(
+  supabase: ReturnType<typeof supabaseAdmin>,
+  matchIds: number[],
+  nowIso: string
+): Promise<MatchResultsBackfillResult> {
+  const uniqueIds = Array.from(
+    new Set(matchIds.filter((matchId) => Number.isFinite(matchId)))
+  );
+
+  if (!uniqueIds.length) {
+    return {
+      checked: 0,
+      missing: 0,
+      inserted: 0,
+      skipped: 0,
+      matchIds: [],
+    };
+  }
+
+  const { data: existingRows, error: existingErr } = await supabase
+    .from("match_results")
+    .select("match_id")
+    .in("match_id", uniqueIds);
+
+  if (existingErr) throw existingErr;
+
+  const existing = new Set(
+    ((existingRows ?? []) as MatchResultIdRow[])
+      .map((row) => Number(row.match_id))
+      .filter((matchId: number) => Number.isFinite(matchId))
+  );
+
+  const missingIds = uniqueIds.filter((matchId) => !existing.has(matchId));
+
+  if (!missingIds.length) {
+    return {
+      checked: uniqueIds.length,
+      missing: 0,
+      inserted: 0,
+      skipped: 0,
+      matchIds: [],
+    };
+  }
+
+  const { data: matchRows, error: matchErr } = await supabase
+    .from("matches")
+    .select("id,status,utc_date,home_score,away_score")
+    .in("id", missingIds)
+    .eq("status", "FINISHED");
+
+  if (matchErr) throw matchErr;
+
+  const repairRows: MatchResultRepairRow[] = ((matchRows ??
+    []) as MatchRepairSourceRow[])
+    .flatMap((row) => {
+      const matchId = Number(row.id);
+      const homeScore = Number(row.home_score);
+      const awayScore = Number(row.away_score);
+
+      if (
+        !Number.isFinite(matchId) ||
+        !Number.isFinite(homeScore) ||
+        !Number.isFinite(awayScore)
+      ) {
+        return [];
+      }
+
+      return [{
+        match_id: matchId,
+        status: "FINISHED",
+        home_score: homeScore,
+        away_score: awayScore,
+        ht_home_score: null,
+        ht_away_score: null,
+        sh_home_score: null,
+        sh_away_score: null,
+        home_goals_ht: null,
+        away_goals_ht: null,
+        started_at: row.utc_date ?? null,
+        finished_at: nowIso,
+        updated_at: nowIso,
+      }];
+    });
+
+  if (repairRows.length > 0) {
+    const { error: insertErr } = await supabase
+      .from("match_results")
+      .upsert(repairRows, { onConflict: "match_id" });
+
+    if (insertErr) throw insertErr;
+  }
+
+  return {
+    checked: uniqueIds.length,
+    missing: missingIds.length,
+    inserted: repairRows.length,
+    skipped: missingIds.length - repairRows.length,
+    matchIds: repairRows.map((row) => Number(row.match_id)),
+  };
 }
 
 export async function POST(req: Request) {
@@ -59,6 +226,7 @@ export async function POST(req: Request) {
     }
 
     const supabase = supabaseAdmin();
+    const nowIso = new Date().toISOString();
 
     const MATCH_BATCH_LIMIT = Number(process.env.SETTLE_BATCH_LIMIT ?? "25");
     const BET_BACKFILL_LIMIT = Number(process.env.SETTLE_BET_BACKFILL_LIMIT ?? "100");
@@ -88,8 +256,8 @@ export async function POST(req: Request) {
 
     const candidateIds = Array.from(
       new Set(
-        (candRows ?? [])
-          .map((r: any) => Number(r.match_id_bigint))
+        ((candRows ?? []) as CandidateRow[])
+          .map((row) => Number(row.match_id_bigint))
           .filter((x: number) => Number.isFinite(x))
       )
     );
@@ -107,12 +275,18 @@ export async function POST(req: Request) {
 
       if (finErr) throw finErr;
 
-      matchIdsToSettle = (finishedRows ?? [])
-        .map((m: any) => Number(m.id))
+      matchIdsToSettle = ((finishedRows ?? []) as FinishedMatchRow[])
+        .map((match) => Number(match.id))
         .filter((x: number) => Number.isFinite(x));
     }
 
     const matchResults: MatchSettleResult[] = [];
+    const matchResultsBackfill = await backfillMissingMatchResults(
+      supabase,
+      matchIdsToSettle,
+      nowIso
+    );
+
     let matchesSettledOk = 0;
     let matchesSkipped = 0;
 
@@ -124,8 +298,9 @@ export async function POST(req: Request) {
 
         if (smErr) throw smErr;
 
-        const skipped = Boolean((smData as any)?.skipped);
-        const reason = (smData as any)?.reason ?? null;
+        const settleResult = (smData ?? {}) as SettleMatchOnceResponse;
+        const skipped = settleResult.skipped === true;
+        const reason = settleResult.reason ?? null;
 
         if (skipped) {
           matchesSkipped++;
@@ -152,7 +327,11 @@ export async function POST(req: Request) {
         if (betErr) throw betErr;
 
         const betIds = Array.from(
-          new Set((betRows ?? []).map((x: any) => x.bet_id).filter(Boolean))
+          new Set(
+            ((betRows ?? []) as BetIdRow[])
+              .map((row) => row.bet_id)
+              .filter((betId): betId is string => Boolean(betId))
+          )
         );
 
         let calls = 0;
@@ -177,11 +356,11 @@ export async function POST(req: Request) {
         });
 
         matchesSettledOk++;
-      } catch (e: any) {
+      } catch (error: unknown) {
         matchResults.push({
           matchId,
           ok: false,
-          error: e?.message ?? String(e),
+          error: errorMessage(error),
           betsTouched: 0,
           betsSettleCalls: 0,
         });
@@ -200,9 +379,9 @@ export async function POST(req: Request) {
 
     if (pendingResolvedErr) throw pendingResolvedErr;
 
-    const pendingBetIds = (pendingResolvedBets ?? [])
-      .map((b: any) => b.id)
-      .filter(Boolean);
+    const pendingBetIds = ((pendingResolvedBets ?? []) as PendingBetRow[])
+      .map((bet) => bet.id)
+      .filter((betId): betId is string => Boolean(betId));
 
     const backfillResults: PendingBetBackfillResult[] = [];
 
@@ -216,8 +395,8 @@ export async function POST(req: Request) {
 
       const byBet = new Map<string, { total: number; resolved: number }>();
 
-      for (const row of backfillRows ?? []) {
-        const betId = String((row as any).bet_id);
+      for (const row of (backfillRows ?? []) as ResolvedBetItemRow[]) {
+        const betId = String(row.bet_id);
         const current = byBet.get(betId) ?? { total: 0, resolved: 0 };
 
         current.total += 1;
@@ -248,11 +427,11 @@ export async function POST(req: Request) {
             ok: true,
             error: null,
           });
-        } catch (e: any) {
+        } catch (error: unknown) {
           backfillResults.push({
             betId: String(betId),
             ok: false,
-            error: e?.message ?? String(e),
+            error: errorMessage(error),
           });
         }
       }
@@ -262,6 +441,7 @@ export async function POST(req: Request) {
       ok: true,
       job: "settle",
       requestedMatches: matchIdsToSettle.length,
+      matchResultsBackfill,
       matchesSettledOk,
       matchesSkipped,
       pendingBetBackfillChecked: pendingBetIds.length,
@@ -273,6 +453,7 @@ export async function POST(req: Request) {
     return json(200, {
       ok: true,
       requestedMatches: matchIdsToSettle.length,
+      matchResultsBackfill,
       matchesSettledOk,
       matchesSkipped,
       pendingBetBackfillChecked: pendingBetIds.length,
@@ -280,9 +461,9 @@ export async function POST(req: Request) {
       matchResults,
       backfillResults,
     });
-  } catch (e: any) {
-    await cronLogError(logId, e);
-    return json(500, { ok: false, error: e?.message ?? String(e) });
+  } catch (error: unknown) {
+    await cronLogError(logId, error);
+    return json(500, { ok: false, error: errorMessage(error) });
   }
 }
 
