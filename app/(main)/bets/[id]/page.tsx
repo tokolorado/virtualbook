@@ -53,7 +53,7 @@ function statusLabel(status: string) {
   if (s === "won") return "WYGRANY";
   if (s === "lost") return "PRZEGRANY";
   if (s === "void") return "ZWROT (VOID)";
-  if (s === "pending") return "OCZEKUJE";
+  if (s === "pending") return "W GRZE";
   return String(status || "").toUpperCase();
 }
 

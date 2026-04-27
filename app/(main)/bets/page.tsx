@@ -9,6 +9,14 @@ import { supabase } from "@/lib/supabase";
 
 type BetStatus = "all" | "pending" | "won" | "lost" | "void";
 
+const STATUS_FILTER_LABELS: Record<BetStatus, string> = {
+  all: "Wszystkie",
+  pending: "W grze",
+  won: "Wygrane",
+  lost: "Przegrane",
+  void: "Zwroty",
+};
+
 type Bet = {
   id: string;
   user_id: string;
@@ -90,7 +98,7 @@ function labelStatus(status: string) {
   if (s === "lost") return "PRZEGRANY";
   if (s === "void") return "ZWROT";
 
-  return "OCZEKUJE";
+  return "W GRZE";
 }
 
 function statusTone(status: string): "green" | "red" | "yellow" | "neutral" {
@@ -404,6 +412,7 @@ export default function BetsPage() {
       const haystack = [
         bet.id,
         bet.status,
+        labelStatus(bet.status),
         String(bet.stake),
         String(bet.total_odds),
         String(bet.potential_win),
@@ -464,7 +473,7 @@ export default function BetsPage() {
 
               <div className="mt-5 flex flex-wrap gap-2">
                 <SmallPill tone="blue">Kupony: {stats.total}</SmallPill>
-                <SmallPill tone="yellow">Oczekujące: {stats.pending}</SmallPill>
+                <SmallPill tone="yellow">W grze: {stats.pending}</SmallPill>
                 <SmallPill tone="green">Wygrane: {stats.won}</SmallPill>
                 <SmallPill tone="red">Przegrane: {stats.lost}</SmallPill>
                 {lastLoadedAt ? (
@@ -492,7 +501,7 @@ export default function BetsPage() {
                 value={`${stats.balance >= 0 ? "+" : ""}${formatVB(
                   stats.balance
                 )} VB`}
-                hint="Won/void/lost bez pending"
+                hint="Bez kuponów w grze"
                 tone={
                   stats.balance > 0
                     ? "green"
@@ -525,7 +534,7 @@ export default function BetsPage() {
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="np. Fulham, Premier League, pending..."
+              placeholder="np. Fulham, Premier League, w grze..."
               className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-neutral-600"
             />
           </div>
@@ -548,7 +557,7 @@ export default function BetsPage() {
                         : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
                     )}
                   >
-                    {status === "all" ? "Wszystkie" : status.toUpperCase()}
+                    {STATUS_FILTER_LABELS[status]}
                   </button>
                 )
               )}
@@ -766,7 +775,7 @@ export default function BetsPage() {
                     hint={`z ${bets.length} wszystkich`}
                   />
                   <StatCard
-                    label="Oczekujące"
+                    label="W grze"
                     value={stats.pending}
                     tone={stats.pending > 0 ? "yellow" : "neutral"}
                   />
