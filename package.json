@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "tsc -p tsconfig.test.json && node .test-dist/tests/run.js",
     "lint": "eslint",
     "cron:local": "tsx --env-file=.env.local scripts/cron-local.ts",
     "sofascore:worker": "tsx --env-file=.env.local scripts/sofascoreMappingWorker.ts"
@@ -30,4 +31,3 @@
   }
   
 }
-

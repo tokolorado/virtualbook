@@ -37,10 +37,10 @@ type SystemHealth = {
     missingPayoutLedger: number;
   };
   samples?: {
-    stuckMatches: any[];
-    finishedMatchesWithUnsettledItems: any[];
-    pendingButAllItemsSettled: any[];
-    missingPayoutLedger: any[];
+    stuckMatches: unknown[];
+    finishedMatchesWithUnsettledItems: unknown[];
+    pendingButAllItemsSettled: unknown[];
+    missingPayoutLedger: unknown[];
   };
 };
 
@@ -69,7 +69,7 @@ type AuditLog = {
   admin_user_id: string;
   action: string;
   target_user_id: string | null;
-  details: any;
+  details: Record<string, unknown>;
   created_at: string;
 };
 
@@ -84,7 +84,7 @@ type SystemCheckRun = {
   checks_total: number;
   checks_passed: number;
   checks_failed: number;
-  summary: any;
+  summary: Record<string, unknown>;
   error: string | null;
 };
 
@@ -226,6 +226,10 @@ function fmtDateCompact(v?: string | null) {
 
 function fmtPct(v?: number | null) {
   return `${Number(v ?? 0).toFixed(2)}%`;
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function getNoticeToneClass(tone: NoticeTone) {
@@ -537,7 +541,7 @@ export default function AdminPage() {
   const [autoLoading, setAutoLoading] = useState(false);
 
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [autoResult, setAutoResult] = useState<any>(null);
+  const [autoResult, setAutoResult] = useState<unknown>(null);
 
   const [selectedUserId, setSelectedUserId] = useState("");
   const [manualAmount, setManualAmount] = useState("");
@@ -546,7 +550,7 @@ export default function AdminPage() {
   const [surpriseEmail, setSurpriseEmail] = useState("");
   const [surpriseMessage, setSurpriseMessage] = useState("");
   const [sendingSurprise, setSendingSurprise] = useState(false);
-  const [surpriseResult, setSurpriseResult] = useState<any>(null);
+  const [surpriseResult, setSurpriseResult] = useState<unknown>(null);
 
   const [activeView, setActiveView] = useState<ViewKey>("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -862,9 +866,9 @@ export default function AdminPage() {
 
       setSystemCheckRun((data.run ?? null) as SystemCheckRun | null);
       setSystemCheckResults((data.results ?? []) as SystemCheckResult[]);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setSystemCheckError(
-        e?.message ?? "Nie udało się pobrać wyników System Check."
+        getErrorMessage(e, "Nie udało się pobrać wyników System Check.")
       );
       setSystemCheckRun(null);
       setSystemCheckResults([]);
@@ -898,8 +902,11 @@ export default function AdminPage() {
         message: "System Check zakończony ✅",
       });
       setActiveView("diagnostics");
-    } catch (e: any) {
-      const message = e?.message ?? "Nie udało się uruchomić System Check.";
+    } catch (e: unknown) {
+      const message = getErrorMessage(
+        e,
+        "Nie udało się uruchomić System Check."
+      );
       setSystemCheckError(message);
       setNotice({
         tone: "error",
@@ -914,15 +921,36 @@ export default function AdminPage() {
     const ok = confirm(`Rozliczyć kupon jako: ${status.toUpperCase()} ?`);
     if (!ok) return;
 
-    const { error } = await supabase.rpc("settle_bet", {
-      p_bet_id: betId,
-      p_status: status,
-    } as any);
+    try {
+      const token = await getAccessToken();
 
-    if (error) {
+      const res = await fetch("/api/admin/force-settle-bet", {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ betId, status }),
+      });
+
+      const data = (await res.json().catch(() => null)) as {
+        error?: string;
+        detail?: string;
+      } | null;
+
+      if (!res.ok) {
+        throw new Error(
+          data?.detail ?? data?.error ?? "Nie udaÅ‚o siÄ™ rozliczyÄ‡ kuponu."
+        );
+      }
+    } catch (e: unknown) {
       setNotice({
         tone: "error",
-        message: error.message,
+        message:
+          e instanceof Error
+            ? e.message
+            : "Nie udaÅ‚o siÄ™ rozliczyÄ‡ kuponu.",
       });
       return;
     }
@@ -982,7 +1010,7 @@ export default function AdminPage() {
         loadAuditLogs(),
         loadSystemCheckLatest(),
       ]);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
       setNotice({
         tone: "error",
@@ -1142,10 +1170,10 @@ export default function AdminPage() {
       });
 
       await Promise.allSettled([loadUsers(), loadAuditLogs()]);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setNotice({
         tone: "error",
-        message: e?.message ?? "Błąd akcji admina.",
+        message: getErrorMessage(e, "Błąd akcji admina."),
       });
     } finally {
       setActionLoading(null);

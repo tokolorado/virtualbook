@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "incremental": false,
+    "lib": ["ES2022", "DOM"],
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "noEmit": false,
+    "outDir": ".test-dist",
+    "rootDir": ".",
+    "target": "ES2022",
+    "tsBuildInfoFile": ".test-dist/tsconfig.tsbuildinfo",
+    "types": ["node"]
+  },
+  "include": [
+    "tests/**/*.ts",
+    "lib/odds/labels.ts",
+    "lib/requireCronSecret.ts"
+  ]
+}

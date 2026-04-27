@@ -7,12 +7,47 @@ type RouteContext = {
   }>;
 };
 
+type PublicLeaderboardRow = {
+  id: string;
+  username: string | null;
+  balance_vb: number | string | null;
+  bets_count: number | string | null;
+  won_bets: number | string | null;
+  lost_bets: number | string | null;
+  void_bets: number | string | null;
+  profit: number | string | null;
+  roi: number | string | null;
+  winrate: number | string | null;
+};
+
+const PUBLIC_PROFILE_FIELDS = [
+  "id",
+  "username",
+  "balance_vb",
+  "bets_count",
+  "won_bets",
+  "lost_bets",
+  "void_bets",
+  "profit",
+  "roi",
+  "winrate",
+].join(",");
+
+function numberValue(value: unknown) {
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Server error";
+}
+
 export async function GET(_req: Request, context: RouteContext) {
   try {
     const { username } = await context.params;
     const decodedUsername = decodeURIComponent(username).trim();
 
-    if (!decodedUsername) {
+    if (!decodedUsername || decodedUsername.length > 40) {
       return NextResponse.json(
         { ok: false, error: "Missing username" },
         { status: 400 }
@@ -21,15 +56,21 @@ export async function GET(_req: Request, context: RouteContext) {
 
     const supabase = createClient(
       process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
     );
 
     const { data, error } = await supabase
       .from("leaderboard_global")
-      .select("*")
+      .select(PUBLIC_PROFILE_FIELDS)
       .ilike("username", decodedUsername)
       .limit(1)
-      .maybeSingle();
+      .maybeSingle<PublicLeaderboardRow>();
 
     if (error) {
       return NextResponse.json(
@@ -50,19 +91,19 @@ export async function GET(_req: Request, context: RouteContext) {
       profile: {
         id: String(data.id),
         username: String(data.username ?? decodedUsername),
-        balance_vb: Number(data.balance_vb ?? 0),
-        bets_count: Number(data.bets_count ?? 0),
-        won_bets: Number(data.won_bets ?? 0),
-        lost_bets: Number(data.lost_bets ?? 0),
-        void_bets: Number(data.void_bets ?? 0),
-        profit: Number(data.profit ?? 0),
-        roi: Number(data.roi ?? 0),
-        winrate: Number(data.winrate ?? 0),
+        balance_vb: numberValue(data.balance_vb),
+        bets_count: numberValue(data.bets_count),
+        won_bets: numberValue(data.won_bets),
+        lost_bets: numberValue(data.lost_bets),
+        void_bets: numberValue(data.void_bets),
+        profit: numberValue(data.profit),
+        roi: numberValue(data.roi),
+        winrate: numberValue(data.winrate),
       },
     });
-  } catch (e: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { ok: false, error: e?.message ?? "Server error" },
+      { ok: false, error: errorMessage(error) },
       { status: 500 }
     );
   }

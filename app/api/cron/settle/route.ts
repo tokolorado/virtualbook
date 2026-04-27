@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
+import { getCronSecretAuthResult } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -204,25 +205,14 @@ export async function POST(req: Request) {
   try {
     logId = await cronLogStart("settle", "github-actions");
 
-    const cronSecret = process.env.CRON_SECRET;
-    const gotSecret = req.headers.get("x-cron-secret") || "";
-
-    if (!cronSecret) {
+    const auth = getCronSecretAuthResult(req);
+    if (!auth.ok) {
       await cronLogSuccess(logId, {
         ok: false,
         job: "settle",
-        reason: "missing_cron_secret_env",
+        reason: auth.reason,
       });
-      return json(500, { ok: false, error: "Missing CRON_SECRET in env" });
-    }
-
-    if (gotSecret !== cronSecret) {
-      await cronLogSuccess(logId, {
-        ok: false,
-        job: "settle",
-        reason: "unauthorized",
-      });
-      return json(401, { ok: false, error: "Unauthorized" });
+      return json(auth.status, { ok: false, error: auth.error });
     }
 
     const supabase = supabaseAdmin();

@@ -1,28 +1,73 @@
+import { createHash, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
 
-export function requireCronSecret(req: Request) {
-  const expected = process.env.CRON_SECRET;
+export type CronSecretAuthResult =
+  | { ok: true; secret: string }
+  | {
+      ok: false;
+      status: 401 | 500;
+      error: string;
+      reason: "missing_cron_secret_env" | "unauthorized";
+    };
 
+function digest(value: string) {
+  return createHash("sha256").update(value, "utf8").digest();
+}
+
+export function timingSafeStringEqual(a: string, b: string) {
+  return timingSafeEqual(digest(a), digest(b));
+}
+
+function bearerToken(value: string | null) {
+  const header = value ?? "";
+  return header.startsWith("Bearer ") ? header.slice(7) : "";
+}
+
+export function checkCronSecretHeaders(
+  headers: Pick<Headers, "get">,
+  expected: string | undefined
+): CronSecretAuthResult {
   if (!expected) {
-    return NextResponse.json(
-      { ok: false, error: "Missing CRON_SECRET in env" },
-      { status: 500 }
-    );
+    return {
+      ok: false,
+      status: 500,
+      error: "Missing CRON_SECRET in env",
+      reason: "missing_cron_secret_env",
+    };
   }
 
-  const gotCustom = req.headers.get("x-cron-secret") || "";
-  const gotAuth = req.headers.get("authorization") || "";
+  const candidates = [
+    headers.get("x-cron-secret") ?? "",
+    bearerToken(headers.get("authorization")),
+  ];
 
-  const ok =
-    gotCustom === expected ||
-    gotAuth === `Bearer ${expected}`;
+  const ok = candidates.some((candidate) =>
+    candidate ? timingSafeStringEqual(candidate, expected) : false
+  );
 
   if (!ok) {
-    return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 }
-    );
+    return {
+      ok: false,
+      status: 401,
+      error: "Unauthorized",
+      reason: "unauthorized",
+    };
   }
 
-  return null;
+  return { ok: true, secret: expected };
+}
+
+export function getCronSecretAuthResult(req: Request) {
+  return checkCronSecretHeaders(req.headers, process.env.CRON_SECRET);
+}
+
+export function requireCronSecret(req: Request) {
+  const auth = getCronSecretAuthResult(req);
+
+  if (auth.ok) return null;
+
+  return NextResponse.json(
+    { ok: false, error: auth.error },
+    { status: auth.status }
+  );
 }

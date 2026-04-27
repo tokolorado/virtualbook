@@ -3,6 +3,7 @@
 import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
+import { getCronSecretAuthResult } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,12 +15,81 @@ const SUPPORTED_COMP_CODES = new Set(["CL", "PL", "BL1", "FL1", "SA", "PD", "WC"
 
 const HORIZON_DAYS = 14;
 
+type JsonRecord = Record<string, unknown>;
+type SupabaseAdminClient = ReturnType<typeof supabaseAdmin>;
+
+type FootballDataTeam = {
+  id?: unknown;
+  name?: unknown;
+};
+
+type FootballDataScoreSide = {
+  home?: unknown;
+  away?: unknown;
+};
+
+type FootballDataMatch = {
+  id?: unknown;
+  status?: unknown;
+  utcDate?: unknown;
+  competition?: { code?: unknown } | null;
+  score?: {
+    fullTime?: FootballDataScoreSide | null;
+    halfTime?: FootballDataScoreSide | null;
+  } | null;
+  homeTeam?: FootballDataTeam | null;
+  awayTeam?: FootballDataTeam | null;
+};
+
+type FootballDataMatchesResponse = JsonRecord & {
+  matches?: FootballDataMatch[];
+};
+
+type FootballDataMatchResponse = FootballDataMatch & {
+  match?: FootballDataMatch;
+};
+
+type MatchPatch = Record<string, string | number | boolean | null>;
+
+type MatchResultPatch = {
+  match_id: number;
+  status: string;
+  home_score: number | null;
+  away_score: number | null;
+  ht_home_score: number | null;
+  ht_away_score: number | null;
+  sh_home_score: number | null;
+  sh_away_score: number | null;
+  home_goals_ht: number | null;
+  away_goals_ht: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+};
+
+type DbMatchIdRow = {
+  id: number | string | null;
+};
+
+type CandidateMatchRow = {
+  id: number | string | null;
+  status: string | null;
+};
+
+type UpsertOneMatchResult = {
+  updated: boolean;
+  matchId: number | null;
+  status: string | null;
+  compCode?: string;
+  skipped?: "unsupported_competition";
+};
+
 function utcYmdFromNowPlusDays(days: number) {
   const dt = new Date(Date.now() + days * 86400_000);
   return dt.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 }
 
-function jsonError(message: string, status = 400, extra?: any) {
+function jsonError(message: string, status = 400, extra?: unknown) {
   return NextResponse.json({ error: message, extra }, { status });
 }
 
@@ -35,7 +105,18 @@ function extractWaitSeconds(msg: string): number | null {
   return s;
 }
 
-async function fdFetch(path: string, opts?: { maxRetries?: number }) {
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Server error";
+}
+
+async function fdFetch<T extends JsonRecord>(
+  path: string,
+  opts?: { maxRetries?: number }
+): Promise<T> {
   const token = process.env.FOOTBALL_DATA_TOKEN || process.env.FOOTBALL_DATA_API_KEY;
 
   if (!token) throw new Error("Missing FOOTBALL_DATA_TOKEN");
@@ -50,20 +131,22 @@ async function fdFetch(path: string, opts?: { maxRetries?: number }) {
     });
 
     const text = await r.text();
-    let j: any = null;
+    let j: JsonRecord = {};
     try {
-      j = JSON.parse(text);
+      const parsed: unknown = JSON.parse(text);
+      j = isRecord(parsed) ? parsed : { raw: parsed };
     } catch {
       j = { raw: text?.slice(0, 500) };
     }
 
-    if (r.ok) return j;
+    if (r.ok) return j as T;
 
-    const msg =
+    const msg = String(
       j?.message ||
       j?.error ||
       (typeof j?.raw === "string" ? j.raw : "") ||
-      `football-data error (HTTP ${r.status})`;
+      `football-data error (HTTP ${r.status})`
+    );
 
     const waitSecs = extractWaitSeconds(String(msg));
     const canRetry = attempt < maxRetries;
@@ -84,7 +167,7 @@ async function fdFetch(path: string, opts?: { maxRetries?: number }) {
   throw new Error("football-data error: retries exhausted");
 }
 
-function toIsoOrNull(v: any): string | null {
+function toIsoOrNull(v: unknown): string | null {
   if (!v) return null;
   const dt = new Date(String(v));
   const ms = dt.getTime();
@@ -93,14 +176,14 @@ function toIsoOrNull(v: any): string | null {
 }
 
 // ✅ FIX: null/undefined NIE może robić się 0
-function toIntOrNull(v: any): number | null {
+function toIntOrNull(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
 
 // ✅ wyliczenie goli w 2. połowie
-function secondHalfOrNull(full: any, half: any): number | null {
+function secondHalfOrNull(full: unknown, half: unknown): number | null {
   const ft = toIntOrNull(full);
   const ht = toIntOrNull(half);
   if (ft == null || ht == null) return null;
@@ -134,7 +217,7 @@ function normalizeStatus(raw: string): string {
   return "TIMED";
 }
 
-function isSupportedCompetition(match: any) {
+function isSupportedCompetition(match: FootballDataMatch) {
   const code = String(match?.competition?.code ?? "").toUpperCase().trim();
   return SUPPORTED_COMP_CODES.has(code);
 }
@@ -166,7 +249,11 @@ function canonicalCompetitionName(code: string): string | null {
   return map[code] ?? null;
 }
 
-async function upsertOneMatchFromFD(sb: any, match: any, nowIso: string) {
+async function upsertOneMatchFromFD(
+  sb: SupabaseAdminClient,
+  match: FootballDataMatch,
+  nowIso: string
+): Promise<UpsertOneMatchResult> {
   const matchId = Number(match?.id);
   if (!Number.isFinite(matchId)) return { updated: false, matchId: null, status: null };
 
@@ -186,18 +273,22 @@ async function upsertOneMatchFromFD(sb: any, match: any, nowIso: string) {
   const compCode = String(match?.competition?.code ?? "").toUpperCase().trim();
   const compName = canonicalCompetitionName(compCode);
 
-  const homeTeam = typeof match?.homeTeam?.name === "string" ? match.homeTeam.name : null;
-  const awayTeam = typeof match?.awayTeam?.name === "string" ? match.awayTeam.name : null;
+  const homeTeamRaw = match.homeTeam;
+  const awayTeamRaw = match.awayTeam;
+  const homeTeam = typeof homeTeamRaw?.name === "string" ? homeTeamRaw.name : null;
+  const awayTeam = typeof awayTeamRaw?.name === "string" ? awayTeamRaw.name : null;
+  const homeTeamIdRaw = homeTeamRaw?.id;
+  const awayTeamIdRaw = awayTeamRaw?.id;
 
   const homeTeamId =
-    Number.isFinite(Number(match?.homeTeam?.id)) ? Number(match.homeTeam.id) : null;
+    Number.isFinite(Number(homeTeamIdRaw)) ? Number(homeTeamIdRaw) : null;
   const awayTeamId =
-    Number.isFinite(Number(match?.awayTeam?.id)) ? Number(match.awayTeam.id) : null;
+    Number.isFinite(Number(awayTeamIdRaw)) ? Number(awayTeamIdRaw) : null;
 
   const bettingClosed = computeBettingClosed(status, utcDateIso);
 
   // ✅ matches: upsert (żeby działało nawet gdy meczu nie ma w DB)
-  const patchMatches: any = {
+  const patchMatches: MatchPatch = {
     id: matchId,
     status,
     last_sync_at: nowIso,
@@ -243,7 +334,7 @@ async function upsertOneMatchFromFD(sb: any, match: any, nowIso: string) {
   const shHome = canWriteScoreToResults ? secondHalfOrNull(ftHome, htHome) : null;
   const shAway = canWriteScoreToResults ? secondHalfOrNull(ftAway, htAway) : null;
 
-  const resRow: any = {
+  const resRow: MatchResultPatch = {
     match_id: matchId,
     status,
     home_score: canWriteScoreToResults ? ftHome : null,
@@ -265,7 +356,7 @@ async function upsertOneMatchFromFD(sb: any, match: any, nowIso: string) {
   return { updated: true, matchId, status, compCode };
 }
 
-async function fetchExistingMatchIds(sb: any, ids: number[]) {
+async function fetchExistingMatchIds(sb: SupabaseAdminClient, ids: number[]) {
   if (!ids.length) return new Set<number>();
 
   // supabase ma limity długości URL → tnijmy na batch'e
@@ -282,8 +373,8 @@ async function fetchExistingMatchIds(sb: any, ids: number[]) {
 
     if (error) throw new Error(`fetchExistingMatchIds failed: ${error.message}`);
 
-    for (const r of data ?? []) {
-      const id = Number((r as any).id);
+    for (const r of (data ?? []) as DbMatchIdRow[]) {
+      const id = Number(r.id);
       if (Number.isFinite(id)) existing.add(id);
     }
   }
@@ -297,10 +388,14 @@ export async function POST(req: Request) {
   try {
     logId = await cronLogStart("results", "github-actions");
 
-    const secret = process.env.CRON_SECRET;
-    if (secret) {
-      const got = req.headers.get("x-cron-secret");
-      if (got !== secret) return jsonError("Unauthorized", 401);
+    const auth = getCronSecretAuthResult(req);
+    if (!auth.ok) {
+      await cronLogSuccess(logId, {
+        ok: false,
+        job: "results",
+        reason: auth.reason,
+      });
+      return jsonError(auth.error, auth.status);
     }
 
     const sb = supabaseAdmin();
@@ -331,7 +426,7 @@ export async function POST(req: Request) {
 
       const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") ?? 200), 500));
 
-      const data = await fdFetch(
+      const data = await fdFetch<FootballDataMatchesResponse>(
         `/matches?dateFrom=${encodeURIComponent(dateFrom)}&dateTo=${encodeURIComponent(dateTo)}`,
         { maxRetries: 2 }
       );
@@ -342,7 +437,7 @@ export async function POST(req: Request) {
       // ✅ 1) wyciągamy ID z paczki
       const incomingIds: number[] = [];
       for (const m of slice) {
-        const id = Number((m as any)?.id);
+        const id = Number(m.id);
         if (Number.isFinite(id)) incomingIds.push(id);
       }
 
@@ -355,7 +450,7 @@ export async function POST(req: Request) {
       let skippedExisting = 0;
 
       for (const m of slice) {
-        const matchId = Number((m as any)?.id);
+        const matchId = Number(m.id);
         if (!Number.isFinite(matchId)) continue;
 
         // jeśli już jest w DB → nie dotykamy, żeby nie robić upsertów
@@ -366,7 +461,7 @@ export async function POST(req: Request) {
 
         const r = await upsertOneMatchFromFD(sb, m, nowIso);
 
-        if ((r as any).skipped === "unsupported_competition") {
+        if (r.skipped === "unsupported_competition") {
           skippedUnsupported++;
           continue;
         }
@@ -423,18 +518,20 @@ export async function POST(req: Request) {
 
     if (cErr) return jsonError(cErr.message, 500, { stage: "candidates_query" });
 
-    const rows = candidates ?? [];
+    const rows = (candidates ?? []) as CandidateMatchRow[];
 
     let processed = 0;
     let becameFinished = 0;
     let skippedUnsupported = 0;
 
-    for (const row of rows as any[]) {
+    for (const row of rows) {
       const matchId = Number(row?.id);
       if (!Number.isFinite(matchId)) continue;
 
       // ✅ FIX: football-data zwraca mecz BEZ wrappera "match"
-      const data = await fdFetch(`/matches/${matchId}`, { maxRetries: 2 });
+      const data = await fdFetch<FootballDataMatchResponse>(`/matches/${matchId}`, {
+        maxRetries: 2,
+      });
       const match = data?.match ?? data;
       if (!match) continue;
 
@@ -459,16 +556,22 @@ export async function POST(req: Request) {
       const compCode = String(match?.competition?.code ?? "").toUpperCase().trim();
       const compName = canonicalCompetitionName(compCode);
 
-      const homeTeam = typeof match?.homeTeam?.name === "string" ? match.homeTeam.name : null;
-      const awayTeam = typeof match?.awayTeam?.name === "string" ? match.awayTeam.name : null;
+      const homeTeamRaw = match.homeTeam;
+      const awayTeamRaw = match.awayTeam;
+      const homeTeam =
+        typeof homeTeamRaw?.name === "string" ? homeTeamRaw.name : null;
+      const awayTeam =
+        typeof awayTeamRaw?.name === "string" ? awayTeamRaw.name : null;
+      const homeTeamIdRaw = homeTeamRaw?.id;
+      const awayTeamIdRaw = awayTeamRaw?.id;
       const homeTeamId =
-        Number.isFinite(Number(match?.homeTeam?.id)) ? Number(match.homeTeam.id) : null;
+        Number.isFinite(Number(homeTeamIdRaw)) ? Number(homeTeamIdRaw) : null;
       const awayTeamId =
-        Number.isFinite(Number(match?.awayTeam?.id)) ? Number(match.awayTeam.id) : null;
+        Number.isFinite(Number(awayTeamIdRaw)) ? Number(awayTeamIdRaw) : null;
 
       const bettingClosed = computeBettingClosed(status, utcDateIso);
 
-      const patchMatches: any = {
+      const patchMatches: MatchPatch = {
         status,
         last_sync_at: nowIso,
         betting_closed: bettingClosed,
@@ -503,7 +606,7 @@ export async function POST(req: Request) {
 
       const canWriteScoreToResults = status === "FINISHED"; // dopisz IN_PLAY/PAUSED jeśli chcesz live
 
-      const resRow: any = {
+      const resRow: MatchResultPatch = {
         match_id: matchId,
         status,
         home_score: canWriteScoreToResults ? ftHome : null,
@@ -551,10 +654,10 @@ export async function POST(req: Request) {
       supported: Array.from(SUPPORTED_COMP_CODES.values()),
       horizon: { days: horizonDays, dateYmd: horizonDateYmd },
     });
-  } catch (e: any) {
-    await cronLogError(logId, e);
+  } catch (error: unknown) {
+    await cronLogError(logId, error);
     return NextResponse.json(
-      { error: e?.message || "Server error", extra: { stage: "catch" } },
+      { error: errorMessage(error), extra: { stage: "catch" } },
       { status: 500 }
     );
   }

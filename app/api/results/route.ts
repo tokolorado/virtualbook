@@ -1,19 +1,35 @@
 // app/api/results/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireCronSecret } from "@/lib/requireCronSecret";
+import { supabaseAdmin } from "@/lib/supabaseServer";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const BASE = "https://api.football-data.org/v4";
 
-function jsonError(message: string, status = 500, extra?: any) {
+type JsonRecord = Record<string, unknown>;
+
+function jsonError(message: string, status = 500, extra?: JsonRecord) {
   return NextResponse.json({ error: message, ...extra }, { status });
 }
 
-function safeJson(text: string) {
+function safeJson(text: string): unknown {
   try {
     return JSON.parse(text);
   } catch {
     return { raw: text };
   }
+}
+
+function asRecord(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonRecord)
+    : {};
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Server error";
 }
 
 async function fetchFD(url: string, apiKey: string) {
@@ -37,7 +53,7 @@ function mapFdStatusToLocal(fdStatus: string | null | undefined): string {
   return "SCHEDULED";
 }
 
-function toIntOrNull(x: any): number | null {
+function toIntOrNull(x: unknown): number | null {
   if (typeof x === "number" && Number.isFinite(x)) return x;
   return null;
 }
@@ -47,15 +63,20 @@ function canPersistScore(status: string) {
 }
 
 export async function GET(req: Request) {
+  const unauthorized = requireCronSecret(req);
+  if (unauthorized) return unauthorized;
+
   const apiKey = process.env.FOOTBALL_DATA_API_KEY;
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!apiKey) return jsonError("Missing FOOTBALL_DATA_API_KEY in env", 500);
-  if (!supabaseUrl) return jsonError("Missing SUPABASE_URL in env", 500);
-  if (!serviceKey) return jsonError("Missing SUPABASE_SERVICE_ROLE_KEY in env", 500);
 
-  const supabase = createClient(supabaseUrl, serviceKey);
+  let supabase: ReturnType<typeof supabaseAdmin>;
+
+  try {
+    supabase = supabaseAdmin();
+  } catch (error) {
+    return jsonError(errorMessage(error), 500);
+  }
 
   const { searchParams } = new URL(req.url);
   const matchId = searchParams.get("matchId") || "";
@@ -72,24 +93,33 @@ export async function GET(req: Request) {
     });
   }
 
-  const match = matchRes.data?.match ?? null;
-  if (!match) {
+  const upstream = asRecord(matchRes.data);
+  const match = asRecord(upstream.match);
+
+  if (!upstream.match) {
     return jsonError("Missing match in upstream response", 502, { upstream: matchRes.data });
   }
 
   // 2) Extract status + scores
-  const localStatus = mapFdStatusToLocal(match?.status);
+  const upstreamStatus =
+    typeof match.status === "string" ? match.status : undefined;
+
+  const localStatus = mapFdStatusToLocal(upstreamStatus);
 
   // football-data typical shape:
   // match.score.fullTime.home / away
   // match.score.halfTime.home / away
-  const ftHome = toIntOrNull(match?.score?.fullTime?.home);
-  const ftAway = toIntOrNull(match?.score?.fullTime?.away);
-  const htHome = toIntOrNull(match?.score?.halfTime?.home);
-  const htAway = toIntOrNull(match?.score?.halfTime?.away);
+  const score = asRecord(match.score);
+  const fullTime = asRecord(score.fullTime);
+  const halfTime = asRecord(score.halfTime);
+
+  const ftHome = toIntOrNull(fullTime.home);
+  const ftAway = toIntOrNull(fullTime.away);
+  const htHome = toIntOrNull(halfTime.home);
+  const htAway = toIntOrNull(halfTime.away);
   const scoreCanBePersisted = canPersistScore(localStatus);
 
-  const utcDate = match?.utcDate ? String(match.utcDate) : null;
+  const utcDate = match.utcDate ? String(match.utcDate) : null;
 
   // 3) Save into match_results via RPC
   const upsertPayload = {
@@ -122,7 +152,7 @@ export async function GET(req: Request) {
     ok: true,
     match: {
       id: String(matchId),
-      status: match?.status ?? null,
+      status: upstreamStatus ?? null,
       status_local: localStatus,
       utcDate,
       score: {

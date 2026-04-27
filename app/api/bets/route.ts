@@ -1,6 +1,6 @@
 // app/api/bets/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { requireUser } from "@/lib/requireUser";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,22 +25,28 @@ type Body = {
 const MAX_ITEMS = 20;
 const MAX_STAKE = 10000;
 
-function toNumber(v: unknown): number {
-  const n = typeof v === "number" ? v : Number(v);
-  return Number.isFinite(n) ? n : NaN;
+function toNumber(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-function nonEmpty(v: unknown): string | null {
-  const s = String(v ?? "").trim();
-  return s.length ? s : null;
+function nonEmpty(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return text.length ? text : null;
 }
 
-function normalizeMarket(m: unknown) {
-  return String(m ?? "").trim().toLowerCase();
+function normalizeMarket(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
-function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Server error";
 }
 
 export async function POST(req: Request) {
@@ -61,7 +67,10 @@ export async function POST(req: Request) {
     const stake = toNumber(body.stake);
 
     if (!Number.isFinite(stake) || stake <= 0) {
-      return NextResponse.json({ error: "Nieprawidłowa stawka." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Nieprawidłowa stawka." },
+        { status: 400 }
+      );
     }
 
     if (stake > MAX_STAKE) {
@@ -74,7 +83,6 @@ export async function POST(req: Request) {
     const headerIdempotencyKey = nonEmpty(req.headers.get("x-idempotency-key"));
     const bodyIdempotencyKey = nonEmpty(body.idempotencyKey);
 
-    // jeśli jednocześnie wyślesz body.idempotencyKey i x-idempotency-key, a będą różne, to teraz backend po prostu weźmie ten z body. To nie jest błąd krytyczny, ale docelowo warto dodać ochronę:
     if (
       bodyIdempotencyKey &&
       headerIdempotencyKey &&
@@ -89,11 +97,11 @@ export async function POST(req: Request) {
     const idempotencyKey = bodyIdempotencyKey ?? headerIdempotencyKey;
 
     if (!idempotencyKey) {
-    return NextResponse.json(
-      { error: "Brak idempotency key." },
-      { status: 400 }
-    );
-  }
+      return NextResponse.json(
+        { error: "Brak idempotency key." },
+        { status: 400 }
+      );
+    }
 
     if (
       (bodyIdempotencyKey && !isUuid(bodyIdempotencyKey)) ||
@@ -105,92 +113,39 @@ export async function POST(req: Request) {
       );
     }
 
-    const authHeader = req.headers.get("authorization") || "";
-    const jwt = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-
-    if (!jwt) {
-      return NextResponse.json({ error: "Brak autoryzacji." }, { status: 401 });
+    const user = await requireUser(req);
+    if (!user.ok) {
+      return NextResponse.json({ error: user.error }, { status: user.status });
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        global: {
-          headers: {
-            Authorization: `Bearer ${jwt}`,
-          },
-        },
-      }
-    );
-
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser();
-
-    if (userErr || !user?.id) {
-      return NextResponse.json(
-        { error: "Nieprawidłowa sesja." },
-        { status: 401 }
-      );
-    }
-
-    const { data: profile, error: profileErr } = await supabase
-      .from("profiles")
-      .select("id,is_banned")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profileErr) {
-      return NextResponse.json(
-        { error: profileErr.message },
-        { status: 500 }
-      );
-    }
-
-    if (!profile) {
-      return NextResponse.json(
-        { error: "Nie znaleziono profilu użytkownika." },
-        { status: 404 }
-      );
-    }
-
-    if (profile.is_banned) {
-      return NextResponse.json(
-        { error: "Twoje konto zostało zablokowane." },
-        { status: 403 }
-      );
-    }
-
-    const payloadItems = body.slip.map((it) => {
-      const matchId = toNumber(it.matchId);
+    const payloadItems = body.slip.map((item) => {
+      const matchId = toNumber(item.matchId);
 
       if (!Number.isFinite(matchId)) {
         throw new Error("Nieprawidłowy matchId.");
       }
 
       let kickoff = null;
-      if (it.kickoffUtc) {
-        const d = new Date(String(it.kickoffUtc));
-        if (isNaN(d.getTime())) {
+      if (item.kickoffUtc) {
+        const date = new Date(String(item.kickoffUtc));
+        if (Number.isNaN(date.getTime())) {
           throw new Error("Nieprawidłowy kickoffUtc.");
         }
-        kickoff = d.toISOString();
+        kickoff = date.toISOString();
       }
 
       return {
         match_id_bigint: matchId,
-        league: nonEmpty(it.league) || nonEmpty(it.competitionCode),
-        home: nonEmpty(it.home),
-        away: nonEmpty(it.away),
-        market: normalizeMarket(it.market),
-        pick: nonEmpty(it.pick),
+        league: nonEmpty(item.league) || nonEmpty(item.competitionCode),
+        home: nonEmpty(item.home),
+        away: nonEmpty(item.away),
+        market: normalizeMarket(item.market),
+        pick: nonEmpty(item.pick),
         kickoff_at: kickoff,
       };
     });
 
-    const { data, error } = await supabase.rpc("place_bet", {
+    const { data, error } = await user.supabase.rpc("place_bet", {
       p_stake: stake,
       p_items: payloadItems,
       p_request_id: idempotencyKey,
@@ -209,9 +164,9 @@ export async function POST(req: Request) {
       potentialWin: data?.potentialWin ?? 0,
       balanceAfter: data?.balanceAfter ?? null,
     });
-  } catch (e: any) {
+  } catch (error: unknown) {
     return NextResponse.json(
-      { error: e?.message || "Server error" },
+      { error: errorMessage(error) },
       { status: 500 }
     );
   }

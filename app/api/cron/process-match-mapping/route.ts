@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { requireCronSecret } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,16 +26,6 @@ function getSupabaseAdmin() {
       persistSession: false,
     },
   });
-}
-
-function isAuthorized(request: NextRequest) {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
-    throw new Error("Brak CRON_SECRET.");
-  }
-
-  const received = request.headers.get("x-cron-secret");
-  return received === expected;
 }
 
 function safeNumber(value: unknown, fallback: number) {
@@ -68,9 +59,8 @@ function backoffMinutes(attempt: number) {
 
 export async function POST(request: NextRequest) {
   try {
-    if (!isAuthorized(request)) {
-      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
-    }
+    const unauthorized = requireCronSecret(request);
+    if (unauthorized) return unauthorized;
 
     const batchSize = safeNumber(request.nextUrl.searchParams.get("batchSize"), 10);
     const maxAttempts = safeNumber(request.nextUrl.searchParams.get("maxAttempts"), 5);

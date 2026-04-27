@@ -1,15 +1,37 @@
 import { NextResponse } from "next/server";
 import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
+import { getCronSecretAuthResult } from "@/lib/requireCronSecret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function json(status: number, body: any) {
+type JsonRecord = Record<string, unknown>;
+
+type PipelineStepResult = {
+  ok: boolean;
+  status: number;
+  body: JsonRecord;
+};
+
+type EnqueueStepResult = PipelineStepResult & {
+  day: string;
+};
+
+function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
 
-async function readJsonSafe(res: Response) {
-  return res.json().catch(() => ({}));
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function readJsonSafe(res: Response): Promise<JsonRecord> {
+  const data: unknown = await res.json().catch(() => ({}));
+  return isRecord(data) ? data : {};
 }
 
 function utcDateYYYYMMDD(d: Date) {
@@ -30,27 +52,17 @@ export async function POST(req: Request) {
   try {
     logId = await cronLogStart("pipeline", "github-actions");
 
-    const cronSecret = process.env.CRON_SECRET;
-    const gotSecret = req.headers.get("x-cron-secret") || "";
-
-    if (!cronSecret) {
+    const auth = getCronSecretAuthResult(req);
+    if (!auth.ok) {
       await cronLogSuccess(logId, {
         ok: false,
         job: "pipeline",
-        reason: "missing_cron_secret_env",
+        reason: auth.reason,
       });
-      return json(500, { ok: false, error: "Missing CRON_SECRET in env" });
+      return json(auth.status, { ok: false, error: auth.error });
     }
 
-    if (gotSecret !== cronSecret) {
-      await cronLogSuccess(logId, {
-        ok: false,
-        job: "pipeline",
-        reason: "unauthorized",
-      });
-      return json(401, { ok: false, error: "Unauthorized" });
-    }
-
+    const cronSecret = auth.secret;
     const origin = new URL(req.url).origin;
 
     const headers = {
@@ -66,7 +78,7 @@ export async function POST(req: Request) {
 
     // 0) enqueue rolling 14-day horizon
     const horizonDays = 14;
-    const enqueueResults: any[] = [];
+    const enqueueResults: EnqueueStepResult[] = [];
 
     for (let i = 0; i < horizonDays; i++) {
       const day = utcDateYYYYMMDD(addUtcDays(now, i));
@@ -91,7 +103,7 @@ export async function POST(req: Request) {
     // 1) drain fetch_queue
     // fetch-queue przetwarza tylko 1 dzień na wywołanie,
     // więc wołamy go wielokrotnie w ramach jednego pipeline run.
-    const fetchQueueRuns: any[] = [];
+    const fetchQueueRuns: PipelineStepResult[] = [];
     const maxFetchQueueRuns = 16;
 
     for (let i = 0; i < maxFetchQueueRuns; i++) {
@@ -193,9 +205,9 @@ export async function POST(req: Request) {
     });
 
     return json(200, responseBody);
-  } catch (e: any) {
-    await cronLogError(logId, e);
-    return json(500, { ok: false, error: e?.message ?? String(e) });
+  } catch (error: unknown) {
+    await cronLogError(logId, error);
+    return json(500, { ok: false, error: errorMessage(error) });
   }
 }
 
