@@ -5,17 +5,48 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatOdd, formatVB } from "@/lib/format";
+import { formatBetSelectionLabels } from "@/lib/odds/labels";
 import { supabase } from "@/lib/supabase";
+
+type BetUser = {
+  id: string;
+  username: string | null;
+  email: string | null;
+  display_name: string;
+};
+
+type BetItem = {
+  id: string;
+  bet_id: string;
+  user_id: string;
+  match_id_bigint: number;
+  league: string;
+  home: string;
+  away: string;
+  market: string;
+  pick: string;
+  odds: number;
+  result: string | null;
+  settled: boolean;
+  settled_at: string | null;
+  kickoff_at: string | null;
+  created_at: string | null;
+};
 
 type Bet = {
   id: string;
   user_id: string;
+  user: BetUser;
   stake: number;
   total_odds: number;
   potential_win: number;
+  payout: number | null;
   status: string;
   settled: boolean;
-  created_at: string;
+  created_at: string | null;
+  settled_at: string | null;
+  item_count: number;
+  items: BetItem[];
 };
 
 type SettleStats = {
@@ -156,6 +187,8 @@ const NAV_ITEMS: Array<{
 ];
 
 const ADMIN_HEALTH_REFRESH_MS = 30_000;
+const ADMIN_BETS_DAYS = 7;
+const ADMIN_BETS_PREVIEW_LIMIT = 12;
 
 const VIEW_META: Record<
   ViewKey,
@@ -262,6 +295,37 @@ function getBetStatusTone(status: string): MetricTone {
   if (s === "lost") return "red";
   if (s === "void") return "yellow";
   return "neutral";
+}
+
+function getBetResultTone(result: string | null, settled: boolean): MetricTone {
+  const normalized = String(result ?? "").toLowerCase();
+
+  if (normalized === "won") return "green";
+  if (normalized === "lost") return "red";
+  if (normalized === "void") return "yellow";
+  return settled ? "blue" : "neutral";
+}
+
+function labelBetStatus(status: string) {
+  const normalized = String(status || "").toLowerCase();
+
+  if (normalized === "won") return "WYGRANY";
+  if (normalized === "lost") return "PRZEGRANY";
+  if (normalized === "void") return "ZWROT";
+  return "W GRZE";
+}
+
+function labelBetResult(result: string | null, settled: boolean) {
+  const normalized = String(result ?? "").toLowerCase();
+
+  if (normalized === "won") return "TRAFIONY";
+  if (normalized === "lost") return "NIETRAFIONY";
+  if (normalized === "void") return "ZWROT";
+  return settled ? "ROZLICZONY" : "W GRZE";
+}
+
+function displayBetUser(bet: Bet) {
+  return bet.user?.display_name || bet.user?.username || bet.user?.email || bet.user_id;
 }
 
 function SurfaceCard({
@@ -569,6 +633,8 @@ export default function AdminPage() {
     "all" | "pending" | "won" | "lost" | "void"
   >("all");
   const [betSearch, setBetSearch] = useState("");
+  const [expandedBetIds, setExpandedBetIds] = useState<string[]>([]);
+  const [showAllBets, setShowAllBets] = useState(false);
 
   const [lastRefreshAt, setLastRefreshAt] = useState<string | null>(null);
   const [notice, setNotice] = useState<{
@@ -608,8 +674,31 @@ export default function AdminPage() {
           ? true
           : String(b.status).toLowerCase() === betFilter;
 
+      const itemHaystack = (b.items ?? [])
+        .map((item) =>
+          [
+            item.league,
+            item.home,
+            item.away,
+            item.market,
+            item.pick,
+            item.result ?? "",
+          ].join(" ")
+        )
+        .join(" ");
+
       const queryMatch = q
-        ? [b.id, b.user_id, b.status, String(b.stake), String(b.total_odds)]
+        ? [
+            b.id,
+            b.user_id,
+            b.user?.username ?? "",
+            b.user?.email ?? "",
+            b.user?.display_name ?? "",
+            b.status,
+            String(b.stake),
+            String(b.total_odds),
+            itemHaystack,
+          ]
             .join(" ")
             .toLowerCase()
             .includes(q)
@@ -618,6 +707,14 @@ export default function AdminPage() {
       return statusMatch && queryMatch;
     });
   }, [bets, betFilter, betSearch]);
+
+  const displayedBets = useMemo(() => {
+    return showAllBets
+      ? filteredBets
+      : filteredBets.slice(0, ADMIN_BETS_PREVIEW_LIMIT);
+  }, [filteredBets, showAllBets]);
+
+  const hiddenBetsCount = Math.max(filteredBets.length - displayedBets.length, 0);
 
   const sortedSystemCheckResults = useMemo(() => {
     return [...systemCheckResults].sort((a, b) => {
@@ -661,6 +758,14 @@ export default function AdminPage() {
     (hm?.missingPayoutLedger ?? 0);
 
   const activeMeta = VIEW_META[activeView];
+
+  const toggleBetDetails = (betId: string) => {
+    setExpandedBetIds((current) =>
+      current.includes(betId)
+        ? current.filter((id) => id !== betId)
+        : [...current, betId]
+    );
+  };
 
   const getAccessToken = async (): Promise<string> => {
     const { data: sessionData } = await supabase.auth.getSession();
@@ -722,22 +827,37 @@ export default function AdminPage() {
       return;
     }
 
-    const { data: betsData, error } = await supabase
-      .from("bets")
-      .select(
-        "id,user_id,stake,total_odds,potential_win,status,settled,created_at"
-      )
-      .order("created_at", { ascending: false })
-      .limit(50);
+    const token = sessionData.session?.access_token;
 
-    if (error) {
-      console.error("ADMIN BETS LOAD ERROR:", error);
+    if (!token) {
       setBets([]);
       setLoading(false);
       return;
     }
 
-    setBets((betsData ?? []) as Bet[]);
+    const betsRes = await fetch(
+      `/api/admin/bets?days=${ADMIN_BETS_DAYS}&limit=1000`,
+      {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+
+    const betsJson = await betsRes.json().catch(() => null);
+
+    if (!betsRes.ok) {
+      console.error("ADMIN BETS LOAD ERROR:", betsJson);
+      setBets([]);
+      setNotice({
+        tone: "error",
+        message:
+          betsJson?.error ?? "Nie udało się pobrać kuponów administratora.",
+      });
+      setLoading(false);
+      return;
+    }
+
+    setBets((betsJson?.bets ?? []) as Bet[]);
     setLoading(false);
   };
 
@@ -1227,6 +1347,10 @@ export default function AdminPage() {
     const timer = window.setTimeout(() => setNotice(null), 5000);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    setShowAllBets(false);
+  }, [betFilter, betSearch]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -2072,7 +2196,10 @@ export default function AdminPage() {
                     {b.id}
                   </div>
                   <div className="mt-1 break-all text-xs text-neutral-500">
-                    user: {b.user_id}
+                    user: {displayBetUser(b)}
+                  </div>
+                  <div className="mt-1 break-all text-xs text-neutral-600">
+                    user_id: {b.user_id}
                   </div>
                   <div className="mt-1 text-xs text-neutral-500">
                     {fmtDate(b.created_at)}
@@ -2198,13 +2325,13 @@ export default function AdminPage() {
     <div className="space-y-5">
       <Panel
         title="Filtry kuponów"
-        description="Szukaj po ID, user ID, statusie lub parametrach kuponu."
+        description="Szukaj po ID, nazwie użytkownika, emailu, statusie lub zdarzeniach z kuponu."
       >
         <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
           <input
             value={betSearch}
             onChange={(e) => setBetSearch(e.target.value)}
-            placeholder="Szukaj kuponu..."
+            placeholder="Szukaj po użytkowniku, ID, drużynie, rynku..."
             className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2.5 text-sm text-white outline-none transition placeholder:text-neutral-500 focus:border-neutral-600"
           />
 
@@ -2232,79 +2359,195 @@ export default function AdminPage() {
 
       <Panel
         title="Ostatnie kupony"
-        description="Karta operacyjna najnowszych kuponów z możliwością szybkiego rozliczenia."
+        description={`Kupony wszystkich użytkowników z ostatnich ${ADMIN_BETS_DAYS} dni z możliwością podglądu zdarzeń.`}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <StatusPill tone="blue">
+              widoczne: {displayedBets.length}/{filteredBets.length}
+            </StatusPill>
+            <StatusPill>pobrane: {bets.length}</StatusPill>
+          </div>
+        }
       >
         {filteredBets.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-neutral-800 bg-black/20 p-6 text-sm text-neutral-500">
             Brak kuponów pasujących do filtra.
           </div>
         ) : (
-          <div className="grid gap-3 xl:grid-cols-2">
-            {filteredBets.map((b) => (
-              <div
-                key={b.id}
-                className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4"
+          <div className="space-y-3">
+            {displayedBets.map((b) => {
+              const isExpanded = expandedBetIds.includes(b.id);
+              const items = b.items ?? [];
+
+              return (
+                <div
+                  key={b.id}
+                  className="rounded-3xl border border-neutral-800 bg-neutral-950/80 p-4"
+                >
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusPill tone={getBetStatusTone(b.status)}>
+                          {labelBetStatus(b.status)}
+                        </StatusPill>
+                        <StatusPill tone={b.settled ? "green" : "neutral"}>
+                          {b.settled ? "SETTLED" : "PENDING"}
+                        </StatusPill>
+                        <StatusPill tone="blue">{displayBetUser(b)}</StatusPill>
+                        <StatusPill>{fmtDate(b.created_at)}</StatusPill>
+                      </div>
+
+                      <div className="mt-3 break-all text-xs text-neutral-500">
+                        ID kuponu: {b.id}
+                      </div>
+                      <div className="mt-1 break-all text-xs text-neutral-600">
+                        user_id: {b.user_id}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => toggleBetDetails(b.id)}
+                      className={cn(
+                        "shrink-0 rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                        isExpanded
+                          ? "border-white bg-white text-black"
+                          : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                      )}
+                    >
+                      {isExpanded
+                        ? "Ukryj zdarzenia"
+                        : `Rozwiń zdarzenia (${items.length})`}
+                    </button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                    <InfoField label="Stawka" value={`${formatVB(b.stake)} VB`} />
+                    <InfoField label="Kurs" value={formatOdd(b.total_odds)} />
+                    <InfoField
+                      label="Możliwa wygrana"
+                      value={`${formatVB(b.potential_win)} VB`}
+                    />
+                    <InfoField
+                      label="Wypłata"
+                      value={
+                        b.payout === null ? "—" : `${formatVB(b.payout)} VB`
+                      }
+                    />
+                    <InfoField label="Zdarzenia" value={items.length} />
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={b.settled}
+                      onClick={() => settle(b.id, "won")}
+                      className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                    >
+                      WON
+                    </button>
+                    <button
+                      type="button"
+                      disabled={b.settled}
+                      onClick={() => settle(b.id, "lost")}
+                      className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                    >
+                      LOST
+                    </button>
+                    <button
+                      type="button"
+                      disabled={b.settled}
+                      onClick={() => settle(b.id, "void")}
+                      className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                    >
+                      VOID
+                    </button>
+                  </div>
+
+                  {isExpanded ? (
+                    <div className="mt-4 border-t border-neutral-800 pt-4">
+                      {items.length === 0 ? (
+                        <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4 text-sm text-yellow-200">
+                          Brak pozycji kuponu. To wymaga sprawdzenia w bazie.
+                        </div>
+                      ) : (
+                        <div className="grid gap-3 xl:grid-cols-2">
+                          {items.map((item) => {
+                            const labels = formatBetSelectionLabels({
+                              market: item.market,
+                              pick: item.pick,
+                              home: item.home,
+                              away: item.away,
+                            });
+
+                            return (
+                              <div
+                                key={item.id}
+                                className="rounded-2xl border border-neutral-800 bg-black/20 p-4"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <div className="text-xs text-neutral-500">
+                                      {item.league || "Liga"} •{" "}
+                                      {labels.marketLabel}
+                                    </div>
+                                    <div className="mt-2 text-sm font-semibold text-white">
+                                      {item.home || "Gospodarze"}{" "}
+                                      <span className="font-normal text-neutral-500">
+                                        vs
+                                      </span>{" "}
+                                      {item.away || "Goście"}
+                                    </div>
+                                    {item.kickoff_at ? (
+                                      <div className="mt-1 text-xs text-neutral-500">
+                                        Start: {fmtDate(item.kickoff_at)}
+                                      </div>
+                                    ) : null}
+                                  </div>
+
+                                  <div className="flex shrink-0 flex-col items-end gap-2">
+                                    <StatusPill tone="blue">
+                                      {formatOdd(item.odds)}
+                                    </StatusPill>
+                                    <StatusPill
+                                      tone={getBetResultTone(
+                                        item.result,
+                                        item.settled
+                                      )}
+                                    >
+                                      {labelBetResult(item.result, item.settled)}
+                                    </StatusPill>
+                                  </div>
+                                </div>
+
+                                <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-3 text-sm text-neutral-300">
+                                  Typ:{" "}
+                                  <span className="font-semibold text-white">
+                                    {labels.selectionLabel}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+
+            {hiddenBetsCount > 0 || showAllBets ? (
+              <button
+                type="button"
+                onClick={() => setShowAllBets((value) => !value)}
+                className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-neutral-200 transition hover:bg-neutral-900"
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="break-all text-sm font-semibold text-white">
-                      {b.id}
-                    </div>
-                    <div className="mt-1 break-all text-xs text-neutral-500">
-                      user: {b.user_id}
-                    </div>
-                    <div className="mt-1 text-xs text-neutral-500">
-                      {fmtDate(b.created_at)}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-2">
-                    <StatusPill tone={getBetStatusTone(b.status)}>
-                      {String(b.status).toUpperCase()}
-                    </StatusPill>
-                    <StatusPill tone={b.settled ? "green" : "neutral"}>
-                      {b.settled ? "SETTLED" : "PENDING"}
-                    </StatusPill>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-3 gap-3">
-                  <InfoField label="Stawka" value={`${formatVB(b.stake)} VB`} />
-                  <InfoField label="Kurs" value={formatOdd(b.total_odds)} />
-                  <InfoField
-                    label="Wygrana"
-                    value={`${formatVB(b.potential_win)} VB`}
-                  />
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={b.settled}
-                    onClick={() => settle(b.id, "won")}
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
-                  >
-                    WON
-                  </button>
-                  <button
-                    type="button"
-                    disabled={b.settled}
-                    onClick={() => settle(b.id, "lost")}
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
-                  >
-                    LOST
-                  </button>
-                  <button
-                    type="button"
-                    disabled={b.settled}
-                    onClick={() => settle(b.id, "void")}
-                    className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs text-white transition hover:bg-neutral-800 disabled:opacity-50"
-                  >
-                    VOID
-                  </button>
-                </div>
-              </div>
-            ))}
+                {showAllBets
+                  ? `Pokaż tylko najnowsze ${ADMIN_BETS_PREVIEW_LIMIT}`
+                  : `Zobacz wszystkie (${hiddenBetsCount} więcej)`}
+              </button>
+            ) : null}
           </div>
         )}
       </Panel>
