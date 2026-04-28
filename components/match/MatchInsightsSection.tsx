@@ -797,15 +797,18 @@ function SofaScoreStaticWidget({
   title,
   src,
   height,
+  cropBottomPx = 0,
   scrolling,
 }: {
   title: string;
   src: string;
   height: number;
+  cropBottomPx?: number;
   scrolling: "yes" | "no";
 }) {
+  const visibleHeight = Math.max(height - cropBottomPx, 120);
   const frameStyle: CSSProperties = {
-    height,
+    height: visibleHeight,
   };
 
   return (
@@ -2008,6 +2011,7 @@ export default function MatchInsightsSection({
           title="UEFA Champions League 25/26 standings"
           src={CHAMPIONS_LEAGUE_STANDINGS_URL}
           height={1763}
+          cropBottomPx={170}
           scrolling="no"
         />
       </div>
@@ -2030,7 +2034,8 @@ export default function MatchInsightsSection({
           title="UEFA Champions League 25/26 playoff"
           src={CHAMPIONS_LEAGUE_PLAYOFF_URL}
           height={872}
-          scrolling="yes"
+          cropBottomPx={126}
+          scrolling="no"
         />
       </div>
     );
