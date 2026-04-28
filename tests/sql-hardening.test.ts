@@ -22,6 +22,11 @@ const adminForceSettleMigration = fs.readFileSync(
   "utf8"
 );
 
+const sameMatchAccumulatorMigration = fs.readFileSync(
+  "supabase/migrations/20260428_reject_same_match_accumulator_items.sql",
+  "utf8"
+);
+
 test("production function snapshot documents every inspected public function", () => {
   const functionHeaders = snapshot.match(/^-- Function:/gm) ?? [];
 
@@ -81,5 +86,20 @@ test("admin manual settlement is transactional and service-role only", () => {
   assert.match(
     adminForceSettleMigration,
     /grant\s+execute\s+on\s+function\s+public\.admin_force_settle_bet\(uuid,\s*text,\s*uuid\)\s+to\s+service_role/i
+  );
+});
+
+test("place_bet rejects same-match accumulator correlations in SQL", () => {
+  assert.match(
+    sameMatchAccumulatorMigration,
+    /v_distinct_matches\s+integer/i
+  );
+  assert.match(
+    sameMatchAccumulatorMigration,
+    /if\s+v_distinct_matches\s*<>\s*v_items_count\s+then/i
+  );
+  assert.match(
+    sameMatchAccumulatorMigration,
+    /Correlated selections in same match are not allowed/i
   );
 });

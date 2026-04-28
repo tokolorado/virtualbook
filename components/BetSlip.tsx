@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useBetSlip, type SlipItem } from "@/lib/BetSlipContext";
 import { formatBetSelectionLabels } from "@/lib/odds/labels";
+import { priceAccumulatorSlip } from "@/lib/bets/slipPricing";
 
 const MIN_STAKE = 1;
 const MAX_STAKE = 10000;
@@ -212,18 +213,9 @@ export default function BetSlip({ variant }: { variant?: string }) {
     attemptFingerprintRef.current = currentAttemptFingerprint;
   }, [currentAttemptFingerprint, slip.length]);
 
-  const totalOdds = useMemo(() => {
-    if (!slip.length) return 0;
-    let prod = 1;
-
-    for (const it of slip) {
-      const o = Number(it.odd);
-      if (!Number.isFinite(o) || o <= 1e-9) continue;
-      prod *= o;
-    }
-
-    return prod;
-  }, [slip]);
+  const slipPricing = useMemo(() => priceAccumulatorSlip(slip), [slip]);
+  const slipPricingError = slipPricing.ok ? null : slipPricing.message;
+  const totalOdds = slipPricing.ok ? slipPricing.totalOdds : 0;
 
   const potentialWin = useMemo(() => {
     if (!stakeNum || stakeNum <= 0 || !slip.length) return null;
@@ -245,8 +237,14 @@ export default function BetSlip({ variant }: { variant?: string }) {
   }, [slip]);
 
   const canSubmit = useMemo(() => {
-    return slip.length > 0 && !stakeError && !submitting && !hasStarted;
-  }, [slip.length, stakeError, submitting, hasStarted]);
+    return (
+      slip.length > 0 &&
+      !stakeError &&
+      !submitting &&
+      !hasStarted &&
+      !slipPricingError
+    );
+  }, [slip.length, stakeError, submitting, hasStarted, slipPricingError]);
 
   const resetAttemptIdentity = () => {
     attemptKeyRef.current = null;
@@ -282,6 +280,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
     setErrorModal(null);
 
     if (!canSubmit) {
+      if (slipPricingError) {
+        setSubmitError(slipPricingError);
+        setErrorModal(slipPricingError);
+      }
       setShake(true);
       window.setTimeout(() => setShake(false), 260);
       return;
@@ -689,7 +691,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                   Kurs
                 </div>
                 <div className="mt-1 text-lg font-semibold text-white">
-                  {slip.length ? formatOdd(totalOdds) : "—"}
+                  {slip.length && !slipPricingError ? formatOdd(totalOdds) : "—"}
                 </div>
               </div>
 
@@ -709,6 +711,12 @@ export default function BetSlip({ variant }: { variant?: string }) {
           <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">
             Masz w kuponie mecz, który już się rozpoczął — usuń go, aby móc postawić
             kupon.
+          </div>
+        ) : null}
+
+        {slipPricingError ? (
+          <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-3 text-sm leading-6 text-amber-100">
+            {slipPricingError}
           </div>
         ) : null}
       </div>
@@ -821,7 +829,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
           <div className="flex items-center justify-between text-sm">
             <span className="text-neutral-300">Kurs łączny</span>
             <span className="font-semibold">
-              {slip.length ? formatOdd(totalOdds) : "—"}
+              {slip.length && !slipPricingError ? formatOdd(totalOdds) : "—"}
             </span>
           </div>
 
@@ -973,8 +981,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 Kupon ({slip.length})
               </div>
               <div className="truncate text-xs text-neutral-400">
-                Kurs: {slip.length ? formatOdd(totalOdds) : "—"} • Potencjalna
-                wygrana: {potentialWin != null ? formatVB(potentialWin) : "—"} VB
+                Kurs:{" "}
+                {slip.length && !slipPricingError ? formatOdd(totalOdds) : "—"} •
+                Potencjalna wygrana:{" "}
+                {potentialWin != null ? formatVB(potentialWin) : "—"} VB
               </div>
             </div>
 

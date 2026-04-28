@@ -1,6 +1,7 @@
 // app/api/bets/route.ts
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/requireUser";
+import { priceAccumulatorSlip } from "@/lib/bets/slipPricing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -76,6 +77,18 @@ export async function POST(req: Request) {
     if (stake > MAX_STAKE) {
       return NextResponse.json(
         { error: "Przekroczono maksymalną stawkę." },
+        { status: 400 }
+      );
+    }
+
+    const slipPricing = priceAccumulatorSlip(body.slip);
+    if (!slipPricing.ok) {
+      return NextResponse.json(
+        {
+          error: slipPricing.message,
+          code: slipPricing.code,
+          conflicts: slipPricing.conflicts,
+        },
         { status: 400 }
       );
     }

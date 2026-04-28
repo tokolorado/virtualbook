@@ -1,0 +1,108 @@
+VirtualBook - liczenie kursow i kuponow
+Stan po zmianie: 2026-04-28
+
+1. Typ kuponu
+
+Aplikacja obsluguje standardowy kupon akumulatorowy, czyli AKO/parlay.
+Taki kupon ma sens bukmacherski tylko wtedy, gdy pozycje sa traktowane jako
+niezalezne zdarzenia.
+
+Przyklad poprawny:
+- mecz A: typ 1X2
+- mecz B: typ over 2.5
+- mecz C: obie druzyny strzela
+
+Przyklad odrzucony:
+- ten sam mecz: obie druzyny strzela
+- ten sam mecz: gole gospodarzy powyzej 0.5
+- ten sam mecz: gole gosci powyzej 0.5
+
+Takie pozycje sa zalezne od siebie. "Obie druzyny strzela" zawiera w sobie
+warunek, ze gospodarze strzela przynajmniej jednego gola i goscie strzela
+przynajmniej jednego gola, wiec prosty iloczyn kursow zawyzalby kurs laczny.
+
+2. Zasada korelacji
+
+W standardowym kuponie VirtualBook mozna dodac maksymalnie jeden typ z jednego
+match_id. Kilka typow z tego samego meczu wymagaloby osobnego silnika
+Bet Builder / Same Game Parlay, ktory liczy wspolne prawdopodobienstwo zdarzen,
+a nie mnozy kursy naiwnie.
+
+Na dzis aplikacja nie ma osobnego silnika Bet Builder, dlatego blokuje takie
+kupony:
+- w komponencie BetSlip na froncie,
+- w endpointzie POST /api/bets,
+- w funkcji SQL public.place_bet.
+
+3. Liczenie kursu lacznego
+
+Dla zaakceptowanego standardowego AKO:
+
+kurs_laczny = kurs_1 * kurs_2 * kurs_3 * ...
+
+Warunek:
+- kazda pozycja musi byc z innego meczu,
+- kazda pozycja musi miec aktualny kurs z tabeli public.odds,
+- kurs musi byc wiekszy niz 1,
+- mecz musi istniec,
+- zaklady na mecz musza byc otwarte,
+- kickoff musi byc w przyszlosci,
+- status meczu musi byc SCHEDULED albo TIMED,
+- uzytkownik musi miec wystarczajace saldo VB.
+
+W bazie danych public.place_bet zapisuje total_odds jako:
+
+round(exp(sum(ln(odds::float8)))::numeric, 2)
+
+To jest matematycznie rownowazne mnozeniu kursow, ale stabilniejsze dla wielu
+pozycji. Wynik jest zaokraglany do 2 miejsc po przecinku.
+
+4. Liczenie potencjalnej wygranej
+
+Dla zaakceptowanego kuponu:
+
+potential_win = stake * total_odds
+
+W bazie:
+
+v_potential_win := round(v_stake * v_total_odds, 2)
+
+5. Skad brane sa kursy
+
+Frontend pokazuje kurs z aktualnego widoku meczu, ale przy zapisie kuponu
+serwer nie ufa kursowi z przegladarki. Funkcja public.place_bet ponownie
+pobiera kurs z tabeli public.odds po:
+
+- match_id,
+- market_id,
+- selection.
+
+Dzieki temu uzytkownik nie moze zmienic kursu po stronie klienta i zapisac
+nieprawdziwej wartosci.
+
+6. Rozliczanie kuponu
+
+Rozliczenie odbywa sie na zapisanych pozycjach bet_items:
+
+- jezeli dowolna pozycja ma wynik lost, caly kupon przegrywa,
+- jezeli wszystkie pozycje sa resolved i nie ma lost, kupon moze byc won albo void,
+- pozycje void nie podbijaja kursu i sa pomijane przy kursie efektywnym,
+- jezeli wszystkie pozycje sa void, uzytkownik dostaje zwrot stawki,
+- jezeli kupon jest wygrany, payout = stake * effective_odds.
+
+Wypłata i zwroty przechodza przez ledger VB, z kontrola duplikatow, zeby nie
+wyplacic albo nie zwrocic tego samego kuponu drugi raz.
+
+7. Czego aplikacja teraz nie robi
+
+Aplikacja nie liczy jeszcze Bet Buildera / Same Game Parlay.
+To wymagaloby osobnego modelu prawdopodobienstwa dla zdarzen z jednego meczu,
+np. macierzy wynikow, modelu Poissona/Monte Carlo oraz reguly marzy dla
+zaleznych rynkow. Dopiero taki silnik moglby poprawnie wycenic kupon typu:
+
+- Bayern wygra,
+- powyzej 2.5 gola,
+- obie druzyny strzela,
+- Bayern strzeli gola.
+
+Bez tego prosty iloczyn kursow bylby zawyzony i niespojny bukmachersko.
