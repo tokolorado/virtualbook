@@ -174,8 +174,53 @@ type TimelineResponse = {
 };
 
 const AUTO_REFRESH_MS = 20_000;
-const CHAMPIONS_LEAGUE_STANDINGS_URL =
-  "https://widgets.sofascore.com/pl/embed/tournament/138314/season/76953/standings/UEFA%20Champions%20League%2025%2F26?widgetTitle=UEFA%20Champions%20League%2025%2F26&showCompetitionLogo=true&widgetTheme=dark";
+
+type SofaScoreStandingsWidgetConfig = {
+  title: string;
+  src: string;
+  height: number;
+  cropBottomPx: number;
+};
+
+const SOFASCORE_STANDINGS_WIDGETS = {
+  CL: {
+    title: "UEFA Champions League 25/26 standings",
+    src: "https://widgets.sofascore.com/pl/embed/tournament/138314/season/76953/standings/UEFA%20Champions%20League%2025%2F26?widgetTitle=UEFA%20Champions%20League%2025%2F26&showCompetitionLogo=true&widgetTheme=dark",
+    height: 1763,
+    cropBottomPx: 150,
+  },
+  SA: {
+    title: "Serie A 25/26 standings",
+    src: "https://widgets.sofascore.com/pl/embed/tournament/33/season/76457/standings/Serie%20A%2025%2F26?widgetTitle=Serie%20A%2025%2F26&showCompetitionLogo=true&widgetTheme=dark",
+    height: 1123,
+    cropBottomPx: 150,
+  },
+  PL: {
+    title: "Premier League 25/26 standings",
+    src: "https://widgets.sofascore.com/pl/embed/tournament/1/season/76986/standings/Premier%20League%2025%2F26?widgetTitle=Premier%20League%2025%2F26&showCompetitionLogo=true&widgetTheme=dark",
+    height: 1123,
+    cropBottomPx: 150,
+  },
+  PD: {
+    title: "LaLiga 25/26 standings",
+    src: "https://widgets.sofascore.com/pl/embed/tournament/36/season/77559/standings/LaLiga%2025%2F26?widgetTitle=LaLiga%2025%2F26&showCompetitionLogo=true&widgetTheme=dark",
+    height: 1123,
+    cropBottomPx: 150,
+  },
+  FL1: {
+    title: "Ligue 1 25/26 standings",
+    src: "https://widgets.sofascore.com/pl/embed/tournament/4/season/77356/standings/Ligue%201%2025%2F26?widgetTitle=Ligue%201%2025%2F26&showCompetitionLogo=true&widgetTheme=dark",
+    height: 1043,
+    cropBottomPx: 150,
+  },
+  BL1: {
+    title: "Bundesliga 25/26 standings",
+    src: "https://widgets.sofascore.com/pl/embed/tournament/42/season/77333/standings/Bundesliga%2025%2F26?widgetTitle=Bundesliga%2025%2F26&showCompetitionLogo=true&widgetTheme=dark",
+    height: 1043,
+    cropBottomPx: 150,
+  },
+} satisfies Record<string, SofaScoreStandingsWidgetConfig>;
+
 const CHAMPIONS_LEAGUE_PLAYOFF_URL =
   "https://widgets.sofascore.com/pl/embed/unique-tournament/7/season/76953/cuptree/10850333?widgetTitle=UEFA Champions League 25/26, Knockout stage&showCompetitionLogo=true&widgetTheme=dark";
 
@@ -191,6 +236,44 @@ function isChampionsLeagueCompetition(competitionCode?: string | null) {
     normalized.includes("CHAMPIONS LEAGUE") ||
     normalized.includes("LIGA MISTRZ")
   );
+}
+
+function resolveSofaScoreStandingsWidget(
+  competitionCode?: string | null
+): SofaScoreStandingsWidgetConfig | null {
+  const normalized = String(competitionCode ?? "").trim().toUpperCase();
+
+  if (!normalized) return null;
+  if (isChampionsLeagueCompetition(normalized)) {
+    return SOFASCORE_STANDINGS_WIDGETS.CL;
+  }
+
+  if (normalized === "SA" || normalized.includes("SERIE A")) {
+    return SOFASCORE_STANDINGS_WIDGETS.SA;
+  }
+
+  if (normalized === "PL" || normalized.includes("PREMIER LEAGUE")) {
+    return SOFASCORE_STANDINGS_WIDGETS.PL;
+  }
+
+  if (
+    normalized === "PD" ||
+    normalized.includes("LALIGA") ||
+    normalized.includes("LA LIGA") ||
+    normalized.includes("PRIMERA")
+  ) {
+    return SOFASCORE_STANDINGS_WIDGETS.PD;
+  }
+
+  if (normalized === "FL1" || normalized.includes("LIGUE 1")) {
+    return SOFASCORE_STANDINGS_WIDGETS.FL1;
+  }
+
+  if (normalized === "BL1" || normalized.includes("BUNDESLIGA")) {
+    return SOFASCORE_STANDINGS_WIDGETS.BL1;
+  }
+
+  return null;
 }
 
 function isPreMatchState(
@@ -1281,6 +1364,10 @@ export default function MatchInsightsSection({
     return isChampionsLeagueCompetition(competitionCode);
   }, [competitionCode]);
 
+  const sofaScoreStandingsWidget = useMemo(() => {
+    return resolveSofaScoreStandingsWidget(competitionCode);
+  }, [competitionCode]);
+
   const visibleTabs = useMemo(() => {
     const withChampionsLeagueTabs = <
       T extends Array<{ key: TabKey; label: string }>,
@@ -1554,7 +1641,7 @@ export default function MatchInsightsSection({
     };
 
     const loadTable = async () => {
-      if (championsLeague) {
+      if (sofaScoreStandingsWidget) {
         setTable(null);
         setTableError(null);
         setTableLoading(false);
@@ -1676,7 +1763,15 @@ export default function MatchInsightsSection({
     // Background refresh intentionally uses the current data snapshot
     // without retriggering the whole fetch cycle after every response.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchId, homeTeam, awayTeam, refreshTick, isPreMatch, championsLeague]);
+  }, [
+    matchId,
+    homeTeam,
+    awayTeam,
+    refreshTick,
+    isPreMatch,
+    championsLeague,
+    sofaScoreStandingsWidget,
+  ]);
 
   const sortedTableRows = useMemo(() => {
     return [...(table?.rows ?? [])].sort((a, b) => a.position - b.position);
@@ -2004,14 +2099,16 @@ export default function MatchInsightsSection({
     );
   };
 
-  const renderChampionsLeagueStandings = () => {
+  const renderSofaScoreStandings = (
+    widget: SofaScoreStandingsWidgetConfig
+  ) => {
     return (
       <div className="space-y-4">
         <SofaScoreStaticWidget
-          title="UEFA Champions League 25/26 standings"
-          src={CHAMPIONS_LEAGUE_STANDINGS_URL}
-          height={1763}
-          cropBottomPx={150}
+          title={widget.title}
+          src={widget.src}
+          height={widget.height}
+          cropBottomPx={widget.cropBottomPx}
           scrolling="no"
         />
       </div>
@@ -2042,8 +2139,8 @@ export default function MatchInsightsSection({
   };
 
   const renderTable = () => {
-    if (championsLeague) {
-      return renderChampionsLeagueStandings();
+    if (sofaScoreStandingsWidget) {
+      return renderSofaScoreStandings(sofaScoreStandingsWidget);
     }
 
     const hasData = !!table;
