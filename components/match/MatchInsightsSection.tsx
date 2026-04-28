@@ -2011,7 +2011,7 @@ export default function MatchInsightsSection({
           title="UEFA Champions League 25/26 standings"
           src={CHAMPIONS_LEAGUE_STANDINGS_URL}
           height={1763}
-          cropBottomPx={156}
+          cropBottomPx={150}
           scrolling="no"
         />
       </div>
