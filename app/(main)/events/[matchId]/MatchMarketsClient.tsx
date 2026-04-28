@@ -1465,7 +1465,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
       <MatchInsightsSection
         matchId={matchId}
-        competitionCode={competitionCode}
+        competitionCode={competitionCode || matchUI.leagueName}
         homeTeam={matchUI.home}
         awayTeam={matchUI.away}
         matchStatus={effectiveMatchStatus}

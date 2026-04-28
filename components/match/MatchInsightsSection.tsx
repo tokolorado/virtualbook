@@ -26,6 +26,7 @@ type TabKey =
   | "comparison"
   | "h2h"
   | "table"
+  | "playoff"
   | "liveStats"
   | "momentum"
   | "timeline";
@@ -173,9 +174,25 @@ type TimelineResponse = {
 };
 
 const AUTO_REFRESH_MS = 20_000;
+const CHAMPIONS_LEAGUE_STANDINGS_URL =
+  "https://widgets.sofascore.com/pl/embed/tournament/138314/season/76953/standings/UEFA%20Champions%20League%2025%2F26?widgetTitle=UEFA%20Champions%20League%2025%2F26&showCompetitionLogo=true";
+const CHAMPIONS_LEAGUE_PLAYOFF_URL =
+  "https://widgets.sofascore.com/pl/embed/unique-tournament/7/season/76953/cuptree/10850333?widgetTitle=UEFA Champions League 25/26, Knockout stage&showCompetitionLogo=true&widgetTheme=light";
+const CHAMPIONS_LEAGUE_SOURCE_URL =
+  "https://www.sofascore.com/pl/football/tournament/europe/uefa-champions-league/7#id:76953";
 
 function normalizeMatchStatus(status?: string | null) {
   return String(status ?? "").toUpperCase();
+}
+
+function isChampionsLeagueCompetition(competitionCode?: string | null) {
+  const normalized = String(competitionCode ?? "").trim().toUpperCase();
+
+  return (
+    normalized === "CL" ||
+    normalized.includes("CHAMPIONS LEAGUE") ||
+    normalized.includes("LIGA MISTRZ")
+  );
 }
 
 function isPreMatchState(
@@ -778,6 +795,55 @@ function StateBox({
   );
 }
 
+function SofaScoreStaticWidget({
+  title,
+  src,
+  height,
+  maxWidth,
+  scrolling,
+  sourceLabel,
+}: {
+  title: string;
+  src: string;
+  height: number;
+  maxWidth: number;
+  scrolling: "yes" | "no";
+  sourceLabel: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div
+        className="overflow-hidden rounded-3xl border border-neutral-800 bg-white"
+        style={{ maxWidth, width: "100%" }}
+      >
+        <iframe
+          id={title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}
+          title={title}
+          src={src}
+          width="100%"
+          height={height}
+          frameBorder="0"
+          scrolling={scrolling}
+          loading="lazy"
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+      </div>
+
+      <div className="text-xs text-neutral-500">
+        {sourceLabel} zapewniona przez{" "}
+        <a
+          target="_blank"
+          rel="noreferrer"
+          href={CHAMPIONS_LEAGUE_SOURCE_URL}
+          className="text-neutral-300 underline underline-offset-4 hover:text-white"
+        >
+          Sofascore
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function InlineWarning({ message }: { message: string }) {
   return (
     <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
@@ -1222,33 +1288,56 @@ export default function MatchInsightsSection({
     return canRenderLiveWidgets(matchStatus, isLive, isFinished);
   }, [matchStatus, isLive, isFinished]);
 
+  const championsLeague = useMemo(() => {
+    return isChampionsLeagueCompetition(competitionCode);
+  }, [competitionCode]);
+
   const visibleTabs = useMemo(() => {
-    if (isPreMatch) {
+    const withChampionsLeagueTabs = <
+      T extends Array<{ key: TabKey; label: string }>,
+    >(
+      tabs: T
+    ) => {
+      if (!championsLeague) return tabs;
+
+      const tableIndex = tabs.findIndex((tab) => tab.key === "table");
+      if (tableIndex === -1) {
+        return [...tabs, { key: "playoff" as const, label: "Play-off" }];
+      }
+
       return [
+        ...tabs.slice(0, tableIndex + 1),
+        { key: "playoff" as const, label: "Play-off" },
+        ...tabs.slice(tableIndex + 1),
+      ];
+    };
+
+    if (isPreMatch) {
+      return withChampionsLeagueTabs([
         { key: "lineups" as const, label: "Składy" },
         { key: "comparison" as const, label: "Porównanie" },
         { key: "h2h" as const, label: "H2H" },
         { key: "table" as const, label: "Tabela" },
-      ];
+      ]);
     }
 
     if (isLive) {
-      return [
+      return withChampionsLeagueTabs([
         { key: "lineups" as const, label: "Składy" },
         { key: "liveStats" as const, label: "Statystyki" },
         { key: "table" as const, label: "Tabela" },
         { key: "momentum" as const, label: "Momentum" },
         { key: "timeline" as const, label: "Timeline" },
-      ];
+      ]);
     }
 
-    return [
+    return withChampionsLeagueTabs([
       { key: "lineups" as const, label: "Składy" },
       { key: "liveStats" as const, label: "Statystyki" },
       { key: "table" as const, label: "Tabela" },
       { key: "timeline" as const, label: "Timeline" },
-    ];
-  }, [isPreMatch, isLive]);
+    ]);
+  }, [isPreMatch, isLive, championsLeague]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -1476,6 +1565,13 @@ export default function MatchInsightsSection({
     };
 
     const loadTable = async () => {
+      if (championsLeague) {
+        setTable(null);
+        setTableError(null);
+        setTableLoading(false);
+        return;
+      }
+
       if (!isBackgroundRefresh || !table) {
         setTableLoading(true);
       }
@@ -1588,7 +1684,10 @@ export default function MatchInsightsSection({
     return () => {
       controller.abort();
     };
-  }, [matchId, homeTeam, awayTeam, refreshTick, isPreMatch]);
+    // Background refresh intentionally uses the current data snapshot
+    // without retriggering the whole fetch cycle after every response.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchId, homeTeam, awayTeam, refreshTick, isPreMatch, championsLeague]);
 
   const sortedTableRows = useMemo(() => {
     return [...(table?.rows ?? [])].sort((a, b) => a.position - b.position);
@@ -1916,7 +2015,68 @@ export default function MatchInsightsSection({
     );
   };
 
+  const renderChampionsLeagueStandings = () => {
+    return (
+      <div className="space-y-4">
+        <Surface className="p-4">
+          <div className="text-sm font-semibold text-white">
+            Tabela Ligi Mistrzów
+          </div>
+          <div className="mt-2 text-sm text-neutral-400">
+            Oficjalny widget SofaScore dla UEFA Champions League 25/26.
+          </div>
+        </Surface>
+
+        <SofaScoreStaticWidget
+          title="UEFA Champions League 25/26 standings"
+          src={CHAMPIONS_LEAGUE_STANDINGS_URL}
+          height={1763}
+          maxWidth={768}
+          scrolling="no"
+          sourceLabel="Tabela"
+        />
+      </div>
+    );
+  };
+
+  const renderChampionsLeaguePlayoff = () => {
+    if (!championsLeague) {
+      return (
+        <StateBox
+          title="Play-off dostępny tylko dla Ligi Mistrzów"
+          description="Ta zakładka jest ukrywana przy meczach innych rozgrywek."
+        />
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        <Surface className="p-4">
+          <div className="text-sm font-semibold text-white">
+            Drabinka play-off Ligi Mistrzów
+          </div>
+          <div className="mt-2 text-sm text-neutral-400">
+            Drzewko fazy pucharowej UEFA Champions League 25/26.
+          </div>
+        </Surface>
+
+        <SofaScoreStaticWidget
+          title="UEFA Champions League 25/26 playoff"
+          src={CHAMPIONS_LEAGUE_PLAYOFF_URL}
+          height={872}
+          maxWidth={700}
+          scrolling="yes"
+          sourceLabel="Drabinka turnieju"
+        />
+      </div>
+    );
+  };
+
   const renderTable = () => {
+    if (championsLeague) {
+      return renderChampionsLeagueStandings();
+    }
+
     const hasData = !!table;
 
     if (tableLoading && !hasData) {
@@ -2296,9 +2456,11 @@ export default function MatchInsightsSection({
                 ? renderLiveStats()
                 : activeTab === "momentum"
                   ? renderMomentum()
-                  : activeTab === "timeline"
-                    ? renderTimeline()
-                    : renderTable()}
+                  : activeTab === "playoff"
+                    ? renderChampionsLeaguePlayoff()
+                    : activeTab === "timeline"
+                      ? renderTimeline()
+                      : renderTable()}
       </div>
     </section>
   );
