@@ -175,11 +175,9 @@ type TimelineResponse = {
 
 const AUTO_REFRESH_MS = 20_000;
 const CHAMPIONS_LEAGUE_STANDINGS_URL =
-  "https://widgets.sofascore.com/pl/embed/tournament/138314/season/76953/standings/UEFA%20Champions%20League%2025%2F26?widgetTitle=UEFA%20Champions%20League%2025%2F26&showCompetitionLogo=true";
+  "https://widgets.sofascore.com/pl/embed/tournament/138314/season/76953/standings/UEFA%20Champions%20League%2025%2F26?widgetTitle=UEFA%20Champions%20League%2025%2F26&showCompetitionLogo=true&widgetTheme=dark";
 const CHAMPIONS_LEAGUE_PLAYOFF_URL =
-  "https://widgets.sofascore.com/pl/embed/unique-tournament/7/season/76953/cuptree/10850333?widgetTitle=UEFA Champions League 25/26, Knockout stage&showCompetitionLogo=true&widgetTheme=light";
-const CHAMPIONS_LEAGUE_SOURCE_URL =
-  "https://www.sofascore.com/pl/football/tournament/europe/uefa-champions-league/7#id:76953";
+  "https://widgets.sofascore.com/pl/embed/unique-tournament/7/season/76953/cuptree/10850333?widgetTitle=UEFA Champions League 25/26, Knockout stage&showCompetitionLogo=true&widgetTheme=dark";
 
 function normalizeMatchStatus(status?: string | null) {
   return String(status ?? "").toUpperCase();
@@ -799,22 +797,22 @@ function SofaScoreStaticWidget({
   title,
   src,
   height,
-  maxWidth,
   scrolling,
-  sourceLabel,
 }: {
   title: string;
   src: string;
   height: number;
-  maxWidth: number;
   scrolling: "yes" | "no";
-  sourceLabel: string;
 }) {
+  const frameStyle: CSSProperties = {
+    height,
+  };
+
   return (
     <div className="space-y-2">
       <div
-        className="overflow-hidden rounded-3xl border border-neutral-800 bg-white"
-        style={{ maxWidth, width: "100%" }}
+        className="w-full overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950"
+        style={frameStyle}
       >
         <iframe
           id={title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}
@@ -827,18 +825,6 @@ function SofaScoreStaticWidget({
           loading="lazy"
           referrerPolicy="strict-origin-when-cross-origin"
         />
-      </div>
-
-      <div className="text-xs text-neutral-500">
-        {sourceLabel} zapewniona przez{" "}
-        <a
-          target="_blank"
-          rel="noreferrer"
-          href={CHAMPIONS_LEAGUE_SOURCE_URL}
-          className="text-neutral-300 underline underline-offset-4 hover:text-white"
-        >
-          Sofascore
-        </a>
       </div>
     </div>
   );
@@ -2018,22 +2004,11 @@ export default function MatchInsightsSection({
   const renderChampionsLeagueStandings = () => {
     return (
       <div className="space-y-4">
-        <Surface className="p-4">
-          <div className="text-sm font-semibold text-white">
-            Tabela Ligi Mistrzów
-          </div>
-          <div className="mt-2 text-sm text-neutral-400">
-            Oficjalny widget SofaScore dla UEFA Champions League 25/26.
-          </div>
-        </Surface>
-
         <SofaScoreStaticWidget
           title="UEFA Champions League 25/26 standings"
           src={CHAMPIONS_LEAGUE_STANDINGS_URL}
           height={1763}
-          maxWidth={768}
           scrolling="no"
-          sourceLabel="Tabela"
         />
       </div>
     );
@@ -2051,22 +2026,11 @@ export default function MatchInsightsSection({
 
     return (
       <div className="space-y-4">
-        <Surface className="p-4">
-          <div className="text-sm font-semibold text-white">
-            Drabinka play-off Ligi Mistrzów
-          </div>
-          <div className="mt-2 text-sm text-neutral-400">
-            Drzewko fazy pucharowej UEFA Champions League 25/26.
-          </div>
-        </Surface>
-
         <SofaScoreStaticWidget
           title="UEFA Champions League 25/26 playoff"
           src={CHAMPIONS_LEAGUE_PLAYOFF_URL}
           height={872}
-          maxWidth={700}
           scrolling="yes"
-          sourceLabel="Drabinka turnieju"
         />
       </div>
     );
