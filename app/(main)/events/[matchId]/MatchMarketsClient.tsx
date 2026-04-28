@@ -77,6 +77,27 @@ type MarketUI = {
   selections: MarketSelectionUI[];
 };
 
+type LineMarketFamily = {
+  key: string;
+  label: string;
+  sortOrder: number;
+};
+
+type MarketDisplayBlock =
+  | {
+      type: "line";
+      key: string;
+      label: string;
+      sortOrder: number;
+      markets: MarketUI[];
+    }
+  | {
+      type: "single";
+      key: string;
+      sortOrder: number;
+      market: MarketUI;
+    };
+
 const BETTING_CLOSE_BUFFER_MS = 60_000;
 const ESTIMATED_LIVE_AFTER_KICKOFF_MS = 150 * 60 * 1000;
 
@@ -625,6 +646,186 @@ function selectionGridClass(count: number) {
   return "grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2";
 }
 
+function lineFromMarketId(marketId: string) {
+  const underscore = marketId.match(/(?:^|_)(\d+)_(\d+)$/);
+  if (underscore) {
+    const value = Number(`${underscore[1]}.${underscore[2]}`);
+    return {
+      value,
+      label: `${underscore[1]},${underscore[2]}`,
+    };
+  }
+
+  const decimal = marketId.match(/(?:^|_)(\d+\.\d+)$/);
+  if (decimal) {
+    const value = Number(decimal[1]);
+    return {
+      value,
+      label: decimal[1].replace(".", ","),
+    };
+  }
+
+  return null;
+}
+
+function getLineMarketFamily(marketId: string): LineMarketFamily | null {
+  if (
+    /^(ou|ft_ou)_\d+_\d+$/.test(marketId) ||
+    /^ft_total_\d+(?:[._]\d+)?$/.test(marketId)
+  ) {
+    return {
+      key: "full_time_goals",
+      label: "Liczba goli w meczu",
+      sortOrder: 10,
+    };
+  }
+
+  if (
+    /^home_ou_\d+_\d+$/.test(marketId) ||
+    /^ft_home_tg_\d+(?:[._]\d+)?$/.test(marketId)
+  ) {
+    return { key: "home_goals", label: "Gole gospodarzy", sortOrder: 10 };
+  }
+
+  if (
+    /^away_ou_\d+_\d+$/.test(marketId) ||
+    /^ft_away_tg_\d+(?:[._]\d+)?$/.test(marketId)
+  ) {
+    return { key: "away_goals", label: "Gole gości", sortOrder: 10 };
+  }
+
+  if (/^ht_ou_\d+_\d+$/.test(marketId)) {
+    return {
+      key: "first_half_goals",
+      label: "Gole w 1. połowie",
+      sortOrder: 20,
+    };
+  }
+
+  if (/^ht_home_ou_\d+_\d+$/.test(marketId)) {
+    return {
+      key: "first_half_home_goals",
+      label: "Gole gospodarzy w 1. połowie",
+      sortOrder: 30,
+    };
+  }
+
+  if (/^ht_away_ou_\d+_\d+$/.test(marketId)) {
+    return {
+      key: "first_half_away_goals",
+      label: "Gole gości w 1. połowie",
+      sortOrder: 40,
+    };
+  }
+
+  if (/^(st|sh)_ou_\d+_\d+$/.test(marketId)) {
+    return {
+      key: "second_half_goals",
+      label: "Gole w 2. połowie",
+      sortOrder: 20,
+    };
+  }
+
+  if (/^(st|sh)_home_ou_\d+_\d+$/.test(marketId)) {
+    return {
+      key: "second_half_home_goals",
+      label: "Gole gospodarzy w 2. połowie",
+      sortOrder: 30,
+    };
+  }
+
+  if (/^(st|sh)_away_ou_\d+_\d+$/.test(marketId)) {
+    return {
+      key: "second_half_away_goals",
+      label: "Gole gości w 2. połowie",
+      sortOrder: 40,
+    };
+  }
+
+  return null;
+}
+
+function lineHint(marketId: string) {
+  const line = lineFromMarketId(marketId);
+  if (!line || !Number.isFinite(line.value)) return null;
+
+  const underMax = Math.floor(line.value);
+  const overMin = underMax + 1;
+  const underLabel = underMax <= 0 ? "0" : `0-${underMax}`;
+
+  return `Powyżej = ${overMin}+ · Poniżej = ${underLabel}`;
+}
+
+function formatThresholdCount(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+
+  if (count === 1) return "1 próg";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) {
+    return `${count} progi`;
+  }
+
+  return `${count} progów`;
+}
+
+function sortLineMarkets(a: MarketUI, b: MarketUI) {
+  const aLine = lineFromMarketId(a.marketId);
+  const bLine = lineFromMarketId(b.marketId);
+  const aValue = aLine?.value ?? Number.MAX_SAFE_INTEGER;
+  const bValue = bLine?.value ?? Number.MAX_SAFE_INTEGER;
+
+  if (aValue !== bValue) return aValue - bValue;
+  return a.sortOrder - b.sortOrder;
+}
+
+function buildMarketDisplayBlocks(markets: MarketUI[]): MarketDisplayBlock[] {
+  const blocks: MarketDisplayBlock[] = [];
+  const lineBlocks = new Map<
+    string,
+    Extract<MarketDisplayBlock, { type: "line" }>
+  >();
+
+  for (const market of markets) {
+    const family = getLineMarketFamily(market.marketId);
+
+    if (!family) {
+      blocks.push({
+        type: "single",
+        key: market.marketId,
+        sortOrder: market.sortOrder,
+        market,
+      });
+      continue;
+    }
+
+    const key = `${market.groupKey}__${family.key}`;
+    let block = lineBlocks.get(key);
+
+    if (!block) {
+      block = {
+        type: "line",
+        key,
+        label: family.label,
+        sortOrder: market.sortOrder + family.sortOrder / 100,
+        markets: [],
+      };
+      lineBlocks.set(key, block);
+      blocks.push(block);
+    }
+
+    block.markets.push(market);
+  }
+
+  for (const block of lineBlocks.values()) {
+    block.markets.sort(sortLineMarkets);
+  }
+
+  return blocks.sort((a, b) => {
+    if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+    return a.key.localeCompare(b.key);
+  });
+}
+
 function hasVisibleScore(match: MatchUI) {
   return match.homeScore !== null || match.awayScore !== null;
 }
@@ -1054,7 +1255,10 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         key,
         label: value.label,
         order: value.order,
-        markets: value.markets.sort((a, b) => a.sortOrder - b.sortOrder),
+        marketCount: value.markets.length,
+        blocks: buildMarketDisplayBlocks(
+          value.markets.sort((a, b) => a.sortOrder - b.sortOrder)
+        ),
       }))
       .sort((a, b) => a.order - b.order);
   }, [markets]);
@@ -1116,6 +1320,67 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
       </span>
     );
   }, [closed, effectiveIsLive, matchUI.isFinished]);
+
+  const renderSelectionButton = (
+    market: MarketUI,
+    item: MarketSelectionUI,
+    compact = false
+  ) => {
+    const hasOdd =
+      typeof item.odd === "number" && Number.isFinite(item.odd) && item.odd > 0;
+
+    const active = isActivePick(matchId, market.marketId, item.selection);
+
+    return (
+      <button
+        key={`${market.marketId}__${item.selection}`}
+        disabled={!hasOdd || closed}
+        onClick={() => {
+          if (!hasOdd || closed) return;
+
+          if (active) {
+            removeFromSlip(matchId, market.marketId);
+            return;
+          }
+
+          addToSlip({
+            matchId,
+            competitionCode,
+            league: matchUI.leagueName,
+            home: matchUI.home,
+            away: matchUI.away,
+            market: market.marketId,
+            pick: item.selection,
+            odd: item.odd!,
+            kickoffUtc: kickoffIso || null,
+          });
+        }}
+        className={cn(
+          "rounded-2xl border text-left transition",
+          compact ? "min-h-[62px] px-3 py-2.5" : "px-3 py-3",
+          !hasOdd || closed
+            ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+            : active
+              ? "border-neutral-200 bg-white text-black"
+              : "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-800"
+        )}
+        title={
+          !hasOdd
+            ? "Brak kursu w bazie"
+            : closed
+              ? "Zakłady zamknięte"
+              : active
+                ? "Kliknij ponownie, aby usunąć z kuponu"
+                : `Kurs: ${formatOdd(item.odd!)}`
+        }
+      >
+        <div className="truncate text-sm font-medium">{item.label}</div>
+        <div className="mt-1 text-sm font-semibold">
+          {hasOdd ? formatOdd(item.odd!) : "—"}
+        </div>
+      </button>
+    );
+  };
 
   return (
     <div className="space-y-5">
@@ -1238,86 +1503,92 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                 {section.label}
               </h3>
               <span className="rounded-full border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-[11px] font-semibold text-neutral-300">
-                {section.markets.length}
+                {section.marketCount}
               </span>
             </div>
 
-            {section.markets.map((market) => (
-              <div
-                key={market.marketId}
-                className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4"
-              >
-                <div className="text-sm font-semibold text-white">
-                  {market.marketLabel}
-                </div>
-
-                <div className={`mt-3 ${selectionGridClass(market.selections.length)}`}>
-                  {market.selections.map((item) => {
-                    const hasOdd =
-                      typeof item.odd === "number" &&
-                      Number.isFinite(item.odd) &&
-                      item.odd > 0;
-
-                    const active = isActivePick(
-                      matchId,
-                      market.marketId,
-                      item.selection
-                    );
-
-                    return (
-                      <button
-                        key={`${market.marketId}__${item.selection}`}
-                        disabled={!hasOdd || closed}
-                        onClick={() => {
-                          if (!hasOdd || closed) return;
-
-                          if (active) {
-                            removeFromSlip(matchId, market.marketId);
-                            return;
-                          }
-
-                          addToSlip({
-                            matchId,
-                            competitionCode,
-                            league: matchUI.leagueName,
-                            home: matchUI.home,
-                            away: matchUI.away,
-                            market: market.marketId,
-                            pick: item.selection,
-                            odd: item.odd!,
-                            kickoffUtc: kickoffIso || null,
-                          });
-                        }}
-                        className={cn(
-                          "rounded-2xl border px-3 py-3 text-left transition",
-                          !hasOdd || closed
-                            ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
-                            : active
-                              ? "border-neutral-200 bg-white text-black"
-                              : "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-800"
-                        )}
-                        title={
-                          !hasOdd
-                            ? "Brak kursu w bazie"
-                            : closed
-                              ? "Zakłady zamknięte"
-                              : active
-                                ? "Kliknij ponownie, aby usunąć z kuponu"
-                                : `Kurs: ${formatOdd(item.odd!)}`
-                        }
-                      >
-                        <div className="truncate text-sm font-medium">
-                          {item.label}
+            {section.blocks.map((block) => {
+              if (block.type === "line") {
+                return (
+                  <div
+                    key={block.key}
+                    className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-sm font-semibold text-white">
+                          {block.label}
                         </div>
-                        <div className="mt-1 text-sm font-semibold">
-                          {hasOdd ? formatOdd(item.odd!) : "—"}
-                        </div>
-                      </button>
-                    );
-                  })}
+                      </div>
+                      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-[11px] font-semibold text-neutral-300">
+                        {formatThresholdCount(block.markets.length)}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 overflow-hidden rounded-2xl border border-neutral-800">
+                      {block.markets.map((market) => {
+                        const line = lineFromMarketId(market.marketId);
+                        const hint = lineHint(market.marketId);
+
+                        return (
+                          <div
+                            key={market.marketId}
+                            className="grid gap-3 border-t border-neutral-800 p-3 first:border-t-0 sm:grid-cols-[minmax(120px,0.55fr)_1fr] sm:items-center"
+                          >
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.16em] text-neutral-500">
+                                Próg
+                              </div>
+                              <div className="mt-1 text-base font-semibold text-white">
+                                {line ? line.label : market.marketLabel}
+                              </div>
+                              {hint ? (
+                                <div className="mt-1 text-xs text-neutral-500">
+                                  {hint}
+                                </div>
+                              ) : null}
+                            </div>
+
+                            <div
+                              className={selectionGridClass(
+                                market.selections.length
+                              )}
+                            >
+                              {market.selections.map((item) =>
+                                renderSelectionButton(market, item, true)
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              }
+
+              const { market } = block;
+
+              return (
+                <div
+                  key={market.marketId}
+                  className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4"
+                >
+                  <div className="text-sm font-semibold text-white">
+                    {market.marketLabel}
+                  </div>
+
+                  <div
+                    className={`mt-3 ${selectionGridClass(
+                      market.selections.length
+                    )}`}
+                  >
+                    {market.selections.map((item) =>
+                      renderSelectionButton(market, item)
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         ))
       ) : (

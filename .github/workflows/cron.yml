@@ -28,6 +28,12 @@ jobs:
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
             --data '{"lookbackHours":12,"lookaheadHours":6,"batchLimit":80,"throttleMs":1200,"maxRetries":2}'
 
+      - name: Call hot settle cron
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
+        run: |
+          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/settle" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
+
       - name: Call match-center pre-match cron
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/15 * * * *'
         run: |
