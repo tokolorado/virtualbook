@@ -37,6 +37,14 @@ type BetItemRow = {
   created_at: string;
 };
 
+type BetTimelineStep = {
+  id: string;
+  at: string | null;
+  title: string;
+  description: string;
+  tone: "neutral" | "green" | "red" | "yellow" | "blue";
+};
+
 const fmt2 = (n: number | null | undefined) => Number(n ?? 0).toFixed(2);
 
 function badgeClass(status: string) {
@@ -66,6 +74,104 @@ function itemResultLabel(r: string | null) {
   return r;
 }
 
+function timelineToneClass(tone: BetTimelineStep["tone"]) {
+  if (tone === "green") return "border-green-500/30 bg-green-500/10";
+  if (tone === "red") return "border-red-500/30 bg-red-500/10";
+  if (tone === "yellow") return "border-yellow-500/30 bg-yellow-500/10";
+  if (tone === "blue") return "border-sky-500/30 bg-sky-500/10";
+  return "border-neutral-800 bg-neutral-950/60";
+}
+
+function timelineDotClass(tone: BetTimelineStep["tone"]) {
+  if (tone === "green") return "bg-green-400";
+  if (tone === "red") return "bg-red-400";
+  if (tone === "yellow") return "bg-yellow-400";
+  if (tone === "blue") return "bg-sky-400";
+  return "bg-neutral-500";
+}
+
+function formatTimelineDate(value: string | null) {
+  if (!value) return "Czas nieznany";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Czas nieznany";
+  return date.toLocaleString("pl-PL");
+}
+
+function buildBetTimeline(bet: BetRow, items: BetItemRow[]): BetTimelineStep[] {
+  const steps: BetTimelineStep[] = [
+    {
+      id: "bet-created",
+      at: bet.created_at,
+      title: "Kupon postawiony",
+      description: `Stawka ${fmt2(bet.stake)} VB, kurs łączny ${fmt2(bet.total_odds)}.`,
+      tone: "blue",
+    },
+  ];
+
+  for (const item of items) {
+    const labels = formatBetSelectionLabels({
+      market: item.market,
+      pick: item.pick,
+      home: item.home,
+      away: item.away,
+    });
+
+    if (item.kickoff_at) {
+      steps.push({
+        id: `${item.id}-kickoff`,
+        at: item.kickoff_at,
+        title: "Start meczu",
+        description: `${item.home} vs ${item.away} · ${labels.marketLabel}: ${labels.selectionLabel}.`,
+        tone: "neutral",
+      });
+    }
+
+    if (item.settled_at || item.result) {
+      const result = String(item.result ?? "").toLowerCase();
+      steps.push({
+        id: `${item.id}-settled`,
+        at: item.settled_at ?? bet.settled_at ?? item.created_at,
+        title: "Pozycja rozliczona",
+        description: `${labels.marketLabel}: ${labels.selectionLabel} · wynik: ${itemResultLabel(item.result)}.`,
+        tone:
+          result === "won"
+            ? "green"
+            : result === "lost"
+              ? "red"
+              : result === "void"
+                ? "yellow"
+                : "neutral",
+      });
+    }
+  }
+
+  if (bet.settled_at || bet.settled) {
+    const status = String(bet.status).toLowerCase();
+    steps.push({
+      id: "bet-settled",
+      at: bet.settled_at ?? null,
+      title: "Kupon rozliczony",
+      description: `Status: ${statusLabel(bet.status)} · wypłata ${
+        bet.payout != null ? `${fmt2(bet.payout)} VB` : "nieustalona"
+      }.`,
+      tone:
+        status === "won"
+          ? "green"
+          : status === "lost"
+            ? "red"
+            : status === "void"
+              ? "yellow"
+              : "neutral",
+    });
+  }
+
+  return steps.sort((a, b) => {
+    const aTime = Date.parse(a.at ?? "");
+    const bTime = Date.parse(b.at ?? "");
+    return (Number.isFinite(aTime) ? aTime : 0) - (Number.isFinite(bTime) ? bTime : 0);
+  });
+}
+
 export default function BetDetailsPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
@@ -86,6 +192,11 @@ export default function BetDetailsPage() {
 
     return { total, settledOk, open, hasLost, nonVoidCount };
   }, [items]);
+
+  const timeline = useMemo(() => {
+    if (!bet) return [];
+    return buildBetTimeline(bet, items);
+  }, [bet, items]);
 
   const load = async () => {
     if (!betId) return;
@@ -266,6 +377,42 @@ export default function BetDetailsPage() {
           <span>
             Otwarte: <b className="text-white">{summary.open}</b>
           </span>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="font-semibold">Timeline kuponu</div>
+            <div className="mt-1 text-xs text-neutral-500">
+              Chronologia postawienia, startu meczów i rozliczeń.
+            </div>
+          </div>
+          <div className="text-xs text-neutral-500">kroki: {timeline.length}</div>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {timeline.map((step) => (
+            <div
+              key={step.id}
+              className={`relative rounded-2xl border p-4 pl-11 ${timelineToneClass(step.tone)}`}
+            >
+              <span
+                className={`absolute left-4 top-5 h-3 w-3 rounded-full ${timelineDotClass(step.tone)}`}
+              />
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="font-semibold text-white">{step.title}</div>
+                  <div className="mt-1 text-sm leading-6 text-neutral-300">
+                    {step.description}
+                  </div>
+                </div>
+                <div className="shrink-0 text-xs text-neutral-500">
+                  {formatTimelineDate(step.at)}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

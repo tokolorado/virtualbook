@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { notFound, useParams } from "next/navigation";
+import { buildPlayerReputation } from "@/lib/playerReputation";
 import {
   ResponsiveContainer,
   LineChart,
@@ -528,6 +529,23 @@ export default function PublicUserProfilePage() {
   const roiValue = toNum(profile?.roi);
   const winrateValue = toNum(profile?.winrate);
 
+  const reputation = useMemo(() => {
+    if (!profile) return null;
+
+    return buildPlayerReputation({
+      betsCount: profile.bets_count,
+      wonBets: profile.won_bets,
+      lostBets: profile.lost_bets,
+      voidBets: profile.void_bets,
+      profit: profile.profit,
+      roi: profile.roi,
+      winrate: profile.winrate,
+      balance: profile.balance_vb,
+      currentWinStreak: streak?.currentWinStreak ?? 0,
+      bestWinStreak: streak?.bestWinStreak ?? 0,
+    });
+  }, [profile, streak]);
+
   const profileUrl = profile ? `/users/${encodeURIComponent(profile.username)}` : "";
 
   const copyProfileUrl = async () => {
@@ -594,6 +612,18 @@ export default function PublicUserProfilePage() {
                 <StatusPill>
                   Rozliczone: {settledBets}
                 </StatusPill>
+
+                {reputation ? (
+                  <>
+                    <StatusPill tone={reputation.tone}>
+                      Reputacja: {reputation.title}
+                    </StatusPill>
+
+                    <StatusPill tone="purple">
+                      Score: {reputation.score}/100
+                    </StatusPill>
+                  </>
+                ) : null}
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
@@ -841,6 +871,105 @@ export default function PublicUserProfilePage() {
         </div>
 
         <aside className="min-w-0 space-y-5">
+          {reputation ? (
+            <SurfaceCard className="p-5">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                Reputacja
+              </div>
+
+              <div className="mt-3 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-2xl font-semibold text-white">
+                    {reputation.title}
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-neutral-400">
+                    {reputation.subtitle}
+                  </p>
+                </div>
+
+                <div className={cn("rounded-2xl border px-4 py-3 text-right", toneCardClass(reputation.tone))}>
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-neutral-500">
+                    Score
+                  </div>
+                  <div className="mt-1 text-2xl font-semibold text-white">
+                    {reputation.score}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 h-2 overflow-hidden rounded-full bg-neutral-900">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-sky-500 via-violet-500 to-green-400"
+                  style={{ width: `${reputation.score}%` }}
+                />
+              </div>
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <StatusPill tone="purple">
+                  Trofea: {reputation.earnedTrophies}/{reputation.trophies.length}
+                </StatusPill>
+                <StatusPill tone={reputation.tone}>{reputation.title}</StatusPill>
+              </div>
+            </SurfaceCard>
+          ) : null}
+
+          {reputation ? (
+            <SurfaceCard className="p-5">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                Trofea i kolekcje
+              </div>
+
+              <div className="mt-3 text-2xl font-semibold text-white">
+                Kolekcja gracza
+              </div>
+
+              <div className="mt-5 grid gap-3">
+                {reputation.trophies.map((trophy) => {
+                  const progressPct = Math.round(
+                    Math.min((trophy.progress / trophy.target) * 100, 100)
+                  );
+
+                  return (
+                    <div
+                      key={trophy.id}
+                      className={cn(
+                        "rounded-3xl border p-4",
+                        trophy.earned
+                          ? toneCardClass(trophy.tone)
+                          : "border-neutral-800 bg-neutral-950/80 opacity-75"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-white">
+                            {trophy.title}
+                          </div>
+                          <div className="mt-1 text-xs leading-5 text-neutral-400">
+                            {trophy.description}
+                          </div>
+                        </div>
+
+                        <StatusPill tone={trophy.earned ? trophy.tone : "neutral"}>
+                          {trophy.earned ? "zdobyte" : `${progressPct}%`}
+                        </StatusPill>
+                      </div>
+
+                      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-neutral-900">
+                        <div
+                          className={cn(
+                            "h-full rounded-full",
+                            trophy.earned ? "bg-green-400" : "bg-neutral-600"
+                          )}
+                          style={{ width: `${progressPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </SurfaceCard>
+          ) : null}
+
           <SurfaceCard className="p-5">
             <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
               Forma gracza

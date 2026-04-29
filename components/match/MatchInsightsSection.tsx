@@ -2468,6 +2468,16 @@ export default function MatchInsightsSection({
     }
   };
 
+  const premiumStatusLabel = isLive
+    ? "Live center"
+    : isFinished
+      ? "Post-match"
+      : "Pre-match scout";
+
+  const premiumDataLabel = championsLeague
+    ? "SofaScore, football-data, CL widgets"
+    : "SofaScore i football-data";
+
   return (
     <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -2508,6 +2518,44 @@ export default function MatchInsightsSection({
               onClick={() => setActiveTab(tab.key)}
             />
           ))}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">
+            Tryb
+          </div>
+          <div className="mt-2 text-sm font-semibold text-sky-200">
+            {premiumStatusLabel}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">
+            Moduły
+          </div>
+          <div className="mt-2 text-sm font-semibold text-white">
+            {visibleTabs.length} aktywnych sekcji
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">
+            Dane
+          </div>
+          <div className="mt-2 text-sm font-semibold text-white">
+            {premiumDataLabel}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-green-500/20 bg-green-500/10 p-4">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">
+            Refresh
+          </div>
+          <div className="mt-2 text-sm font-semibold text-green-200">
+            auto co {Math.round(AUTO_REFRESH_MS / 1000)} s
+          </div>
         </div>
       </div>
 

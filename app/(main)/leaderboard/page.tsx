@@ -3,7 +3,6 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
 
 type LeaderboardRow = {
   id: string;
@@ -17,9 +16,31 @@ type LeaderboardRow = {
   profit: number | string | null;
   roi: number | string | null;
   winrate: number | string | null;
+  weekly_profit?: number | string | null;
+  weekly_won_bets?: number | string | null;
+  best_win_streak?: number | string | null;
+  current_win_streak?: number | string | null;
+  underdog_wins?: number | string | null;
+  underdog_profit?: number | string | null;
+  winning_bets?: number | string | null;
 };
 
-type SortKey = "profit" | "balance" | "roi" | "winrate";
+type SortKey =
+  | "profit"
+  | "balance"
+  | "roi"
+  | "winrate"
+  | "weekly"
+  | "streak"
+  | "underdog"
+  | "wins";
+
+type RankingsResponse = {
+  ok: boolean;
+  error?: string;
+  rows?: LeaderboardRow[];
+  generatedAt?: string;
+};
 
 const MIN_BETS_FOR_RATE_RANKING = 5;
 
@@ -63,7 +84,11 @@ function sortLabel(sortBy: SortKey) {
   if (sortBy === "profit") return "Profit";
   if (sortBy === "balance") return "Saldo";
   if (sortBy === "roi") return "ROI";
-  return "Winrate";
+  if (sortBy === "winrate") return "Winrate";
+  if (sortBy === "weekly") return "Gracz tygodnia";
+  if (sortBy === "streak") return "Seria wygranych";
+  if (sortBy === "underdog") return "Underdog hunter";
+  return "Trafione kupony";
 }
 
 function medalBg(index: number) {
@@ -289,10 +314,14 @@ function PodiumCard({
   const balance = toNum(row.balance_vb);
   const betsCount = toNum(row.bets_count);
   const activeBets = toNum(row.active_bets);
+  const weeklyProfit = toNum(row.weekly_profit);
+  const bestWinStreak = toNum(row.best_win_streak);
+  const underdogWins = toNum(row.underdog_wins);
+  const winningBets = toNum(row.winning_bets ?? row.won_bets);
   const rateEligible = betsCount >= MIN_BETS_FOR_RATE_RANKING;
   const trend = trendLabel(profit, roi, winrate);
 
-  const primaryMetric =
+  let primaryMetric =
     sortBy === "profit"
       ? `${profit > 0 ? "+" : ""}${fmt(profit)} VB`
       : sortBy === "balance"
@@ -304,6 +333,16 @@ function PodiumCard({
           : rateEligible
             ? fmtPct(winrate)
             : "—";
+
+  if (sortBy === "weekly") {
+    primaryMetric = `${weeklyProfit > 0 ? "+" : ""}${fmt(weeklyProfit)} VB`;
+  } else if (sortBy === "streak") {
+    primaryMetric = `${fmtInt(bestWinStreak)} wygr. z rzędu`;
+  } else if (sortBy === "underdog") {
+    primaryMetric = `${fmtInt(underdogWins)} trafień`;
+  } else if (sortBy === "wins") {
+    primaryMetric = `${fmtInt(winningBets)} trafień`;
+  }
 
   return (
     <div
@@ -419,18 +458,21 @@ export default function LeaderboardPage() {
     setLoadError(null);
 
     try {
-      const { data, error } = await supabase
-        .from("leaderboard_global")
-        .select("*");
+      const response = await fetch("/api/leaderboard/rankings", {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as RankingsResponse;
+      const error = { message: payload.error ?? `HTTP ${response.status}` };
+      const data = payload.rows ?? [];
 
-      if (error) {
+      if (!response.ok || !payload.ok) {
         setRows([]);
         setLoadError(`Nie udało się pobrać rankingu: ${error.message}`);
         return;
       }
 
       setRows((data ?? []) as LeaderboardRow[]);
-      setLastLoadedAt(new Date().toISOString());
+      setLastLoadedAt(payload.generatedAt ?? new Date().toISOString());
     } catch (error) {
       setRows([]);
       setLoadError(
@@ -475,6 +517,16 @@ export default function LeaderboardPage() {
 
       const aBets = toNum(a.bets_count);
       const bBets = toNum(b.bets_count);
+      const aWeeklyProfit = toNum(a.weekly_profit);
+      const bWeeklyProfit = toNum(b.weekly_profit);
+      const aBestStreak = toNum(a.best_win_streak);
+      const bBestStreak = toNum(b.best_win_streak);
+      const aUnderdogWins = toNum(a.underdog_wins);
+      const bUnderdogWins = toNum(b.underdog_wins);
+      const aUnderdogProfit = toNum(a.underdog_profit);
+      const bUnderdogProfit = toNum(b.underdog_profit);
+      const aWinningBets = toNum(a.winning_bets ?? a.won_bets);
+      const bWinningBets = toNum(b.winning_bets ?? b.won_bets);
 
       if (sortBy === "profit") {
         if (bProfit !== aProfit) return bProfit - aProfit;
@@ -496,6 +548,31 @@ export default function LeaderboardPage() {
         if (aEligible && bEligible && bRoi !== aRoi) return bRoi - aRoi;
         if (bProfit !== aProfit) return bProfit - aProfit;
         return bBets - aBets;
+      }
+
+      if (sortBy === "weekly") {
+        if (bWeeklyProfit !== aWeeklyProfit) return bWeeklyProfit - aWeeklyProfit;
+        if (bWinningBets !== aWinningBets) return bWinningBets - aWinningBets;
+        return bProfit - aProfit;
+      }
+
+      if (sortBy === "streak") {
+        if (bBestStreak !== aBestStreak) return bBestStreak - aBestStreak;
+        if (bWinningBets !== aWinningBets) return bWinningBets - aWinningBets;
+        return bProfit - aProfit;
+      }
+
+      if (sortBy === "underdog") {
+        if (bUnderdogWins !== aUnderdogWins) return bUnderdogWins - aUnderdogWins;
+        if (bUnderdogProfit !== aUnderdogProfit) {
+          return bUnderdogProfit - aUnderdogProfit;
+        }
+        return bProfit - aProfit;
+      }
+
+      if (sortBy === "wins") {
+        if (bWinningBets !== aWinningBets) return bWinningBets - aWinningBets;
+        return bProfit - aProfit;
       }
 
       const aEligible = aBets >= MIN_BETS_FOR_RATE_RANKING;
@@ -650,6 +727,30 @@ export default function LeaderboardPage() {
                 label="Winrate"
                 onClick={() => setSortBy("winrate")}
               />
+
+              <SortButton
+                active={sortBy === "weekly"}
+                label="Gracz tygodnia"
+                onClick={() => setSortBy("weekly")}
+              />
+
+              <SortButton
+                active={sortBy === "streak"}
+                label="Seria"
+                onClick={() => setSortBy("streak")}
+              />
+
+              <SortButton
+                active={sortBy === "underdog"}
+                label="Underdog"
+                onClick={() => setSortBy("underdog")}
+              />
+
+              <SortButton
+                active={sortBy === "wins"}
+                label="Trafione"
+                onClick={() => setSortBy("wins")}
+              />
             </div>
           </div>
 
@@ -742,7 +843,7 @@ export default function LeaderboardPage() {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1080px] text-sm">
+              <table className="w-full min-w-[1320px] text-sm">
                 <thead className="border-b border-neutral-800 text-neutral-400">
                   <tr>
                     <th className="w-14 px-4 py-4 text-left font-medium">#</th>
@@ -764,6 +865,27 @@ export default function LeaderboardPage() {
                         active={sortBy === "winrate"}
                       />
                     </th>
+                    <th className="px-4 py-4 text-right font-medium">
+                      <HeaderLabel
+                        label="Tydzień"
+                        active={sortBy === "weekly"}
+                      />
+                    </th>
+                    <th className="px-4 py-4 text-right font-medium">
+                      <HeaderLabel
+                        label="Seria"
+                        active={sortBy === "streak"}
+                      />
+                    </th>
+                    <th className="px-4 py-4 text-right font-medium">
+                      <HeaderLabel
+                        label="Underdog"
+                        active={sortBy === "underdog"}
+                      />
+                    </th>
+                    <th className="px-4 py-4 text-right font-medium">
+                      <HeaderLabel label="Trafione" active={sortBy === "wins"} />
+                    </th>
                     <th className="px-4 py-4 text-right font-medium">Kupony</th>
                     <th className="px-4 py-4 text-right font-medium">W grze</th>
                     <th className="px-4 py-4 text-right font-medium">Won</th>
@@ -779,6 +901,11 @@ export default function LeaderboardPage() {
                     const winrate = toNum(row.winrate);
                     const betsCount = toNum(row.bets_count);
                     const activeBets = toNum(row.active_bets);
+                    const weeklyProfit = toNum(row.weekly_profit);
+                    const bestWinStreak = toNum(row.best_win_streak);
+                    const underdogWins = toNum(row.underdog_wins);
+                    const underdogProfit = toNum(row.underdog_profit);
+                    const winningBets = toNum(row.winning_bets ?? row.won_bets);
                     const rateEligible =
                       betsCount >= MIN_BETS_FOR_RATE_RANKING;
                     const username = row.username?.trim() || "gracz";
@@ -866,6 +993,32 @@ export default function LeaderboardPage() {
                           }
                         >
                           {rateEligible ? fmtPct(winrate) : "—"}
+                        </td>
+
+                        <td
+                          className={cn(
+                            "px-4 py-5 text-right font-semibold",
+                            metricColor(weeklyProfit)
+                          )}
+                        >
+                          {weeklyProfit > 0 ? "+" : ""}
+                          {fmt(weeklyProfit)} VB
+                        </td>
+
+                        <td className="px-4 py-5 text-right text-violet-300">
+                          {fmtInt(bestWinStreak)}
+                        </td>
+
+                        <td className="px-4 py-5 text-right text-sky-300">
+                          <div className="font-semibold">{fmtInt(underdogWins)}</div>
+                          <div className={cn("text-xs", metricColor(underdogProfit))}>
+                            {underdogProfit > 0 ? "+" : ""}
+                            {fmt(underdogProfit)} VB
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-5 text-right font-semibold text-green-300">
+                          {fmtInt(winningBets)}
                         </td>
 
                         <td className="px-4 py-5 text-right text-neutral-200">
