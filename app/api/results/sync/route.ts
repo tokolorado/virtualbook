@@ -16,13 +16,53 @@ const LOOKBACK_HOURS_DEFAULT = 12;
 const LOOKAHEAD_HOURS_DEFAULT = 6;
 const BATCH_LIMIT_DEFAULT = 80;
 
-function jsonError(message: string, status = 500, extra?: any) {
+type JsonObject = Record<string, unknown>;
+type SupabaseAdminClient = ReturnType<typeof supabaseAdmin>;
+
+type FootballDataScoreSide = {
+  home?: unknown;
+  away?: unknown;
+};
+
+type FootballDataScore = {
+  fullTime?: FootballDataScoreSide | null;
+  regularTime?: FootballDataScoreSide | null;
+  halfTime?: FootballDataScoreSide | null;
+};
+
+type FootballDataStatusObject = {
+  minute?: unknown;
+  injuryTime?: unknown;
+};
+
+type FootballDataMatch = {
+  id?: unknown;
+  status?: unknown;
+  score?: FootballDataScore | null;
+  minute?: unknown;
+  injuryTime?: unknown;
+};
+
+type FootballDataMatchesResponse = JsonObject & {
+  matches?: FootballDataMatch[];
+};
+
+type ApiCacheLockRow = {
+  updated_at: string | null;
+};
+
+function jsonError(message: string, status = 500, extra?: JsonObject) {
   return NextResponse.json({ error: message, ...extra }, { status });
 }
 
-function safeJson(text: string) {
+function isRecord(value: unknown): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeJson(text: string): JsonObject {
   try {
-    return JSON.parse(text);
+    const parsed: unknown = JSON.parse(text);
+    return isRecord(parsed) ? parsed : { raw: parsed };
   } catch {
     return { raw: text };
   }
@@ -72,6 +112,10 @@ function isRateLimitMessage(msg: unknown): msg is string {
     s.includes("too many requests") ||
     s.includes("wait ")
   );
+}
+
+function errorMessage(error: unknown, fallback = "Server error") {
+  return error instanceof Error ? error.message : fallback;
 }
 
 let lastFdCallAt = 0;
@@ -152,14 +196,14 @@ async function fetchFD(
 }
 
 async function tryAcquireLock(
-  supabase: any,
+  supabase: SupabaseAdminClient,
   nowIso: string
 ): Promise<{ ok: true } | { ok: false; ageMs: number }> {
   const { data } = (await supabase
     .from("api_cache")
     .select("updated_at")
     .eq("key", RESULTS_LOCK_KEY)
-    .maybeSingle()) as { data: any };
+    .maybeSingle()) as { data: ApiCacheLockRow | null };
 
   if (data?.updated_at) {
     const ageMs = Date.now() - new Date(data.updated_at).getTime();
@@ -178,8 +222,8 @@ async function tryAcquireLock(
   return { ok: true };
 }
 
-function mapFdStatusToLocal(fdStatus: string | null | undefined): string {
-  const s = (fdStatus ?? "").toUpperCase();
+function mapFdStatusToLocal(fdStatus: unknown): string {
+  const s = String(fdStatus ?? "").toUpperCase();
 
   if (s === "FINISHED") return "FINISHED";
   if (s === "CANCELED") return "CANCELED";
@@ -196,7 +240,7 @@ function mapFdStatusToLocal(fdStatus: string | null | undefined): string {
   return "SCHEDULED";
 }
 
-function toIntOrNull(x: any): number | null {
+function toIntOrNull(x: unknown): number | null {
   if (x === null || x === undefined || x === "") return null;
 
   const n = typeof x === "number" ? x : Number(x);
@@ -205,7 +249,7 @@ function toIntOrNull(x: any): number | null {
   return Math.trunc(n);
 }
 
-function pickMatchScore(match: any, side: "home" | "away"): number | null {
+function pickMatchScore(match: FootballDataMatch, side: "home" | "away"): number | null {
   const fullTime = toIntOrNull(match?.score?.fullTime?.[side]);
   if (fullTime !== null) return fullTime;
 
@@ -218,21 +262,25 @@ function pickMatchScore(match: any, side: "home" | "away"): number | null {
   return null;
 }
 
-function pickMatchMinute(match: any): number | null {
+function asStatusObject(status: unknown): FootballDataStatusObject | null {
+  return isRecord(status) ? status : null;
+}
+
+function pickMatchMinute(match: FootballDataMatch): number | null {
   const direct = toIntOrNull(match?.minute);
   if (direct !== null && direct >= 0) return direct;
 
-  const statusMinute = toIntOrNull(match?.status?.minute);
+  const statusMinute = toIntOrNull(asStatusObject(match?.status)?.minute);
   if (statusMinute !== null && statusMinute >= 0) return statusMinute;
 
   return null;
 }
 
-function pickInjuryTime(match: any): number | null {
+function pickInjuryTime(match: FootballDataMatch): number | null {
   const direct = toIntOrNull(match?.injuryTime);
   if (direct !== null && direct >= 0) return direct;
 
-  const statusInjuryTime = toIntOrNull(match?.status?.injuryTime);
+  const statusInjuryTime = toIntOrNull(asStatusObject(match?.status)?.injuryTime);
   if (statusInjuryTime !== null && statusInjuryTime >= 0) {
     return statusInjuryTime;
   }
@@ -253,6 +301,12 @@ function isoDateOnlyUTC(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function secondHalfOrNull(full: number | null, half: number | null) {
+  if (full == null || half == null) return null;
+  const value = full - half;
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 type SyncBody = {
   leagues?: string[];
   batchLimit?: number;
@@ -261,6 +315,52 @@ type SyncBody = {
   throttleMs?: number;
   maxRetries?: number;
 };
+
+type MatchResultPatch = {
+  match_id: number;
+  status: string;
+  home_score: number | null;
+  away_score: number | null;
+  ht_home_score: number | null;
+  ht_away_score: number | null;
+  sh_home_score: number | null;
+  sh_away_score: number | null;
+  home_goals_ht: number | null;
+  away_goals_ht: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  updated_at: string;
+};
+
+function buildMatchResultPatch(params: {
+  matchId: number;
+  status: string;
+  utcDate: string | null;
+  finishedAt: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  halfHomeScore: number | null;
+  halfAwayScore: number | null;
+}): MatchResultPatch {
+  const shHomeScore = secondHalfOrNull(params.homeScore, params.halfHomeScore);
+  const shAwayScore = secondHalfOrNull(params.awayScore, params.halfAwayScore);
+
+  return {
+    match_id: params.matchId,
+    status: params.status,
+    home_score: params.homeScore,
+    away_score: params.awayScore,
+    ht_home_score: params.halfHomeScore,
+    ht_away_score: params.halfAwayScore,
+    sh_home_score: shHomeScore,
+    sh_away_score: shAwayScore,
+    home_goals_ht: params.halfHomeScore,
+    away_goals_ht: params.halfAwayScore,
+    started_at: params.utcDate,
+    finished_at: params.finishedAt,
+    updated_at: params.finishedAt,
+  };
+}
 
 async function readSyncBody(req: Request): Promise<SyncBody | NextResponse> {
   if (req.method === "GET") {
@@ -290,7 +390,7 @@ async function runResultsSync(req: Request) {
     return jsonError("Missing FOOTBALL_DATA_API_KEY in env", 500);
   }
 
-  const supabase = supabaseAdmin() as any;
+  const supabase = supabaseAdmin();
 
   try {
     const parsedBody = await readSyncBody(req);
@@ -417,7 +517,7 @@ async function runResultsSync(req: Request) {
     let settled = 0;
     let eloApplied = 0;
 
-    const results: Array<Record<string, any>> = [];
+    const results: JsonObject[] = [];
 
     for (const [leagueCode, leagueMatches] of byLeague.entries()) {
       const minUtcMs = Math.min(
@@ -456,11 +556,13 @@ async function runResultsSync(req: Request) {
         continue;
       }
 
-      const upstreamMatches = Array.isArray((upstream.data as any)?.matches)
-        ? ((upstream.data as any).matches as any[])
+      const upstreamMatches = Array.isArray(
+        (upstream.data as FootballDataMatchesResponse).matches
+      )
+        ? (upstream.data as FootballDataMatchesResponse).matches ?? []
         : [];
 
-      const upstreamById = new Map<number, any>();
+      const upstreamById = new Map<number, FootballDataMatch>();
 
       for (const um of upstreamMatches) {
         const id = Number(um?.id);
@@ -491,6 +593,12 @@ async function runResultsSync(req: Request) {
 
           const upstreamHomeScore = pickMatchScore(upstreamMatch, "home");
           const upstreamAwayScore = pickMatchScore(upstreamMatch, "away");
+          const upstreamHtHomeScore = toIntOrNull(
+            upstreamMatch?.score?.halfTime?.home
+          );
+          const upstreamHtAwayScore = toIntOrNull(
+            upstreamMatch?.score?.halfTime?.away
+          );
 
           const scoreCanBePersisted = canPersistScore(nextStatus);
 
@@ -570,14 +678,73 @@ async function runResultsSync(req: Request) {
           if (nextStatus === "FINISHED") {
             let settleOk = false;
             let settleError: string | null = null;
+            let settleResult: unknown = null;
 
-            const { error: settleErr } = await supabase.rpc("settle_match", {
-              p_match_id: localMatch.id,
+            if (nextHomeScore == null || nextAwayScore == null) {
+              results.push({
+                matchId: localMatch.id,
+                ok: false,
+                stage: "finished_missing_score",
+                status: nextStatus,
+                previousStatus: localMatch.status,
+                homeScore: nextHomeScore,
+                awayScore: nextAwayScore,
+                minute: nextMinute,
+                injuryTime: nextInjuryTime,
+                updatedMatch: statusChanged || scoreChanged || minuteChanged,
+                settled: false,
+                settleError:
+                  "Finished match has no full-time score from football-data.",
+              });
+
+              continue;
+            }
+
+            const matchResultRow = buildMatchResultPatch({
+              matchId: localMatch.id,
+              status: nextStatus,
+              utcDate: localMatch.utc_date,
+              finishedAt: syncAt,
+              homeScore: nextHomeScore,
+              awayScore: nextAwayScore,
+              halfHomeScore: upstreamHtHomeScore,
+              halfAwayScore: upstreamHtAwayScore,
             });
+
+            const { error: resultUpsertErr } = await supabase
+              .from("match_results")
+              .upsert(matchResultRow, { onConflict: "match_id" });
+
+            if (resultUpsertErr) {
+              results.push({
+                matchId: localMatch.id,
+                ok: false,
+                stage: "match_results_upsert_failed",
+                status: nextStatus,
+                previousStatus: localMatch.status,
+                homeScore: nextHomeScore,
+                awayScore: nextAwayScore,
+                minute: nextMinute,
+                injuryTime: nextInjuryTime,
+                updatedMatch: statusChanged || scoreChanged || minuteChanged,
+                settled: false,
+                settleError: resultUpsertErr.message,
+              });
+
+              continue;
+            }
+
+            const { data: settleData, error: settleErr } = await supabase.rpc(
+              "settle_match_once",
+              {
+                p_match_id: localMatch.id,
+              }
+            );
 
             if (!settleErr) {
               settled += 1;
               settleOk = true;
+              settleResult = settleData ?? null;
             } else {
               settleError = settleErr.message;
             }
@@ -617,7 +784,9 @@ async function runResultsSync(req: Request) {
               minute: nextMinute,
               injuryTime: nextInjuryTime,
               updatedMatch: statusChanged || scoreChanged || minuteChanged,
+              upsertedMatchResult: true,
               settled: settleOk,
+              settleResult,
               settleError,
               eloOk,
               eloApplied: eloAppliedNow,
@@ -638,12 +807,12 @@ async function runResultsSync(req: Request) {
               updatedMatch: statusChanged || scoreChanged || minuteChanged,
             });
           }
-        } catch (e: any) {
+        } catch (e: unknown) {
           results.push({
             matchId: localMatch.id,
             ok: false,
             stage: "catch_per_match",
-            error: e?.message || "Unknown error",
+            error: errorMessage(e, "Unknown error"),
           });
         }
       }
@@ -666,10 +835,10 @@ async function runResultsSync(req: Request) {
       updatedAt: nowIso,
       results,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     return NextResponse.json(
       {
-        error: e?.message || "Server error",
+        error: errorMessage(e),
         extra: { stage: "catch" },
       },
       { status: 500 }
