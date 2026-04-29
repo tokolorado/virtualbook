@@ -12,6 +12,7 @@ function shouldHideSlip(pathname: string) {
     pathname.startsWith("/login") ||
     pathname.startsWith("/register") ||
     pathname.startsWith("/auth") ||
+    pathname.startsWith("/shared") ||
     pathname.startsWith("/admin") ||
     pathname.startsWith("/account") ||
     pathname.startsWith("/wallet")
@@ -22,7 +23,8 @@ function shouldSkipWeeklyGrant(pathname: string) {
   return (
     pathname.startsWith("/login") ||
     pathname.startsWith("/register") ||
-    pathname.startsWith("/auth")
+    pathname.startsWith("/auth") ||
+    pathname.startsWith("/shared")
   );
 }
 

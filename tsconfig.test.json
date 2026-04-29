@@ -15,6 +15,10 @@
   "include": [
     "tests/**/*.ts",
     "lib/odds/labels.ts",
+    "lib/odds/poisson.ts",
+    "lib/bets/slipPricing.ts",
+    "lib/bets/betBuilderPricing.ts",
+    "lib/missions.ts",
     "lib/requireCronSecret.ts"
   ]
 }

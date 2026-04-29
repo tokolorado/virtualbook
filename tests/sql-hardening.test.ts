@@ -27,6 +27,11 @@ const sameMatchAccumulatorMigration = fs.readFileSync(
   "utf8"
 );
 
+const betBuilderMissionsMigration = fs.readFileSync(
+  "supabase/migrations/20260429_bet_builder_missions_public_bets.sql",
+  "utf8"
+);
+
 test("production function snapshot documents every inspected public function", () => {
   const functionHeaders = snapshot.match(/^-- Function:/gm) ?? [];
 
@@ -101,5 +106,51 @@ test("place_bet rejects same-match accumulator correlations in SQL", () => {
   assert.match(
     sameMatchAccumulatorMigration,
     /Correlated selections in same match are not allowed/i
+  );
+});
+
+test("bet builder migration stores package odds and settles from stored odds", () => {
+  assert.match(
+    betBuilderMissionsMigration,
+    /create\s+or\s+replace\s+function\s+public\.place_bet_builder/i
+  );
+  assert.match(
+    betBuilderMissionsMigration,
+    /bet_type\s*,\s*pricing_meta/i
+  );
+  assert.match(
+    betBuilderMissionsMigration,
+    /'bet_builder'\s*,\s*coalesce\(p_pricing_meta/i
+  );
+  assert.match(
+    betBuilderMissionsMigration,
+    /if\s+v_bet_type\s*=\s*'bet_builder'\s+then\s+v_effective_odds\s*:=\s*v_stored_total_odds/i
+  );
+  assert.match(
+    betBuilderMissionsMigration,
+    /revoke\s+all\s+on\s+function\s+public\.place_bet_builder\(uuid,\s*numeric,\s*jsonb,\s*uuid,\s*numeric,\s*jsonb\)\s+from\s+public,\s+anon,\s+authenticated/i
+  );
+});
+
+test("missions and public bet sharing are idempotent and service-role mediated", () => {
+  assert.match(
+    betBuilderMissionsMigration,
+    /create\s+table\s+if\s+not\s+exists\s+public\.user_mission_claims/i
+  );
+  assert.match(
+    betBuilderMissionsMigration,
+    /constraint\s+user_mission_claims_unique\s+unique\s+\(user_id,\s*mission_id,\s*period_key\)/i
+  );
+  assert.match(
+    betBuilderMissionsMigration,
+    /'MISSION_REWARD'/i
+  );
+  assert.match(
+    betBuilderMissionsMigration,
+    /create\s+unique\s+index\s+if\s+not\s+exists\s+bets_public_share_token_uidx/i
+  );
+  assert.match(
+    betBuilderMissionsMigration,
+    /revoke\s+all\s+on\s+function\s+public\.claim_mission_reward\(uuid,\s*text,\s*text,\s*numeric,\s*jsonb\)\s+from\s+public,\s+anon,\s+authenticated/i
   );
 });

@@ -17,6 +17,11 @@ type BetRow = {
   settled_at: string | null;
   payout: number | null;
   created_at: string;
+  bet_type: string | null;
+  pricing_meta: Record<string, unknown> | null;
+  public_share_enabled: boolean | null;
+  public_share_token: string | null;
+  public_share_created_at: string | null;
 };
 
 type BetItemRow = {
@@ -181,6 +186,10 @@ export default function BetDetailsPage() {
   const [bet, setBet] = useState<BetRow | null>(null);
   const [items, setItems] = useState<BetItemRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
 
   const summary = useMemo(() => {
     const total = items.length;
@@ -220,7 +229,25 @@ export default function BetDetailsPage() {
       // 1) bet
       const { data: betRow, error: betErr } = await supabase
         .from("bets")
-        .select("id,user_id,stake,total_odds,potential_win,status,settled,settled_at,payout,created_at")
+        .select(
+          [
+            "id",
+            "user_id",
+            "stake",
+            "total_odds",
+            "potential_win",
+            "status",
+            "settled",
+            "settled_at",
+            "payout",
+            "created_at",
+            "bet_type",
+            "pricing_meta",
+            "public_share_enabled",
+            "public_share_token",
+            "public_share_created_at",
+          ].join(",")
+        )
         .eq("id", betId)
         .maybeSingle<BetRow>();
 
@@ -245,6 +272,13 @@ export default function BetDetailsPage() {
       }
 
       setBet(betRow);
+      setShareError(null);
+      setShareCopied(false);
+      setShareUrl(
+        betRow.public_share_enabled && betRow.public_share_token
+          ? `${window.location.origin}/shared/bets/${betRow.public_share_token}`
+          : null
+      );
 
       // 2) bet items
       const { data: itemRows, error: itemsErr } = await supabase
@@ -265,8 +299,73 @@ export default function BetDetailsPage() {
       );
       setBet(null);
       setItems([]);
+      setShareUrl(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createShareLink = async () => {
+    if (!bet?.id) return;
+
+    setShareLoading(true);
+    setShareError(null);
+    setShareCopied(false);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      const token = sessionData.session?.access_token;
+      if (!token) throw new Error("Nie jestes zalogowany.");
+
+      const response = await fetch(`/api/bets/${bet.id}/share`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | { ok?: boolean; shareUrl?: string; token?: string; error?: string }
+        | null;
+
+      if (!response.ok || !payload?.ok || !payload.shareUrl) {
+        throw new Error(payload?.error ?? "Nie udalo sie utworzyc linku.");
+      }
+
+      setShareUrl(payload.shareUrl);
+      setBet((current) =>
+        current
+          ? {
+              ...current,
+              public_share_enabled: true,
+              public_share_token: payload.token ?? current.public_share_token,
+              public_share_created_at:
+                current.public_share_created_at ?? new Date().toISOString(),
+            }
+          : current
+      );
+    } catch (err: unknown) {
+      setShareError(
+        err instanceof Error ? err.message : "Nie udalo sie utworzyc linku."
+      );
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const copyShareLink = async () => {
+    if (!shareUrl) return;
+
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1800);
+    } catch {
+      setShareError("Nie udalo sie skopiowac linku.");
     }
   };
 
@@ -304,6 +403,19 @@ export default function BetDetailsPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={shareUrl ? copyShareLink : createShareLink}
+            disabled={shareLoading}
+            className="px-4 py-2 rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20 transition text-sm disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {shareLoading
+              ? "Tworzenie..."
+              : shareUrl
+                ? shareCopied
+                  ? "Skopiowano"
+                  : "Kopiuj link"
+                : "Udostepnij"}
+          </button>
           <button
             onClick={load}
             className="px-4 py-2 rounded-xl border border-neutral-800 bg-neutral-950 hover:bg-neutral-800 transition text-sm"
@@ -378,6 +490,33 @@ export default function BetDetailsPage() {
             Otwarte: <b className="text-white">{summary.open}</b>
           </span>
         </div>
+
+        {shareUrl || shareError ? (
+          <div className="mt-4 rounded-2xl border border-sky-500/20 bg-sky-500/10 p-3">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">
+              Link publiczny
+            </div>
+            {shareUrl ? (
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  readOnly
+                  value={shareUrl}
+                  className="min-w-0 flex-1 rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm text-neutral-200"
+                />
+                <button
+                  type="button"
+                  onClick={copyShareLink}
+                  className="rounded-xl border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm font-semibold text-neutral-100 transition hover:bg-neutral-900"
+                >
+                  {shareCopied ? "Skopiowano" : "Kopiuj"}
+                </button>
+              </div>
+            ) : null}
+            {shareError ? (
+              <div className="mt-2 text-sm text-red-200">{shareError}</div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       <div className="rounded-2xl border border-neutral-800 bg-neutral-900/40 p-4">

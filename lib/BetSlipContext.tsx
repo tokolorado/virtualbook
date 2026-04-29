@@ -22,10 +22,14 @@ export type SlipItem = {
   kickoffUtc?: string | null;
 };
 
+export type BetSlipMode = "standard" | "bet_builder";
+
 type BetSlipContextType = {
   slip: SlipItem[];
   stake: string;
   setStake: (v: string) => void;
+  mode: BetSlipMode;
+  setMode: (mode: BetSlipMode) => void;
 
   open: boolean;
   setOpen: (v: boolean) => void;
@@ -44,6 +48,7 @@ const BetSlipContext = createContext<BetSlipContextType | null>(null);
 const LS_SLIP = "vb_slip_v2";
 const LS_STAKE = "vb_stake_v2";
 const LS_OPEN = "vb_slip_open_v1";
+const LS_MODE = "vb_slip_mode_v1";
 
 function readSlipFromStorage(): SlipItem[] {
   if (typeof window === "undefined") return [];
@@ -79,12 +84,25 @@ function readOpenFromStorage(): boolean {
   }
 }
 
+function readModeFromStorage(): BetSlipMode {
+  if (typeof window === "undefined") return "standard";
+
+  try {
+    return window.localStorage.getItem(LS_MODE) === "bet_builder"
+      ? "bet_builder"
+      : "standard";
+  } catch {
+    return "standard";
+  }
+}
+
 export function BetSlipProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "";
 
   const [slip, setSlip] = useState<SlipItem[]>(readSlipFromStorage);
   const [stake, setStake] = useState<string>(readStakeFromStorage);
   const [open, setOpen] = useState<boolean>(readOpenFromStorage);
+  const [mode, setMode] = useState<BetSlipMode>(readModeFromStorage);
 
   const shouldHideSlip =
     pathname.startsWith("/account") ||
@@ -111,8 +129,16 @@ export function BetSlipProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, [open]);
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LS_MODE, mode);
+    } catch {}
+  }, [mode]);
+
   const addToSlip = useCallback((item: SlipItem) => {
     setSlip((prev) => {
+      const targetMatchId = String(item.matchId);
+
       const idx = prev.findIndex(
         (x) => x.matchId === item.matchId && x.market === item.market
       );
@@ -123,11 +149,18 @@ export function BetSlipProvider({ children }: { children: React.ReactNode }) {
         return copy;
       }
 
+      if (
+        mode === "bet_builder" &&
+        prev.some((x) => String(x.matchId) !== targetMatchId)
+      ) {
+        return [item];
+      }
+
       return [...prev, item];
     });
 
     setOpen(true);
-  }, []);
+  }, [mode]);
 
   const removeFromSlip = useCallback((matchId: string, market: string) => {
     setSlip((prev) =>
@@ -162,6 +195,8 @@ export function BetSlipProvider({ children }: { children: React.ReactNode }) {
       slip,
       stake,
       setStake,
+      mode,
+      setMode,
       open: effectiveOpen,
       setOpen,
       toggleOpen,
@@ -174,6 +209,7 @@ export function BetSlipProvider({ children }: { children: React.ReactNode }) {
     [
       slip,
       stake,
+      mode,
       effectiveOpen,
       toggleOpen,
       addToSlip,

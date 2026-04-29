@@ -5,7 +5,11 @@ import type { ReactNode } from "react";
 import { formatOdd, formatVB } from "@/lib/format";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useBetSlip, type SlipItem } from "@/lib/BetSlipContext";
+import {
+  useBetSlip,
+  type BetSlipMode,
+  type SlipItem,
+} from "@/lib/BetSlipContext";
 import { formatBetSelectionLabels } from "@/lib/odds/labels";
 import { priceAccumulatorSlip } from "@/lib/bets/slipPricing";
 
@@ -54,7 +58,11 @@ function keyOf(it: SlipItem) {
   return `${it.matchId}__${it.market}`;
 }
 
-function buildAttemptFingerprint(items: SlipItem[], stakeNum: number | null) {
+function buildAttemptFingerprint(
+  items: SlipItem[],
+  stakeNum: number | null,
+  mode: BetSlipMode
+) {
   const normalizedStake =
     stakeNum != null && Number.isFinite(stakeNum) ? stakeNum.toFixed(2) : "null";
 
@@ -68,16 +76,26 @@ function buildAttemptFingerprint(items: SlipItem[], stakeNum: number | null) {
     .sort()
     .join("|");
 
-  return `${normalizedStake}__${normalizedItems}`;
+  return `${mode}__${normalizedStake}__${normalizedItems}`;
 }
 
 type SuccessModalData = {
+  mode: BetSlipMode;
   itemsCount: number;
   stake: number;
   totalOdds: number;
   potentialWin: number;
   slipSnapshot: SlipItem[];
   betId?: string | null;
+};
+
+type BetBuilderQuote = {
+  ok: true;
+  totalOdds: number;
+  potentialWin?: number;
+  jointProbability: number;
+  productOdds: number;
+  correlationFactor: number;
 };
 
 function formatStakeInput(v: string) {
@@ -96,8 +114,16 @@ function formatStakeInput(v: string) {
 }
 
 export default function BetSlip({ variant }: { variant?: string }) {
-  const { slip, stake, setStake, removeFromSlip, clearSlip, addToSlip } =
-    useBetSlip();
+  const {
+    slip,
+    stake,
+    setStake,
+    mode,
+    setMode,
+    removeFromSlip,
+    clearSlip,
+    addToSlip,
+  } = useBetSlip();
 
   const isMobile = variant === "mobile";
   const isDesktop = variant === "desktop";
@@ -118,6 +144,9 @@ export default function BetSlip({ variant }: { variant?: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [errorModal, setErrorModal] = useState<string | null>(null);
+  const [builderQuote, setBuilderQuote] = useState<BetBuilderQuote | null>(null);
+  const [builderQuoteLoading, setBuilderQuoteLoading] = useState(false);
+  const [builderQuoteError, setBuilderQuoteError] = useState<string | null>(null);
 
   // Stabilny klucz dla jednej próby submitu
   const attemptKeyRef = useRef<string | null>(null);
@@ -192,8 +221,8 @@ export default function BetSlip({ variant }: { variant?: string }) {
   const stakeNum = useMemo(() => parseStake(stakeInput), [stakeInput]);
 
   const currentAttemptFingerprint = useMemo(() => {
-    return buildAttemptFingerprint(slip, stakeNum);
-  }, [slip, stakeNum]);
+    return buildAttemptFingerprint(slip, stakeNum, mode);
+  }, [slip, stakeNum, mode]);
 
   // Reset idempotency key tylko gdy zaczyna się nowa, istotnie zmieniona próba
   useEffect(() => {
@@ -213,9 +242,97 @@ export default function BetSlip({ variant }: { variant?: string }) {
     attemptFingerprintRef.current = currentAttemptFingerprint;
   }, [currentAttemptFingerprint, slip.length]);
 
-  const slipPricing = useMemo(() => priceAccumulatorSlip(slip), [slip]);
-  const slipPricingError = slipPricing.ok ? null : slipPricing.message;
-  const totalOdds = slipPricing.ok ? slipPricing.totalOdds : 0;
+  const standardPricing = useMemo(() => priceAccumulatorSlip(slip), [slip]);
+  const builderLocalError = useMemo(() => {
+    if (mode !== "bet_builder" || slip.length === 0) return null;
+    if (slip.length < 2) return "Bet Builder wymaga minimum 2 typow z jednego meczu.";
+
+    const matchIds = new Set(slip.map((item) => String(item.matchId)));
+    if (matchIds.size !== 1) {
+      return "Bet Builder dziala tylko dla jednego meczu naraz.";
+    }
+
+    return null;
+  }, [mode, slip]);
+
+  useEffect(() => {
+    if (mode !== "bet_builder" || slip.length === 0) {
+      setBuilderQuote(null);
+      setBuilderQuoteLoading(false);
+      setBuilderQuoteError(null);
+      return;
+    }
+
+    if (builderLocalError) {
+      setBuilderQuote(null);
+      setBuilderQuoteLoading(false);
+      setBuilderQuoteError(builderLocalError);
+      return;
+    }
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        setBuilderQuoteLoading(true);
+        setBuilderQuoteError(null);
+
+        const response = await fetch("/api/bet-builder/quote", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slip, stake: stakeNum }),
+          signal: controller.signal,
+        });
+
+        const payload = (await response.json().catch(() => null)) as unknown;
+
+        if (cancelled) return;
+
+        if (!response.ok || !isRecord(payload) || payload.ok !== true) {
+          const message = isRecord(payload)
+            ? messageFromUnknown(payload.error, "Nie udalo sie policzyc kursu Bet Buildera.")
+            : "Nie udalo sie policzyc kursu Bet Buildera.";
+          setBuilderQuote(null);
+          setBuilderQuoteError(message);
+          return;
+        }
+
+        setBuilderQuote(payload as BetBuilderQuote);
+        setBuilderQuoteError(null);
+      } catch (error: unknown) {
+        if (cancelled || controller.signal.aborted) return;
+        setBuilderQuote(null);
+        setBuilderQuoteError(
+          messageFromUnknown(error, "Nie udalo sie policzyc kursu Bet Buildera.")
+        );
+      } finally {
+        if (!cancelled) {
+          setBuilderQuoteLoading(false);
+        }
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [builderLocalError, mode, slip, stakeNum]);
+
+  const slipPricingError =
+    mode === "bet_builder"
+      ? builderQuoteLoading
+        ? "Licze kurs Bet Buildera..."
+        : builderQuoteError
+      : standardPricing.ok
+        ? null
+        : standardPricing.message;
+  const totalOdds =
+    mode === "bet_builder"
+      ? builderQuote?.totalOdds ?? 0
+      : standardPricing.ok
+        ? standardPricing.totalOdds
+        : 0;
 
   const potentialWin = useMemo(() => {
     if (!stakeNum || stakeNum <= 0 || !slip.length) return null;
@@ -242,9 +359,19 @@ export default function BetSlip({ variant }: { variant?: string }) {
       !stakeError &&
       !submitting &&
       !hasStarted &&
-      !slipPricingError
+      !slipPricingError &&
+      (mode === "standard" || (!!builderQuote && !builderQuoteLoading))
     );
-  }, [slip.length, stakeError, submitting, hasStarted, slipPricingError]);
+  }, [
+    slip.length,
+    stakeError,
+    submitting,
+    hasStarted,
+    slipPricingError,
+    mode,
+    builderQuote,
+    builderQuoteLoading,
+  ]);
 
   const resetAttemptIdentity = () => {
     attemptKeyRef.current = null;
@@ -256,6 +383,16 @@ export default function BetSlip({ variant }: { variant?: string }) {
     setStake("");
     setStakeInput("");
     setSubmitError(null);
+    resetAttemptIdentity();
+  };
+
+  const changeMode = (nextMode: BetSlipMode) => {
+    if (nextMode === mode) return;
+    setMode(nextMode);
+    setSubmitError(null);
+    setErrorModal(null);
+    setBuilderQuote(null);
+    setBuilderQuoteError(null);
     resetAttemptIdentity();
   };
 
@@ -283,6 +420,9 @@ export default function BetSlip({ variant }: { variant?: string }) {
       if (slipPricingError) {
         setSubmitError(slipPricingError);
         setErrorModal(slipPricingError);
+      } else if (mode === "bet_builder" && builderQuoteLoading) {
+        const message = "Czekam na kurs Bet Buildera.";
+        setSubmitError(message);
       }
       setShake(true);
       window.setTimeout(() => setShake(false), 260);
@@ -316,6 +456,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
           slip: snapshot,
           stake: stakeNum,
           idempotencyKey: requestId,
+          mode,
         }),
       });
 
@@ -391,6 +532,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
       setShowTicket(false);
       setSuccessModal({
+        mode,
         itemsCount: snapshot.length,
         stake: Number(stakeNum ?? 0),
         totalOdds: totalOddsFinal,
@@ -603,6 +745,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
         <div className="mt-4 grid grid-cols-1 gap-2">
           <button
             onClick={() => {
+              setMode(successModal.mode);
               restoreSlip(successModal.slipSnapshot);
               setSuccessModal(null);
             }}
@@ -684,6 +827,41 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 {slip.length} zdarzeń
               </div>
             </div>
+
+            <div className="mt-4 grid grid-cols-2 rounded-2xl border border-neutral-800 bg-black/25 p-1">
+              {[
+                { value: "standard" as BetSlipMode, label: "AKO" },
+                { value: "bet_builder" as BetSlipMode, label: "Bet Builder" },
+              ].map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => changeMode(option.value)}
+                  disabled={submitting}
+                  className={cx(
+                    "rounded-xl px-3 py-2 text-xs font-semibold transition",
+                    mode === option.value
+                      ? "bg-white text-black"
+                      : "text-neutral-400 hover:bg-white/5 hover:text-white",
+                    submitting && "cursor-not-allowed opacity-70"
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {mode === "bet_builder" ? (
+              <div className="mt-3 rounded-2xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs leading-5 text-sky-100">
+                Jeden mecz, wiele typow, jeden skorelowany kurs pakietu.
+                {builderQuote && !builderQuoteError ? (
+                  <span className="mt-1 block text-sky-200/80">
+                    Korelacja: {builderQuote.correlationFactor.toFixed(2)}x wobec
+                    prostego mnozenia.
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="mt-4 grid grid-cols-2 gap-2">
               <div className="rounded-2xl border border-neutral-800 bg-black/20 p-3">
