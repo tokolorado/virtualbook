@@ -1,4 +1,5 @@
 import "./bet-builder-pricing.test";
+import "./cron-settle.test";
 import "./cron-secret.test";
 import "./missions.test";
 import "./odds-labels.test";

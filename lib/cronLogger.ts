@@ -47,15 +47,19 @@ export async function cronLogError(id: number | null, error: unknown) {
   if (!id) return;
 
   const sb = supabaseAdmin();
+  const details =
+    error instanceof Error
+      ? { message: error.message }
+      : typeof error === "object" && error !== null
+        ? error
+        : { message: String(error) };
 
   await sb
     .from("cron_logs")
     .update({
       status: "error",
       finished_at: new Date().toISOString(),
-      details: {
-        message: error instanceof Error ? error.message : String(error),
-      },
+      details,
     })
     .eq("id", id);
 }

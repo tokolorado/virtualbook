@@ -447,30 +447,39 @@ export async function POST(req: Request) {
       }
     }
 
-    await cronLogSuccess(logId, {
-      ok: true,
+    const pendingBetBackfillSettled = backfillResults.filter((x) => x.ok).length;
+    const failedMatchResults = matchResults.filter((x) => !x.ok);
+    const failedBackfillResults = backfillResults.filter((x) => !x.ok);
+    const hasSettlementFailures =
+      failedMatchResults.length > 0 || failedBackfillResults.length > 0;
+
+    const responseBody = {
+      ok: !hasSettlementFailures,
       job: "settle",
       requestedMatches: matchIdsToSettle.length,
       matchResultsBackfill,
       matchesSettledOk,
       matchesSkipped,
       pendingBetBackfillChecked: pendingBetIds.length,
-      pendingBetBackfillSettled: backfillResults.filter((x) => x.ok).length,
+      pendingBetBackfillSettled,
+      failedMatchResults: failedMatchResults.length,
+      failedBackfillResults: failedBackfillResults.length,
       matchResults,
       backfillResults,
-    });
+    };
 
-    return json(200, {
-      ok: true,
-      requestedMatches: matchIdsToSettle.length,
-      matchResultsBackfill,
-      matchesSettledOk,
-      matchesSkipped,
-      pendingBetBackfillChecked: pendingBetIds.length,
-      pendingBetBackfillSettled: backfillResults.filter((x) => x.ok).length,
-      matchResults,
-      backfillResults,
-    });
+    if (hasSettlementFailures) {
+      await cronLogError(logId, {
+        message: "settle job completed with unresolved settlement failures",
+        ...responseBody,
+      });
+
+      return json(500, responseBody);
+    }
+
+    await cronLogSuccess(logId, responseBody);
+
+    return json(200, responseBody);
   } catch (error: unknown) {
     await cronLogError(logId, error);
     return json(500, { ok: false, error: errorMessage(error) });
