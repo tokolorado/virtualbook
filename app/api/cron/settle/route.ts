@@ -66,8 +66,12 @@ type FinishedMatchRow = {
 };
 
 type SettleMatchOnceResponse = {
+  ok?: boolean | null;
   skipped?: boolean;
   reason?: string | null;
+  error?: string | null;
+  openBefore?: number | null;
+  openAfter?: number | null;
 };
 
 type BetIdRow = {
@@ -289,8 +293,24 @@ export async function POST(req: Request) {
         if (smErr) throw smErr;
 
         const settleResult = (smData ?? {}) as SettleMatchOnceResponse;
+        const rpcReportedFailure = settleResult.ok === false;
         const skipped = settleResult.skipped === true;
         const reason = settleResult.reason ?? null;
+        const settleError = settleResult.error ?? null;
+
+        if (rpcReportedFailure) {
+          matchResults.push({
+            matchId,
+            ok: false,
+            skipped: false,
+            reason,
+            error: settleError ?? "settle_match_once returned ok=false",
+            betsTouched: 0,
+            betsSettleCalls: 0,
+          });
+
+          continue;
+        }
 
         if (skipped) {
           matchesSkipped++;
