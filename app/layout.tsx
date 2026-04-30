@@ -1,6 +1,8 @@
 // app/layout.tsx
 import type { Metadata } from "next";
 import { Roboto_Flex } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import Topbar from "@/components/Topbar";
 import ClientProviders from "@/components/ClientProviders";
@@ -26,6 +28,8 @@ export default function RootLayout({
       <body className="min-h-screen bg-neutral-950 text-white antialiased">
         <Topbar />
         <ClientProviders>{children}</ClientProviders>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
