@@ -92,7 +92,7 @@ const FREE_TIER_LEAGUES: League[] = [
   { code: "PL", name: "Premier League" },
   { code: "BL1", name: "Bundesliga" },
   { code: "FL1", name: "Ligue 1" },
-  { code: "SA", name: "Serie A (Italy)" },
+  { code: "SA", name: "Serie A" },
   { code: "PD", name: "LaLiga" },
   { code: "WC", name: "World Cup" },
 ];
