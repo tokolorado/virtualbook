@@ -2453,7 +2453,7 @@ export default function MatchInsightsSection({
 
 
   return (
-    <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
+    <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 sm:p-5">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
@@ -2473,7 +2473,7 @@ export default function MatchInsightsSection({
         </div>
       </div>
 
-      <div className="mt-5">
+      <div className="mt-4">
         {activeTab === "lineups"
           ? renderLineups()
           : activeTab === "comparison"
