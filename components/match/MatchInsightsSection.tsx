@@ -2459,28 +2459,10 @@ export default function MatchInsightsSection({
           <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
             Match Center
           </div>
+
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">
             Centrum meczu
           </h2>
-          <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
-            {subtitle}
-          </p>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {competitionCode ? (
-              <StatusChip tone="blue">{competitionCode}</StatusChip>
-            ) : null}
-
-            {lastRefreshedAt ? (
-              <StatusChip>
-                <span className="whitespace-nowrap tabular-nums">
-                  Sprawdzono: {new Date(lastRefreshedAt).toLocaleTimeString()}
-                </span>
-              </StatusChip>
-            ) : null}
-
-            {isRefreshing ? <StatusChip tone="green">Odświeżanie…</StatusChip> : null}
-          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -2492,44 +2474,6 @@ export default function MatchInsightsSection({
               onClick={() => setActiveTab(tab.key)}
             />
           ))}
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">
-            Tryb
-          </div>
-          <div className="mt-2 text-sm font-semibold text-sky-200">
-            {premiumStatusLabel}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">
-            Moduły
-          </div>
-          <div className="mt-2 text-sm font-semibold text-white">
-            {visibleTabs.length} aktywnych sekcji
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">
-            Dane
-          </div>
-          <div className="mt-2 text-sm font-semibold text-white">
-            {premiumDataLabel}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-green-500/20 bg-green-500/10 p-4">
-          <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500">
-            Refresh
-          </div>
-          <div className="mt-2 text-sm font-semibold text-green-200">
-            auto co {Math.round(AUTO_REFRESH_MS / 1000)} s
-          </div>
         </div>
       </div>
 
