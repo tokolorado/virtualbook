@@ -1,3 +1,4 @@
+// app/(main)/quiz/page.tsx
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -230,6 +231,15 @@ export default function QuizPage() {
       0
     );
   }, [levels]);
+
+  const rewardEarnedToday = useMemo(() => {
+    return Object.values(attempts).reduce((sum, attempt) => {
+      if (attempt.status !== "completed") return sum;
+      if (!attempt.reward_granted) return sum;
+
+      return sum + toNumber(attempt.reward_amount, 0);
+    }, 0);
+  }, [attempts]);
 
   const loadQuizState = useCallback(async () => {
     setMode("checking");
@@ -599,7 +609,10 @@ export default function QuizPage() {
                 ) : (
                   <>
                     {" "}
-                    · <span className="font-semibold text-red-300">Bez nagrody</span>
+                    ·{" "}
+                    <span className="font-semibold text-red-300">
+                      Bez nagrody
+                    </span>
                   </>
                 )}
               </div>
@@ -904,11 +917,11 @@ export default function QuizPage() {
             <div className="grid grid-cols-3 gap-3 sm:min-w-[420px]">
               <StatBox label="Quizy" value={`${completedCount}/${levels.length || 5}`} />
 
-              <StatBox label="Czas" value={`${DEFAULT_QUESTION_TIME_SECONDS}s`} />
+              <StatBox label="Czas" value="8–12s" />
 
               <StatBox
-                label="Nagrody"
-                value={`${totalRewardAvailable.toFixed(0)} VB`}
+                label="Zdobyto dziś"
+                value={`${rewardEarnedToday.toFixed(0)} / ${totalRewardAvailable.toFixed(0)} VB`}
                 tone="yellow"
               />
             </div>
