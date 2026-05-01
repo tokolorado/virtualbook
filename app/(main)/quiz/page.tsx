@@ -6,7 +6,29 @@ import { supabase } from "@/lib/supabase";
 
 type OptionKey = "A" | "B" | "C" | "D";
 
-type QuizLevelSlug = "very_easy" | "easy" | "medium" | "hard" | "very_hard";
+type QuizMode = "checking" | "idle" | "running" | "completed";
+
+type QuizLevel = {
+  slug: string;
+  name: string;
+  description: string | null;
+  reward_amount: number | string | null;
+  sort_order: number;
+  question_count: number;
+  time_limit_seconds: number;
+  mix: Record<string, number> | null;
+};
+
+type QuizAttempt = {
+  id: number;
+  level_slug: string;
+  status: string;
+  score: number | null;
+  total_questions: number | null;
+  reward_granted: boolean | null;
+  reward_amount: number | string | null;
+  completed_at: string | null;
+};
 
 type QuizQuestion = {
   attempt_id: number;
@@ -28,71 +50,9 @@ type QuizResult = {
   balance_after?: number | null;
 };
 
-type QuizAttemptRow = {
-  id: number | string;
-  status: string | null;
-  score: number | string | null;
-  total_questions: number | string | null;
-  reward_granted: boolean | null;
-  reward_amount: number | string | null;
-  level_slug?: string | null;
-};
-
 type SelectedAnswers = Record<number, OptionKey | null>;
 
-type QuizMode = "checking" | "idle" | "running" | "completed";
-
-const QUESTION_TIME_SECONDS = 10;
-
-const QUIZ_LEVELS: Array<{
-  slug: QuizLevelSlug;
-  label: string;
-  shortLabel: string;
-  description: string;
-  mix: string;
-  reward: number;
-}> = [
-  {
-    slug: "very_easy",
-    label: "Bardzo łatwy",
-    shortLabel: "Bardzo łatwy",
-    description: "Najprostsze pytania piłkarskie. Dobry poziom na rozgrzewkę.",
-    mix: "4 bardzo łatwe + 1 łatwe",
-    reward: 50,
-  },
-  {
-    slug: "easy",
-    label: "Łatwy",
-    shortLabel: "Łatwy",
-    description: "Spokojny poziom z jednym pytaniem średnim.",
-    mix: "3 bardzo łatwe + 1 łatwe + 1 średnie",
-    reward: 50,
-  },
-  {
-    slug: "medium",
-    label: "Średni",
-    shortLabel: "Średni",
-    description: "Standardowy quiz dla regularnych fanów piłki.",
-    mix: "1 łatwe + 3 średnie + 1 trudne",
-    reward: 50,
-  },
-  {
-    slug: "hard",
-    label: "Trudny",
-    shortLabel: "Trudny",
-    description: "Wymaga dobrej wiedzy o klubach, ligach i historii futbolu.",
-    mix: "1 średnie + 3 trudne + 1 bardzo trudne",
-    reward: 50,
-  },
-  {
-    slug: "very_hard",
-    label: "Bardzo trudny",
-    shortLabel: "Bardzo trudny",
-    description: "Poziom ekspercki. Najtrudniejszy wariant quizu dnia.",
-    mix: "1 średnie + 2 trudne + 2 bardzo trudne",
-    reward: 50,
-  },
-];
+const DEFAULT_QUESTION_TIME_SECONDS = 10;
 
 const OPTIONS = [
   { key: "A", field: "option_a" },
@@ -101,17 +61,21 @@ const OPTIONS = [
   { key: "D", field: "option_d" },
 ] as const;
 
+const DIFFICULTY_LABELS: Record<string, string> = {
+  very_easy: "Bardzo łatwe",
+  easy: "Łatwe",
+  medium: "Średnie",
+  hard: "Trudne",
+  very_hard: "Bardzo trudne",
+};
+
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function toNumber(value: unknown, fallback = 0) {
-  const n = Number(value ?? fallback);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function isQuizLevelSlug(value: unknown): value is QuizLevelSlug {
-  return QUIZ_LEVELS.some((level) => level.slug === value);
+function toNumber(value: number | string | null | undefined, fallback = 0) {
+  const parsed = Number(value ?? fallback);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function formatTomorrowLabel() {
@@ -125,116 +89,237 @@ function formatTomorrowLabel() {
   });
 }
 
-function formatBalance(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  return value.toFixed(2);
+function todayYmd() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatMix(mix: Record<string, number> | null | undefined) {
+  if (!mix) return "Mieszany zestaw pytań";
+
+  const entries = Object.entries(mix)
+    .filter(([, count]) => Number(count) > 0)
+    .map(([key, count]) => {
+      const label = DIFFICULTY_LABELS[key] ?? key;
+      return `${count} ${label.toLowerCase()}`;
+    });
+
+  return entries.length ? entries.join(" + ") : "Mieszany zestaw pytań";
+}
+
+function getLevelAccent(slug: string) {
+  if (slug === "very_easy") {
+    return {
+      border: "border-emerald-500/20",
+      bg: "bg-emerald-500/10",
+      text: "text-emerald-200",
+      label: "text-emerald-400",
+    };
+  }
+
+  if (slug === "easy") {
+    return {
+      border: "border-sky-500/20",
+      bg: "bg-sky-500/10",
+      text: "text-sky-200",
+      label: "text-sky-400",
+    };
+  }
+
+  if (slug === "medium") {
+    return {
+      border: "border-yellow-500/20",
+      bg: "bg-yellow-500/10",
+      text: "text-yellow-200",
+      label: "text-yellow-400",
+    };
+  }
+
+  if (slug === "hard") {
+    return {
+      border: "border-orange-500/20",
+      bg: "bg-orange-500/10",
+      text: "text-orange-200",
+      label: "text-orange-400",
+    };
+  }
+
+  return {
+    border: "border-red-500/20",
+    bg: "bg-red-500/10",
+    text: "text-red-200",
+    label: "text-red-400",
+  };
+}
+
+function StatBox({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "neutral" | "yellow";
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-2xl border p-4",
+        tone === "yellow"
+          ? "border-yellow-500/20 bg-yellow-500/10"
+          : "border-neutral-800 bg-neutral-950/80"
+      )}
+    >
+      <div
+        className={cn(
+          "text-[11px] uppercase tracking-[0.18em]",
+          tone === "yellow" ? "text-yellow-500/80" : "text-neutral-500"
+        )}
+      >
+        {label}
+      </div>
+      <div
+        className={cn(
+          "mt-2 text-2xl font-semibold",
+          tone === "yellow" ? "text-yellow-200" : "text-white"
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  );
 }
 
 export default function QuizPage() {
   const [mode, setMode] = useState<QuizMode>("checking");
 
-  const [starting, setStarting] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+  const [levels, setLevels] = useState<QuizLevel[]>([]);
+  const [attempts, setAttempts] = useState<Record<string, QuizAttempt>>({});
 
-  const [selectedLevel, setSelectedLevel] = useState<QuizLevelSlug>("easy");
+  const [activeLevel, setActiveLevel] = useState<QuizLevel | null>(null);
+  const [activeAttemptId, setActiveAttemptId] = useState<number | null>(null);
+
+  const [startingLevelSlug, setStartingLevelSlug] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<SelectedAnswers>({});
   const [result, setResult] = useState<QuizResult | null>(null);
 
-  const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_SECONDS);
+  const [timeLeft, setTimeLeft] = useState(DEFAULT_QUESTION_TIME_SECONDS);
   const [error, setError] = useState<string | null>(null);
 
   const answerLockRef = useRef(false);
 
   const currentQuestion = questions[currentIndex] ?? null;
 
-  const selectedLevelMeta = useMemo(() => {
-    return QUIZ_LEVELS.find((level) => level.slug === selectedLevel) ?? QUIZ_LEVELS[1];
-  }, [selectedLevel]);
+  const questionTimeSeconds = activeLevel?.time_limit_seconds
+    ? Number(activeLevel.time_limit_seconds)
+    : DEFAULT_QUESTION_TIME_SECONDS;
 
   const answeredCount = useMemo(() => {
     return Object.keys(answers).length;
   }, [answers]);
 
+  const completedCount = useMemo(() => {
+    return Object.values(attempts).filter((attempt) => attempt.status === "completed")
+      .length;
+  }, [attempts]);
+
+  const totalRewardAvailable = useMemo(() => {
+    return levels.reduce((sum, level) => sum + toNumber(level.reward_amount, 0), 0);
+  }, [levels]);
+
   const progressPercent = questions.length
     ? ((currentIndex + 1) / questions.length) * 100
     : 0;
 
-  const timerPercent = (timeLeft / QUESTION_TIME_SECONDS) * 100;
+  const timerPercent = questionTimeSeconds
+    ? (timeLeft / questionTimeSeconds) * 100
+    : 0;
 
-  const checkExistingAttempt = useCallback(async () => {
+  const loadQuizState = useCallback(async () => {
     setMode("checking");
     setError(null);
 
-    const today = new Date().toISOString().slice(0, 10);
+    const [levelsResult, attemptsResult] = await Promise.all([
+      supabase
+        .from("quiz_levels")
+        .select(
+          "slug, name, description, reward_amount, sort_order, question_count, time_limit_seconds, mix"
+        )
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true }),
 
-    const { data, error } = await supabase
-      .from("quiz_daily_attempts")
-      .select(
-        "id, status, score, total_questions, reward_granted, reward_amount, level_slug"
-      )
-      .eq("quiz_date", today)
-      .maybeSingle();
+      supabase
+        .from("quiz_daily_attempts")
+        .select(
+          "id, level_slug, status, score, total_questions, reward_granted, reward_amount, completed_at"
+        )
+        .eq("quiz_date", todayYmd()),
+    ]);
 
-    if (error) {
+    if (levelsResult.error) {
+      setError(levelsResult.error.message || "Nie udało się pobrać poziomów quizu.");
       setMode("idle");
       return;
     }
 
-    const row = (data ?? null) as QuizAttemptRow | null;
-
-    if (isQuizLevelSlug(row?.level_slug)) {
-      setSelectedLevel(row.level_slug);
-    }
-
-    if (row?.status === "completed") {
-      setResult({
-        attempt_id: toNumber(row.id),
-        score: toNumber(row.score),
-        total_questions: toNumber(row.total_questions, 5),
-        reward_granted: Boolean(row.reward_granted),
-        reward_amount: toNumber(row.reward_amount),
-        balance_after: null,
-      });
-
-      setQuestions([]);
-      setAnswers({});
-      setCurrentIndex(0);
-      setMode("completed");
+    if (attemptsResult.error) {
+      setError(
+        attemptsResult.error.message || "Nie udało się pobrać dzisiejszych prób."
+      );
+      setMode("idle");
       return;
     }
 
+    const loadedLevels = ((levelsResult.data ?? []) as QuizLevel[]).sort(
+      (a, b) => Number(a.sort_order) - Number(b.sort_order)
+    );
+
+    const loadedAttempts = ((attemptsResult.data ?? []) as QuizAttempt[]).reduce<
+      Record<string, QuizAttempt>
+    >((acc, attempt) => {
+      acc[attempt.level_slug] = attempt;
+      return acc;
+    }, {});
+
+    setLevels(loadedLevels);
+    setAttempts(loadedAttempts);
     setMode("idle");
   }, []);
 
   useEffect(() => {
-    void checkExistingAttempt();
-  }, [checkExistingAttempt]);
+    void loadQuizState();
+  }, [loadQuizState]);
 
-  const startQuiz = async () => {
-    if (starting) return;
+  const startQuiz = async (level: QuizLevel) => {
+    if (startingLevelSlug || submitting || mode === "running") return;
 
-    setStarting(true);
+    setStartingLevelSlug(level.slug);
     setError(null);
     setResult(null);
     setQuestions([]);
     setAnswers({});
     setCurrentIndex(0);
-    setTimeLeft(QUESTION_TIME_SECONDS);
+    setTimeLeft(Number(level.time_limit_seconds || DEFAULT_QUESTION_TIME_SECONDS));
+    setActiveLevel(level);
+    setActiveAttemptId(null);
     answerLockRef.current = false;
 
     try {
       const { data, error } = await supabase.rpc("start_daily_quiz", {
-        p_level_slug: selectedLevel,
+        p_level_slug: level.slug,
       });
 
       if (error) {
         const msg = String(error.message || "");
 
-        if (msg.includes("Daily quiz already completed")) {
-          await checkExistingAttempt();
+        if (
+          msg.includes("already completed") ||
+          msg.includes("Daily quiz for this level already completed")
+        ) {
+          await loadQuizState();
           return;
         }
 
@@ -247,22 +332,35 @@ export default function QuizPage() {
         (a, b) => Number(a.question_position) - Number(b.question_position)
       );
 
-      if (loadedQuestions.length !== 5) {
+      if (loadedQuestions.length !== Number(level.question_count || 5)) {
         setError("Quiz nie ma poprawnej liczby pytań.");
         setMode("idle");
         return;
       }
 
+      const attemptId = Number(loadedQuestions[0]?.attempt_id);
+
+      if (!Number.isFinite(attemptId)) {
+        setError("Nie udało się odczytać ID próby quizu.");
+        setMode("idle");
+        return;
+      }
+
+      setActiveAttemptId(attemptId);
       setQuestions(loadedQuestions);
       setMode("running");
     } finally {
-      setStarting(false);
+      setStartingLevelSlug(null);
     }
   };
 
   const submitQuiz = useCallback(
     async (finalAnswers: SelectedAnswers) => {
       if (submitting) return;
+      if (!activeAttemptId) {
+        setError("Brak aktywnej próby quizu.");
+        return;
+      }
 
       setSubmitting(true);
       setError(null);
@@ -274,14 +372,16 @@ export default function QuizPage() {
         }));
 
         const { data, error } = await supabase.rpc("submit_daily_quiz", {
+          p_attempt_id: activeAttemptId,
           p_answers: payload,
         });
 
         if (error) {
           const msg = String(error.message || "");
 
-          if (msg.includes("Daily quiz already completed")) {
-            await checkExistingAttempt();
+          if (msg.includes("already completed")) {
+            await loadQuizState();
+            setMode("idle");
             return;
           }
 
@@ -290,30 +390,12 @@ export default function QuizPage() {
         }
 
         const first = Array.isArray(data) ? data[0] : null;
-
-        if (!first) {
-          setError("Nie udało się odczytać wyniku quizu.");
-          return;
-        }
-
-        const raw = first as Record<string, unknown>;
-
-        const quizResult: QuizResult = {
-          attempt_id: toNumber(raw.attempt_id),
-          score: toNumber(raw.score),
-          total_questions: toNumber(raw.total_questions, 5),
-          reward_granted: Boolean(raw.reward_granted),
-          reward_amount: toNumber(raw.reward_amount),
-          balance_after:
-            raw.balance_after === null || raw.balance_after === undefined
-              ? null
-              : toNumber(raw.balance_after),
-        };
+        const quizResult = first as QuizResult | null;
 
         setResult(quizResult);
         setMode("completed");
 
-        if (quizResult.reward_granted) {
+        if (quizResult?.reward_granted) {
           window.dispatchEvent(
             new CustomEvent("vb:refresh-balance", {
               detail: {
@@ -322,11 +404,14 @@ export default function QuizPage() {
             })
           );
         }
+
+        await loadQuizState();
+        setMode("completed");
       } finally {
         setSubmitting(false);
       }
     },
-    [checkExistingAttempt, questions, submitting]
+    [activeAttemptId, loadQuizState, questions, submitting]
   );
 
   const answerCurrentQuestion = useCallback(
@@ -353,7 +438,7 @@ export default function QuizPage() {
       }
 
       setCurrentIndex((value) => value + 1);
-      setTimeLeft(QUESTION_TIME_SECONDS);
+      setTimeLeft(questionTimeSeconds);
 
       window.setTimeout(() => {
         answerLockRef.current = false;
@@ -364,6 +449,7 @@ export default function QuizPage() {
       currentIndex,
       currentQuestion,
       mode,
+      questionTimeSeconds,
       questions.length,
       submitQuiz,
     ]
@@ -373,7 +459,7 @@ export default function QuizPage() {
     if (mode !== "running") return;
     if (!currentQuestion) return;
 
-    setTimeLeft(QUESTION_TIME_SECONDS);
+    setTimeLeft(questionTimeSeconds);
 
     const intervalId = window.setInterval(() => {
       setTimeLeft((previous) => {
@@ -385,7 +471,7 @@ export default function QuizPage() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [currentIndex, currentQuestion, mode]);
+  }, [currentIndex, currentQuestion, mode, questionTimeSeconds]);
 
   useEffect(() => {
     if (mode !== "running") return;
@@ -394,121 +480,171 @@ export default function QuizPage() {
     void answerCurrentQuestion(null);
   }, [answerCurrentQuestion, mode, timeLeft]);
 
-  const renderStartScreen = () => {
+  const renderLevelCard = (level: QuizLevel) => {
+    const attempt = attempts[level.slug] ?? null;
+    const completed = attempt?.status === "completed";
+    const starting = startingLevelSlug === level.slug;
+    const accent = getLevelAccent(level.slug);
+
+    const rewardAmount = toNumber(level.reward_amount, 50);
+    const questionCount = Number(level.question_count || 5);
+    const timeLimit = Number(level.time_limit_seconds || 10);
+
+    return (
+      <div
+        key={level.slug}
+        className={cn(
+          "rounded-3xl border bg-neutral-950/70 p-5 transition",
+          completed
+            ? "border-green-500/20 bg-green-500/10"
+            : "border-neutral-800 hover:border-neutral-700"
+        )}
+      >
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <div
+                className={cn(
+                  "rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
+                  accent.border,
+                  accent.bg,
+                  accent.label
+                )}
+              >
+                {level.name}
+              </div>
+
+              {completed ? (
+                <div className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] font-semibold text-green-300">
+                  Ukończony dzisiaj
+                </div>
+              ) : (
+                <div className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[11px] font-semibold text-neutral-300">
+                  Dostępny
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 text-xl font-semibold text-white">
+              Quiz: {level.name}
+            </div>
+
+            <div className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
+              {level.description || "Osobny quiz dzienny dla tego poziomu trudności."}
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2 text-xs text-neutral-300">
+              <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
+                {questionCount} pytań
+              </span>
+              <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
+                {timeLimit}s / pytanie
+              </span>
+              <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
+                Mix: {formatMix(level.mix)}
+              </span>
+              <span
+                className={cn(
+                  "rounded-full border px-3 py-1",
+                  accent.border,
+                  accent.bg,
+                  accent.text
+                )}
+              >
+                Nagroda: {rewardAmount.toFixed(0)} VB
+              </span>
+            </div>
+
+            {completed ? (
+              <div className="mt-4 text-sm text-neutral-300">
+                Wynik:{" "}
+                <span className="font-semibold text-white">
+                  {Number(attempt?.score ?? 0)}/{Number(attempt?.total_questions ?? 5)}
+                </span>
+                {attempt?.reward_granted ? (
+                  <>
+                    {" "}
+                    · Nagroda:{" "}
+                    <span className="font-semibold text-green-300">
+                      {toNumber(attempt.reward_amount, 0).toFixed(0)} VB
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {" "}
+                    · <span className="text-neutral-500">Bez nagrody</span>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex shrink-0 flex-col gap-2 xl:w-[180px]">
+            <button
+              type="button"
+              onClick={() => void startQuiz(level)}
+              disabled={completed || starting || mode === "running"}
+              className={cn(
+                "rounded-2xl px-5 py-3 text-sm font-semibold transition",
+                completed || mode === "running"
+                  ? "cursor-not-allowed bg-neutral-800 text-neutral-500"
+                  : starting
+                    ? "cursor-wait bg-neutral-800 text-neutral-400"
+                    : "bg-white text-black hover:bg-neutral-200"
+              )}
+            >
+              {completed
+                ? "Zrobiony"
+                : starting
+                  ? "Losuję…"
+                  : "Rozpocznij"}
+            </button>
+
+            {completed ? (
+              <div className="text-center text-xs text-neutral-500">
+                Dostępny jutro
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderLevelList = () => {
     return (
       <div className="p-5 sm:p-6">
         <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
-          <div className="max-w-3xl">
-            <div className="text-xl font-semibold text-white">
-              Gotowy na quiz dnia?
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <div className="text-xl font-semibold text-white">
+                Wybierz quiz dzienny
+              </div>
+              <p className="mt-2 max-w-3xl text-sm leading-7 text-neutral-400">
+                Każdy poziom to osobny quiz. Każdy z nich możesz zrobić tylko raz
+                dziennie. Poziomy są wylistowane osobno, więc możesz dziś zagrać
+                we wszystkie pięć.
+              </p>
             </div>
 
-            <p className="mt-3 text-sm leading-7 text-neutral-400">
-              Wybierz poziom trudności i kliknij start. System wylosuje 5 pytań.
-              Każde pytanie pojawi się pojedynczo, a na odpowiedź masz{" "}
-              <span className="font-semibold text-white">10 sekund</span>.
-              Po wybraniu odpowiedzi automatycznie przejdziesz dalej.
-            </p>
-
-            <div className="mt-5 grid gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                  Pytań
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-white">5</div>
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                Ukończone dzisiaj
               </div>
-
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-950 p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                  Czas
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-white">
-                  10s
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-yellow-500/80">
-                  Nagroda
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-yellow-200">
-                  {selectedLevelMeta.reward} VB
-                </div>
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {completedCount}/{levels.length || 5}
               </div>
             </div>
           </div>
 
-          <div className="mt-7">
-            <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-              Wybierz poziom
-            </div>
-
-            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-              {QUIZ_LEVELS.map((level) => {
-                const active = selectedLevel === level.slug;
-
-                return (
-                  <button
-                    key={level.slug}
-                    type="button"
-                    disabled={starting}
-                    onClick={() => setSelectedLevel(level.slug)}
-                    className={cn(
-                      "rounded-2xl border p-4 text-left transition",
-                      starting && "cursor-not-allowed opacity-70",
-                      active
-                        ? "border-white bg-white text-black shadow-[0_12px_50px_rgba(255,255,255,0.08)]"
-                        : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-neutral-700 hover:bg-neutral-900"
-                    )}
-                  >
-                    <div className="text-sm font-semibold">{level.label}</div>
-
-                    <div
-                      className={cn(
-                        "mt-2 text-xs leading-5",
-                        active ? "text-black/70" : "text-neutral-500"
-                      )}
-                    >
-                      {level.description}
-                    </div>
-
-                    <div
-                      className={cn(
-                        "mt-3 rounded-xl border px-3 py-2 text-[11px] leading-5",
-                        active
-                          ? "border-black/10 bg-black/5 text-black/70"
-                          : "border-neutral-800 bg-neutral-900 text-neutral-400"
-                      )}
-                    >
-                      {level.mix}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              onClick={startQuiz}
-              disabled={starting}
-              className={cn(
-                "rounded-2xl px-5 py-3 text-sm font-semibold transition",
-                starting
-                  ? "cursor-not-allowed bg-neutral-800 text-neutral-500"
-                  : "bg-white text-black hover:bg-neutral-200"
-              )}
-            >
-              {starting ? "Losuję pytania…" : "Rozpocznij quiz"}
-            </button>
-
-            <div className="text-sm text-neutral-500">
-              Wybrany poziom:{" "}
-              <span className="font-semibold text-white">
-                {selectedLevelMeta.label}
-              </span>
-            </div>
+          <div className="mt-6 space-y-3">
+            {levels.length > 0 ? (
+              levels.map((level) => renderLevelCard(level))
+            ) : (
+              <div className="rounded-3xl border border-neutral-800 bg-neutral-950 p-5 text-sm text-neutral-400">
+                Brak aktywnych poziomów quizu w bazie.
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -516,23 +652,32 @@ export default function QuizPage() {
   };
 
   const renderRunningScreen = () => {
-    if (!currentQuestion) return null;
+    if (!currentQuestion || !activeLevel) return null;
+
+    const accent = getLevelAccent(activeLevel.slug);
 
     return (
       <div className="p-5 sm:p-6">
         <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+              <div
+                className={cn(
+                  "inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]",
+                  accent.border,
+                  accent.bg,
+                  accent.label
+                )}
+              >
+                Quiz: {activeLevel.name}
+              </div>
+
+              <div className="mt-3 text-[11px] uppercase tracking-[0.22em] text-neutral-500">
                 Pytanie {currentIndex + 1} z {questions.length}
               </div>
 
               <div className="mt-2 text-sm text-neutral-400">
-                Poziom:{" "}
-                <span className="font-semibold text-neutral-200">
-                  {selectedLevelMeta.label}
-                </span>
-                . Wybierz odpowiedź. Po kliknięciu przejdziesz dalej.
+                Wybierz odpowiedź. Po kliknięciu przejdziesz dalej.
               </div>
             </div>
 
@@ -607,7 +752,7 @@ export default function QuizPage() {
             <div className="mt-5 text-sm text-neutral-500">
               Odpowiedzi zapisane:{" "}
               <span className="font-semibold text-white">{answeredCount}</span>
-              /5
+              /{questions.length}
             </div>
           </div>
         </div>
@@ -619,8 +764,7 @@ export default function QuizPage() {
     const score = result?.score ?? 0;
     const total = result?.total_questions ?? 5;
     const wonReward = Boolean(result?.reward_granted);
-    const rewardAmount = toNumber(result?.reward_amount, selectedLevelMeta.reward);
-    const balanceAfter = formatBalance(result?.balance_after);
+    const levelName = activeLevel?.name ?? "Quiz";
 
     return (
       <div className="p-5 sm:p-6">
@@ -636,15 +780,12 @@ export default function QuizPage() {
             Quiz ukończony
           </div>
 
-          <div className="mt-3 text-3xl font-semibold text-white">
-            Wynik: {score}/{total}
+          <div className="mt-2 text-sm font-semibold text-neutral-300">
+            {levelName}
           </div>
 
-          <div className="mt-2 text-sm text-neutral-400">
-            Poziom:{" "}
-            <span className="font-semibold text-white">
-              {selectedLevelMeta.label}
-            </span>
+          <div className="mt-3 text-3xl font-semibold text-white">
+            Wynik: {score}/{total}
           </div>
 
           <div className="mt-3 max-w-2xl text-sm leading-7 text-neutral-300">
@@ -652,13 +793,13 @@ export default function QuizPage() {
               <>
                 Brawo. Wszystkie odpowiedzi są poprawne. Otrzymujesz{" "}
                 <span className="font-semibold text-white">
-                  {rewardAmount.toFixed(0)} VB
+                  {Number(result?.reward_amount ?? 50).toFixed(0)} VB
                 </span>
-                {balanceAfter ? (
+                {typeof result?.balance_after === "number" ? (
                   <>
                     . Nowe saldo:{" "}
                     <span className="font-semibold text-white">
-                      {balanceAfter} VB
+                      {Number(result.balance_after).toFixed(2)} VB
                     </span>
                     .
                   </>
@@ -668,23 +809,33 @@ export default function QuizPage() {
               </>
             ) : (
               <>
-                Nie udało się zdobyć nagrody. Aby otrzymać{" "}
-                <span className="font-semibold text-white">
-                  {selectedLevelMeta.reward} VB
-                </span>
-                , trzeba odpowiedzieć poprawnie na wszystkie 5 pytań.
+                Nie udało się zdobyć nagrody. Aby otrzymać nagrodę, trzeba
+                odpowiedzieć poprawnie na wszystkie pytania w tym quizie.
               </>
             )}
           </div>
 
           <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950 p-4 text-sm text-neutral-400">
-            Dzisiejszy quiz jest już zakończony. Kolejna próba będzie dostępna
-            jutro:{" "}
-            <span className="font-semibold text-white">
-              {formatTomorrowLabel()}
-            </span>
-            .
+            Ten poziom quizu jest już dzisiaj zakończony. Pozostałe poziomy możesz
+            zrobić nadal, jeśli nie były jeszcze grane.
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setMode("idle");
+              setResult(null);
+              setActiveLevel(null);
+              setActiveAttemptId(null);
+              setQuestions([]);
+              setAnswers({});
+              setCurrentIndex(0);
+              setTimeLeft(DEFAULT_QUESTION_TIME_SECONDS);
+            }}
+            className="mt-5 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200"
+          >
+            Wróć do listy quizów
+          </button>
         </div>
       </div>
     );
@@ -705,42 +856,19 @@ export default function QuizPage() {
               </h1>
 
               <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
-                5 pytań, 10 sekund na każde pytanie. Wybierz poziom trudności,
-                odpowiedz bezbłędnie i zgarnij{" "}
-                <span className="font-semibold text-white">
-                  {selectedLevelMeta.reward} VB
-                </span>
-                .
+                Pięć osobnych quizów dziennych. Każdy poziom możesz ukończyć raz
+                dziennie. Odpowiedz bezbłędnie i zgarnij nagrodę VB.
               </p>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 sm:min-w-[360px]">
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                  Pytanie
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-white">
-                  {mode === "running" ? `${currentIndex + 1}/5` : "5"}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                  Czas
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-white">
-                  {mode === "running" ? `${timeLeft}s` : "10s"}
-                </div>
-              </div>
-
-              <div className="rounded-2xl border border-yellow-500/20 bg-yellow-500/10 p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-yellow-500/80">
-                  Nagroda
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-yellow-200">
-                  {selectedLevelMeta.reward} VB
-                </div>
-              </div>
+            <div className="grid grid-cols-3 gap-3 sm:min-w-[420px]">
+              <StatBox label="Quizy" value={`${completedCount}/${levels.length || 5}`} />
+              <StatBox label="Czas" value={`${DEFAULT_QUESTION_TIME_SECONDS}s`} />
+              <StatBox
+                label="Nagrody"
+                value={`${totalRewardAvailable.toFixed(0)} VB`}
+                tone="yellow"
+              />
             </div>
           </div>
         </div>
@@ -756,15 +884,19 @@ export default function QuizPage() {
             <div className="animate-pulse rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6">
               <div className="h-5 w-52 rounded bg-neutral-800" />
               <div className="mt-4 h-4 w-96 max-w-full rounded bg-neutral-800" />
-              <div className="mt-6 h-12 w-40 rounded-2xl bg-neutral-800" />
+              <div className="mt-6 space-y-3">
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <div key={index} className="h-24 rounded-3xl bg-neutral-800" />
+                ))}
+              </div>
             </div>
           </div>
-        ) : mode === "idle" ? (
-          renderStartScreen()
         ) : mode === "running" ? (
           renderRunningScreen()
-        ) : (
+        ) : mode === "completed" ? (
           renderCompletedScreen()
+        ) : (
+          renderLevelList()
         )}
       </section>
     </div>
