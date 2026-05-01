@@ -833,7 +833,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="mx-auto flex min-h-[calc(100svh-112px)] max-w-3xl items-center justify-center px-4 py-6">
+    <div className="mx-auto flex min-h-[calc(100svh-112px)] max-w-3xl -translate-y-6 items-center justify-center px-4 py-6">
       <section className="w-full overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/80 shadow-[0_18px_80px_rgba(0,0,0,0.35)]">
         <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_36%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
           <div className="flex flex-wrap items-center gap-2">
