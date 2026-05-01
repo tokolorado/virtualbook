@@ -2454,8 +2454,8 @@ export default function MatchInsightsSection({
 
   return (
     <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 sm:p-5">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0 lg:flex lg:min-h-[60px] lg:items-center">
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
             Match Center
           </div>
