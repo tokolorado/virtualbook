@@ -1355,7 +1355,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <section className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[#050505]">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_14%_0%,rgba(255,255,255,0.11),transparent_34%),radial-gradient(circle_at_88%_18%,rgba(255,255,255,0.045),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_48%)]" />
 
@@ -1364,8 +1364,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
               Ładowanie…
             </div>
           ) : (
-            <div className="relative px-6 py-8 sm:px-10 sm:py-10 xl:px-12 xl:py-12">
-              <div className="flex flex-col gap-8">
+            <div className="relative px-6 py-6 sm:px-10 sm:py-8 xl:px-12 xl:py-9">
+              <div className="flex flex-col gap-6">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
@@ -1402,7 +1402,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                 </div>
 
                 <div>
-                  <h1 className="max-w-full text-[clamp(2rem,3.2vw,4.25rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-white lg:overflow-hidden lg:text-ellipsis lg:whitespace-nowrap">
+                  <h1 className="max-w-full text-[clamp(2rem,3vw,3.75rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-white lg:overflow-hidden lg:text-ellipsis lg:whitespace-nowrap">
                     <span>{matchUI.home}</span>
                     <span className="mx-3 font-normal text-neutral-600">vs</span>
                     <span>{matchUI.away}</span>
