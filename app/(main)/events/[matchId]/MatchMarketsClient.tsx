@@ -1357,18 +1357,18 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   return (
     <div className="space-y-5">
       <section className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[#050505]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(255,255,255,0.10),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_42%)]" />
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_14%_0%,rgba(255,255,255,0.11),transparent_34%),radial-gradient(circle_at_88%_18%,rgba(255,255,255,0.045),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_48%)]" />
 
           {loading ? (
             <div className="relative px-6 py-8 text-neutral-400 sm:px-10 sm:py-10">
               Ładowanie…
             </div>
           ) : (
-            <div className="relative px-6 py-8 sm:px-10 sm:py-10">
-              <div className="flex flex-col gap-8">
-                <div className="flex items-start justify-between gap-6">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex size-10 items-center justify-center rounded-full border border-white/10 bg-white/[0.04]">
+            <div className="relative px-6 py-8 sm:px-10 sm:py-10 xl:px-12 xl:py-12">
+              <div className="flex flex-col gap-10">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                       <LeagueIcon
                         src={matchUI.leagueEmblem}
                         alt={matchUI.leagueName}
@@ -1381,18 +1381,20 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                       <div className="text-[11px] font-medium uppercase tracking-[0.28em] text-neutral-500">
                         Rozgrywki
                       </div>
-                      <div className="mt-1 truncate text-sm font-medium text-neutral-200">
+
+                      <div className="mt-1 truncate text-base font-semibold text-white">
                         {matchUI.leagueName}
                       </div>
                     </div>
                   </div>
 
                   {matchUI.kickoffLocal ? (
-                    <div className="shrink-0 text-right">
+                    <div className="sm:text-right">
                       <div className="text-[11px] font-medium uppercase tracking-[0.28em] text-neutral-500">
                         Data meczu
                       </div>
-                      <div className="mt-1 text-sm font-medium text-neutral-200 sm:text-base">
+
+                      <div className="mt-1 text-base font-semibold text-white">
                         {matchUI.kickoffLocal}
                       </div>
                     </div>
@@ -1400,14 +1402,14 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                 </div>
 
                 <div>
-                  <h1 className="max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-4xl font-semibold leading-none tracking-[-0.045em] text-white sm:text-5xl xl:text-6xl">
-                    {matchUI.home}
+                  <h1 className="max-w-full text-[clamp(2.45rem,5.2vw,5.6rem)] font-semibold leading-[0.98] tracking-[-0.06em] text-white lg:overflow-hidden lg:text-ellipsis lg:whitespace-nowrap">
+                    <span>{matchUI.home}</span>
                     <span className="mx-3 font-normal text-neutral-600">vs</span>
-                    {matchUI.away}
+                    <span>{matchUI.away}</span>
                   </h1>
 
                   {hasVisibleScore(matchUI) ? (
-                    <div className="mt-5 inline-flex items-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-lg font-semibold text-white">
+                    <div className="mt-6 inline-flex items-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-lg font-semibold text-white">
                       {matchUI.homeScore ?? 0} : {matchUI.awayScore ?? 0}
                     </div>
                   ) : null}
