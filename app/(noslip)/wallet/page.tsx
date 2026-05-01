@@ -113,6 +113,8 @@ function kindTone(kind: string): MetricTone {
   if (kind === "BET_PAYOUT") return "green";
   if (kind === "WEEKLY_GRANT") return "yellow";
   if (kind === "MANUAL_RECONCILIATION") return "purple";
+  if (kind === "QUIZ_DAILY_RESET") return "red";
+  if (kind === "QUIZ_DAILY_REWARD") return "green";
   return "blue";
 }
 
@@ -150,6 +152,8 @@ function getDotColor(kind: string) {
   if (kind === "BET_PAYOUT") return "#22c55e";
   if (kind === "WEEKLY_GRANT") return "#facc15";
   if (kind === "MANUAL_RECONCILIATION") return "#a78bfa";
+  if (kind === "QUIZ_DAILY_RESET") return "#ef4444";
+  if (kind === "QUIZ_DAILY_REWARD") return "#22c55e";
   return "#38bdf8";
 }
 

@@ -47,7 +47,13 @@ type QuizResult = {
   total_questions: number;
   reward_granted: boolean;
   reward_amount: number;
-  balance_after?: number | null;
+  balance_after?: number | string | null;
+};
+
+type QuizResetResult = {
+  level_slug: string;
+  reset_cost: number | string;
+  balance_after: number | string | null;
 };
 
 type SelectedAnswers = Record<number, OptionKey | null>;
@@ -197,6 +203,9 @@ export default function QuizPage() {
   const [startingLevelSlug, setStartingLevelSlug] = useState<string | null>(
     null
   );
+  const [resettingLevelSlug, setResettingLevelSlug] = useState<string | null>(
+    null
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -338,7 +347,7 @@ export default function QuizPage() {
     void loadQuizState();
   }, [loadQuizState]);
 
- useEffect(() => {
+  useEffect(() => {
     const checkQuizDate = () => {
       const nextDate = todayWarsawYmd();
 
@@ -360,7 +369,9 @@ export default function QuizPage() {
   }, []);
 
   const startQuiz = async (level: QuizLevel) => {
-    if (startingLevelSlug || submitting || mode === "running") return;
+    if (startingLevelSlug || resettingLevelSlug || submitting || mode === "running") {
+      return;
+    }
 
     if (!isLevelUnlocked(level)) {
       const previousLevelName = getPreviousLevelName(level);
@@ -430,6 +441,62 @@ export default function QuizPage() {
       setMode("running");
     } finally {
       setStartingLevelSlug(null);
+    }
+  };
+
+  const resetFailedQuiz = async (level: QuizLevel) => {
+    if (resettingLevelSlug || startingLevelSlug || submitting || mode === "running") {
+      return;
+    }
+
+    const resetCost = toNumber(level.reward_amount, 0);
+
+    const ok = window.confirm(
+      `Zresetować dzisiejszą próbę quizu "${level.name}" za ${resetCost.toFixed(
+        0
+      )} VB? Po resecie możesz podejść do tego poziomu jeszcze raz.`
+    );
+
+    if (!ok) return;
+
+    setResettingLevelSlug(level.slug);
+    setError(null);
+
+    try {
+      const { data, error } = await supabase.rpc("reset_daily_quiz_attempt", {
+        p_level_slug: level.slug,
+      });
+
+      if (error) {
+        setError(error.message || "Nie udało się zresetować próby quizu.");
+        return;
+      }
+
+      const first = Array.isArray(data)
+        ? ((data[0] ?? null) as QuizResetResult | null)
+        : null;
+
+      window.dispatchEvent(
+        new CustomEvent("vb:refresh-balance", {
+          detail: {
+            balanceAfter: first?.balance_after ?? null,
+          },
+        })
+      );
+
+      setResult(null);
+      setActiveLevel(null);
+      setActiveAttemptId(null);
+      setQuestions([]);
+      setAnswers({});
+      setCurrentIndex(0);
+      setTimeLeft(DEFAULT_QUESTION_TIME_SECONDS);
+      setTimerAnimating(false);
+
+      await loadQuizState();
+      setMode("idle");
+    } finally {
+      setResettingLevelSlug(null);
     }
   };
 
@@ -584,6 +651,7 @@ export default function QuizPage() {
     const lostReward = completed && !Boolean(attempt?.reward_granted);
 
     const starting = startingLevelSlug === level.slug;
+    const resetting = resettingLevelSlug === level.slug;
     const accent = getLevelAccent(level.slug);
 
     const unlocked = isLevelUnlocked(level);
@@ -717,10 +785,16 @@ export default function QuizPage() {
             <button
               type="button"
               onClick={() => void startQuiz(level)}
-              disabled={completed || locked || starting || mode === "running"}
+              disabled={
+                completed ||
+                locked ||
+                starting ||
+                resetting ||
+                mode === "running"
+              }
               className={cn(
                 "rounded-2xl px-5 py-3 text-sm font-semibold transition",
-                completed || locked || mode === "running"
+                completed || locked || resetting || mode === "running"
                   ? "cursor-not-allowed bg-neutral-800 text-neutral-500"
                   : starting
                     ? "cursor-wait bg-neutral-800 text-neutral-400"
@@ -736,7 +810,29 @@ export default function QuizPage() {
                     : "Rozpocznij"}
             </button>
 
-            {completed ? (
+            {lostReward ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void resetFailedQuiz(level)}
+                  disabled={
+                    resetting ||
+                    starting ||
+                    submitting ||
+                    mode === "running"
+                  }
+                  className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-5 py-3 text-sm font-semibold text-yellow-200 transition hover:bg-yellow-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {resetting
+                    ? "Resetuję…"
+                    : `Reset za ${rewardAmount.toFixed(0)} VB`}
+                </button>
+
+                <div className="text-center text-xs text-yellow-500/80">
+                  Odblokuje ponowne podejście dzisiaj
+                </div>
+              </>
+            ) : completed ? (
               <div className="text-center text-xs text-neutral-500">
                 Dostępny jutro
               </div>
@@ -909,6 +1005,10 @@ export default function QuizPage() {
     const total = result?.total_questions ?? 5;
     const wonReward = Boolean(result?.reward_granted);
     const levelName = activeLevel?.name ?? "Quiz";
+    const retryCost = toNumber(activeLevel?.reward_amount, result?.reward_amount ?? 0);
+    const resetting = activeLevel
+      ? resettingLevelSlug === activeLevel.slug
+      : false;
 
     return (
       <div className="p-5 sm:p-6">
@@ -950,7 +1050,7 @@ export default function QuizPage() {
                 <span className="font-semibold text-white">
                   {Number(result?.reward_amount ?? 50).toFixed(0)} VB
                 </span>
-                {typeof result?.balance_after === "number" ? (
+                {result?.balance_after != null ? (
                   <>
                     . Nowe saldo:{" "}
                     <span className="font-semibold text-white">
@@ -964,9 +1064,12 @@ export default function QuizPage() {
               </>
             ) : (
               <>
-                Quiz został ukończony, ale nagroda nie została przyznana. Kolejny
-                poziom pozostaje zablokowany, bo do odblokowania trzeba
-                odpowiedzieć poprawnie na wszystkie pytania.
+                Quiz został ukończony, ale nagroda nie została przyznana. Możesz
+                zresetować tę próbę za{" "}
+                <span className="font-semibold text-white">
+                  {retryCost.toFixed(0)} VB
+                </span>{" "}
+                i podejść do tego poziomu jeszcze raz dzisiaj.
               </>
             )}
           </div>
@@ -975,26 +1078,39 @@ export default function QuizPage() {
             Ten poziom quizu jest już dzisiaj zakończony.{" "}
             {wonReward
               ? "Jeśli kolejny poziom nie był jeszcze grany, możesz przejść dalej."
-              : "Kolejny poziom odblokujesz dopiero po bezbłędnym zaliczeniu tego poziomu."}
+              : "Reset usuwa tylko nieudaną próbę tego poziomu i pobiera opłatę równą nagrodzie za ten poziom."}
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setMode("idle");
-              setResult(null);
-              setActiveLevel(null);
-              setActiveAttemptId(null);
-              setQuestions([]);
-              setAnswers({});
-              setCurrentIndex(0);
-              setTimeLeft(DEFAULT_QUESTION_TIME_SECONDS);
-              setTimerAnimating(false);
-            }}
-            className="mt-5 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200"
-          >
-            Wróć do listy quizów
-          </button>
+          <div className="mt-5 flex flex-wrap gap-3">
+            {!wonReward && activeLevel ? (
+              <button
+                type="button"
+                onClick={() => void resetFailedQuiz(activeLevel)}
+                disabled={resetting || submitting}
+                className="rounded-2xl border border-yellow-500/30 bg-yellow-500/10 px-5 py-3 text-sm font-semibold text-yellow-200 transition hover:bg-yellow-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {resetting ? "Resetuję…" : `Reset za ${retryCost.toFixed(0)} VB`}
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => {
+                setMode("idle");
+                setResult(null);
+                setActiveLevel(null);
+                setActiveAttemptId(null);
+                setQuestions([]);
+                setAnswers({});
+                setCurrentIndex(0);
+                setTimeLeft(DEFAULT_QUESTION_TIME_SECONDS);
+                setTimerAnimating(false);
+              }}
+              className="rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200"
+            >
+              Wróć do listy quizów
+            </button>
+          </div>
         </div>
       </div>
     );
