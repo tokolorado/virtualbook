@@ -1293,64 +1293,6 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
       .sort((a, b) => a.order - b.order);
   }, [markets]);
 
-  const oddsUpdatedAt = useMemo(() => {
-    if (!oddsRows.length) return null;
-
-    const latest = oddsRows
-      .map((r) => Date.parse(r.updated_at))
-      .filter(Number.isFinite)
-      .sort((a, b) => b - a)[0];
-
-    return Number.isFinite(latest) ? formatPolishDateTime(new Date(latest)) : null;
-  }, [oddsRows]);
-
-  const engineVersionLabel = useMemo(() => {
-    const versions = Array.from(
-      new Set(
-        oddsRows
-          .map((row) => row.engine_version)
-          .filter(
-            (v): v is string => typeof v === "string" && v.trim().length > 0
-          )
-      )
-    );
-
-    if (!versions.length) return null;
-    return versions.join(", ");
-  }, [oddsRows]);
-
-  const statusPill = useMemo(() => {
-    if (effectiveIsLive) {
-      return (
-        <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-300">
-          LIVE
-        </span>
-      );
-    }
-
-    if (matchUI.isFinished) {
-      return (
-        <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs font-semibold text-neutral-300">
-          Zakończony
-        </span>
-      );
-    }
-
-    if (closed) {
-      return (
-        <span className="rounded-full border border-yellow-500/30 bg-yellow-500/10 px-3 py-1 text-xs font-semibold text-yellow-300">
-          Zakłady zamknięte
-        </span>
-      );
-    }
-
-    return (
-      <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs font-semibold text-neutral-300">
-        Pre-match
-      </span>
-    );
-  }, [closed, effectiveIsLive, matchUI.isFinished]);
-
   const renderSelectionButton = (
     market: MarketUI,
     item: MarketSelectionUI,
@@ -1414,89 +1356,43 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
   return (
     <div className="space-y-5">
-      <section className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
+      <section className="overflow-hidden rounded-[32px] border border-white/10 bg-neutral-950/90 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
         {loading ? (
-          <div className="text-neutral-400">Ładowanie…</div>
+          <div className="px-6 py-8 text-neutral-400 sm:px-8 sm:py-10">Ładowanie…</div>
         ) : (
-          <>
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0">
-                <div className="inline-flex max-w-full items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-                  <LeagueIcon
-                    src={matchUI.leagueEmblem}
-                    alt={matchUI.leagueName}
-                    size={16}
-                    fallback={matchUI.leagueName.slice(0, 1)}
-                  />
-
-                  <span className="min-w-0 truncate">{matchUI.leagueName}</span>
-                </div>
-
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {statusPill}
-
-                  {liveClockLabel ? (
-                    <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-semibold text-red-300">
-                      {liveClockLabel}
-                    </span>
-                  ) : null}
-
-                  {matchUI.kickoffLocal ? (
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-300">
-                      {matchUI.kickoffLocal}
-                    </span>
-                  ) : null}
-
-                  {oddsUpdatedAt ? (
-                    <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-xs text-neutral-500">
-                      Kursy: {oddsUpdatedAt}
-                    </span>
-                  ) : null}
-                </div>
-
-                <div className="mt-4 text-2xl font-semibold leading-tight text-white sm:text-3xl">
-                  {matchUI.home}{" "}
-                  <span className="font-normal text-neutral-500">vs</span>{" "}
-                  {matchUI.away}
-                </div>
-
-                {hasVisibleScore(matchUI) ? (
-                  <div className="mt-4 inline-flex items-center rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-lg font-semibold text-white">
-                    {matchUI.homeScore ?? 0} : {matchUI.awayScore ?? 0}
-                  </div>
-                ) : null}
+          <div className="px-6 py-8 sm:px-8 sm:py-10">
+            <div className="max-w-4xl">
+              <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.24em] text-neutral-500">
+                <LeagueIcon
+                  src={matchUI.leagueEmblem}
+                  alt={matchUI.leagueName}
+                  size={18}
+                  fallback={matchUI.leagueName.slice(0, 1)}
+                />
+                <span className="truncate">{matchUI.leagueName}</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:w-[340px]">
-                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                    Rynki
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-white">
-                    {markets.length}
-                  </div>
+              {matchUI.kickoffLocal ? (
+                <div className="mt-5">
+                  <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-neutral-200">
+                    {matchUI.kickoffLocal}
+                  </span>
                 </div>
+              ) : null}
 
-                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                    Selekcje
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-white">
-                    {oddsRows.length}
-                  </div>
-                </div>
+              <h1 className="mt-6 text-3xl font-semibold leading-tight tracking-[-0.02em] text-white sm:text-5xl">
+                {matchUI.home}{" "}
+                <span className="font-medium text-neutral-500">vs</span>{" "}
+                {matchUI.away}
+              </h1>
 
-                <div className="col-span-2 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4 sm:col-span-1">
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                    Silnik
-                  </div>
-                  <div className="mt-2 break-words text-sm font-semibold text-white">
-                    {engineVersionLabel ?? "—"}
-                  </div>
+              {hasVisibleScore(matchUI) ? (
+                <div className="mt-6 inline-flex items-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-lg font-semibold text-white">
+                  {matchUI.homeScore ?? 0} : {matchUI.awayScore ?? 0}
                 </div>
-              </div>
+              ) : null}
             </div>
-          </>
+          </div>
         )}
       </section>
 
