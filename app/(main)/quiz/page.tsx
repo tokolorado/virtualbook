@@ -20,7 +20,7 @@ type QuizResult = {
   total_questions: number;
   reward_granted: boolean;
   reward_amount: number;
-  balance_after: number;
+  balance_after?: number | null;
 };
 
 type SelectedAnswers = Record<number, "A" | "B" | "C" | "D">;
@@ -59,17 +59,51 @@ export default function QuizPage() {
     setAnswers({});
 
     try {
-      const { data, error } = await supabase.rpc("start_daily_quiz");
+    const today = new Date().toISOString().slice(0, 10);
+
+    const { data: existingAttempt, error: existingAttemptError } = await supabase
+        .from("quiz_daily_attempts")
+        .select("id, status, score, total_questions, reward_granted, reward_amount")
+        .eq("quiz_date", today)
+        .maybeSingle();
+
+    if (!existingAttemptError && existingAttempt?.status === "completed") {
+        setResult({
+        attempt_id: Number(existingAttempt.id),
+        score: Number(existingAttempt.score ?? 0),
+        total_questions: Number(existingAttempt.total_questions ?? 5),
+        reward_granted: Boolean(existingAttempt.reward_granted),
+        reward_amount: Number(existingAttempt.reward_amount ?? 0),
+        balance_after: null,
+        });
+
+        setQuestions([]);
+        setError(null);
+        setLoading(false);
+        return;
+    }
+
+    const { data, error } = await supabase.rpc("start_daily_quiz");
 
       if (error) {
         const msg = String(error.message || "");
 
         if (msg.includes("Daily quiz already completed")) {
-          setError("Dzisiejszy quiz został już ukończony. Wróć jutro po kolejną próbę.");
-        } else {
-          setError(msg || "Nie udało się rozpocząć quizu.");
+        setResult({
+            attempt_id: 0,
+            score: 0,
+            total_questions: 5,
+            reward_granted: false,
+            reward_amount: 0,
+            balance_after: null,
+        });
+
+        setError(null);
+        setQuestions([]);
+        return;
         }
 
+        setError(msg || "Nie udało się rozpocząć quizu.");
         setQuestions([]);
         return;
       }
@@ -167,7 +201,7 @@ export default function QuizPage() {
                   Odp.
                 </div>
                 <div className="mt-2 text-2xl font-semibold text-white">
-                  {answeredCount}/5
+                  {result ? `${result.score}/${result.total_questions}` : `${answeredCount}/5`}
                 </div>
               </div>
 
@@ -208,11 +242,18 @@ export default function QuizPage() {
                   <span className="font-semibold text-white">
                     {Number(result.reward_amount).toFixed(0)} VB
                   </span>
-                  . Nowe saldo po wpisie w ledgerze:{" "}
-                  <span className="font-semibold text-white">
-                    {Number(result.balance_after).toFixed(2)} VB
-                  </span>
-                  .
+                    {typeof result.balance_after === "number" ? (
+                    <>
+                        {" "}
+                        Nowe saldo po wpisie w ledgerze:{" "}
+                        <span className="font-semibold text-white">
+                        {Number(result.balance_after).toFixed(2)} VB
+                        </span>
+                        .
+                    </>
+                    ) : (
+                    <> Wróć jutro po kolejną próbę.</>
+                    )}
                 </>
               ) : (
                 "Nie udało się zdobyć nagrody. Aby otrzymać 50 VB, trzeba odpowiedzieć poprawnie na wszystkie 5 pytań."
@@ -337,7 +378,9 @@ export default function QuizPage() {
             </div>
           ) : (
             <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 text-sm text-neutral-300">
-              Brak dostępnego quizu.
+            {result
+                ? "Dzisiejszy quiz jest już ukończony. Wróć jutro po kolejne pytania."
+                : "Brak dostępnego quizu."}
             </div>
           )}
         </div>
