@@ -3,10 +3,10 @@
 
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 type NoticeTone = "success" | "error" | "warning" | "info";
+type RegisterStep = "email" | "profile" | "password" | "summary" | "success";
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -79,7 +79,7 @@ function isValidUsername(username: string) {
 
 function noticeClasses(tone: NoticeTone) {
   if (tone === "success") {
-    return "border-emerald-500/30 bg-emerald-500/10 text-emerald-200";
+    return "border-green-500/30 bg-green-500/10 text-green-200";
   }
 
   if (tone === "error") {
@@ -115,8 +115,8 @@ function InputField({
   error?: string | null;
 }) {
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-semibold text-neutral-200">{label}</label>
+    <div className="space-y-1.5">
+      <label className="text-sm font-medium text-neutral-200">{label}</label>
 
       <div className="relative">
         <input
@@ -126,12 +126,11 @@ function InputField({
           autoComplete={autoComplete}
           placeholder={placeholder}
           className={cn(
-            "w-full rounded-2xl border bg-black/60 px-4 py-3.5 text-sm text-white outline-none transition placeholder:text-neutral-600",
-            "shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]",
-            rightSlot ? "pr-24" : "",
+            "w-full rounded-2xl border bg-neutral-950 px-4 py-3 text-sm text-white outline-none transition placeholder:text-neutral-500",
+            rightSlot ? "pr-20" : "",
             error
-              ? "border-red-500/50 focus:border-red-400 focus:ring-4 focus:ring-red-500/10"
-              : "border-neutral-800 focus:border-neutral-500 focus:ring-4 focus:ring-white/5"
+              ? "border-red-500/50 focus:border-red-400"
+              : "border-neutral-800 focus:border-neutral-600"
           )}
         />
 
@@ -161,86 +160,51 @@ function PasswordRule({
   return (
     <div
       className={cn(
-        "rounded-2xl border px-3 py-2.5 text-[11px] font-medium transition",
+        "rounded-xl border px-3 py-2 text-[11px]",
         ok
-          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-          : "border-neutral-800 bg-black/40 text-neutral-500"
+          ? "border-green-500/30 bg-green-500/10 text-green-300"
+          : "border-neutral-800 bg-neutral-950/50 text-neutral-400"
       )}
     >
-      <span className="mr-2">{ok ? "✓" : "•"}</span>
+      {ok ? "✓ " : "• "}
       {children}
     </div>
   );
 }
 
-function FeatureCard({
-  eyebrow,
-  title,
-  text,
-}: {
-  eyebrow: string;
-  title: string;
-  text: string;
-}) {
-  return (
-    <div className="rounded-3xl border border-white/10 bg-white/[0.035] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-yellow-400/80">
-        {eyebrow}
-      </div>
-
-      <div className="mt-2 text-base font-semibold text-white">{title}</div>
-
-      <p className="mt-2 text-sm leading-6 text-neutral-400">{text}</p>
-    </div>
-  );
-}
-
-function MiniStat({
+function StepPill({
+  active,
+  done,
   label,
-  value,
-  tone = "neutral",
 }: {
+  active: boolean;
+  done: boolean;
   label: string;
-  value: string;
-  tone?: "neutral" | "yellow";
 }) {
   return (
     <div
       className={cn(
-        "rounded-2xl border p-4",
-        tone === "yellow"
-          ? "border-yellow-500/25 bg-yellow-500/10"
-          : "border-white/10 bg-white/[0.035]"
+        "rounded-full border px-3 py-1 text-[11px] font-semibold transition",
+        active
+          ? "border-white/30 bg-white text-black"
+          : done
+            ? "border-green-500/30 bg-green-500/10 text-green-300"
+            : "border-neutral-800 bg-neutral-950 text-neutral-500"
       )}
     >
-      <div
-        className={cn(
-          "text-[10px] font-semibold uppercase tracking-[0.2em]",
-          tone === "yellow" ? "text-yellow-400/80" : "text-neutral-500"
-        )}
-      >
-        {label}
-      </div>
-
-      <div
-        className={cn(
-          "mt-2 text-xl font-semibold",
-          tone === "yellow" ? "text-yellow-200" : "text-white"
-        )}
-      >
-        {value}
-      </div>
+      {label}
     </div>
   );
 }
 
 export default function RegisterPage() {
-  const router = useRouter();
+  const [step, setStep] = useState<RegisterStep>("email");
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [confirmedEmail, setConfirmedEmail] = useState("");
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
 
@@ -248,10 +212,9 @@ export default function RegisterPage() {
   const [showPassword2, setShowPassword2] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState<{
-    tone: NoticeTone;
-    text: string;
-  } | null>(null);
+  const [notice, setNotice] = useState<{ tone: NoticeTone; text: string } | null>(
+    null
+  );
 
   const cleanUsername = useMemo(() => username.trim().toLowerCase(), [username]);
   const cleanEmail = useMemo(() => normalizeEmail(email), [email]);
@@ -280,72 +243,41 @@ export default function RegisterPage() {
 
   const passwordMismatch = password2.length > 0 && password !== password2;
 
-  const canSubmit =
-    !loading &&
-    !!firstName.trim() &&
-    !!lastName.trim() &&
-    !!cleanUsername &&
-    !!cleanEmail &&
-    !!password &&
-    !!password2 &&
-    !usernameError &&
-    !emailError &&
-    passwordValid &&
-    !passwordMismatch;
+  const stepIndex =
+    step === "email"
+      ? 1
+      : step === "profile"
+        ? 2
+        : step === "password"
+          ? 3
+          : step === "summary"
+            ? 4
+            : 5;
 
-  const handleSignUp = async (e?: FormEvent) => {
-    e?.preventDefault();
-    setNotice(null);
+  const resetNotice = () => setNotice(null);
 
-    const cleanFirstName = firstName.trim();
-    const cleanLastName = lastName.trim();
-    const cleanPassword = password.trim();
+  const goToEmailStep = () => {
+    resetNotice();
+    setStep("email");
+  };
 
-    if (
-      !cleanFirstName ||
-      !cleanLastName ||
-      !cleanUsername ||
-      !cleanEmail ||
-      !cleanPassword ||
-      !password2
-    ) {
-      setNotice({
-        tone: "error",
-        text: "Wszystkie pola są wymagane.",
-      });
-      return;
-    }
+  const goToProfileStep = () => {
+    resetNotice();
+    setStep("profile");
+  };
 
-    if (!isValidUsername(cleanUsername)) {
-      setNotice({
-        tone: "error",
-        text:
-          "Nazwa użytkownika jest nieprawidłowa. Użyj 3-20 znaków: małe litery, cyfry i _. Bez wulgaryzmów i nazw zastrzeżonych.",
-      });
-      return;
-    }
+  const goToPasswordStep = () => {
+    resetNotice();
+    setStep("password");
+  };
+
+  const checkEmailAndContinue = async () => {
+    resetNotice();
 
     if (!isValidEmail(cleanEmail)) {
       setNotice({
         tone: "error",
         text: "Podaj poprawny adres e-mail.",
-      });
-      return;
-    }
-
-    if (!passwordValid) {
-      setNotice({
-        tone: "error",
-        text:
-          "Hasło nie spełnia wymagań. Musi mieć minimum 8 znaków, jedną dużą literę, jedną małą literę i jedną cyfrę.",
-      });
-      return;
-    }
-
-    if (password !== password2) {
-      setNotice({
-        tone: "error",
-        text: "Hasła nie są identyczne.",
       });
       return;
     }
@@ -370,6 +302,46 @@ export default function RegisterPage() {
         return;
       }
 
+      setStep("profile");
+    } catch (e: unknown) {
+      setNotice({
+        tone: "error",
+        text:
+          e instanceof Error
+            ? e.message
+            : "Nie udało się sprawdzić adresu e-mail.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkProfileAndContinue = async () => {
+    resetNotice();
+
+    const cleanFirstName = firstName.trim();
+    const cleanLastName = lastName.trim();
+
+    if (!cleanFirstName || !cleanLastName || !cleanUsername) {
+      setNotice({
+        tone: "error",
+        text: "Podaj imię, nazwisko i nazwę użytkownika.",
+      });
+      return;
+    }
+
+    if (!isValidUsername(cleanUsername)) {
+      setNotice({
+        tone: "error",
+        text:
+          "Nazwa użytkownika jest nieprawidłowa. Użyj 3-20 znaków: małe litery, cyfry i _. Bez wulgaryzmów i nazw zastrzeżonych.",
+      });
+      return;
+    }
+
+    try {
+      setLoading(true);
+
       const checkRes = await fetch(
         `/api/username/check?username=${encodeURIComponent(cleanUsername)}`,
         { cache: "no-store" }
@@ -384,6 +356,95 @@ export default function RegisterPage() {
         });
         return;
       }
+
+      setStep("password");
+    } catch (e: unknown) {
+      setNotice({
+        tone: "error",
+        text:
+          e instanceof Error
+            ? e.message
+            : "Nie udało się sprawdzić nazwy użytkownika.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkPasswordAndContinue = () => {
+    resetNotice();
+
+    if (!passwordValid) {
+      setNotice({
+        tone: "error",
+        text:
+          "Hasło nie spełnia wymagań. Musi mieć minimum 8 znaków, jedną dużą literę, jedną małą literę i jedną cyfrę.",
+      });
+      return;
+    }
+
+    if (password !== password2) {
+      setNotice({
+        tone: "error",
+        text: "Hasła nie są identyczne.",
+      });
+      return;
+    }
+
+    setStep("summary");
+  };
+
+  const createAccount = async () => {
+    resetNotice();
+
+    const cleanFirstName = firstName.trim();
+    const cleanLastName = lastName.trim();
+    const cleanPassword = password.trim();
+
+    if (
+      !cleanFirstName ||
+      !cleanLastName ||
+      !cleanUsername ||
+      !cleanEmail ||
+      !cleanPassword ||
+      !password2
+    ) {
+      setNotice({
+        tone: "error",
+        text: "Brakuje wymaganych danych rejestracyjnych.",
+      });
+      return;
+    }
+
+    if (!isValidEmail(cleanEmail)) {
+      setNotice({
+        tone: "error",
+        text: "Adres e-mail jest nieprawidłowy.",
+      });
+      setStep("email");
+      return;
+    }
+
+    if (!isValidUsername(cleanUsername)) {
+      setNotice({
+        tone: "error",
+        text: "Nazwa użytkownika jest nieprawidłowa.",
+      });
+      setStep("profile");
+      return;
+    }
+
+    if (!passwordValid || password !== password2) {
+      setNotice({
+        tone: "error",
+        text: "Hasło jest nieprawidłowe albo hasła nie są identyczne.",
+      });
+      setStep("password");
+      return;
+    }
+
+    try {
+      setLoading(true);
 
       const { error } = await supabase.auth.signUp({
         email: cleanEmail,
@@ -406,6 +467,7 @@ export default function RegisterPage() {
             tone: "error",
             text: "Konto z tym adresem e-mail już istnieje.",
           });
+          setStep("email");
         } else {
           setNotice({
             tone: "error",
@@ -416,9 +478,8 @@ export default function RegisterPage() {
         return;
       }
 
-      router.replace(
-        `/login?registered=1&email=${encodeURIComponent(cleanEmail)}`
-      );
+      setConfirmedEmail(cleanEmail);
+      setStep("success");
     } catch (e: unknown) {
       setNotice({
         tone: "error",
@@ -432,295 +493,400 @@ export default function RegisterPage() {
     }
   };
 
-  return (
-    <div className="relative min-h-[calc(100vh-72px)] overflow-hidden bg-black px-4 py-8 text-white sm:px-6 lg:px-8">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_12%,rgba(250,204,21,0.16),transparent_28%),radial-gradient(circle_at_88%_20%,rgba(14,165,233,0.14),transparent_26%),radial-gradient(circle_at_50%_90%,rgba(34,197,94,0.08),transparent_34%)]" />
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+  const handleFormSubmit = async (e: FormEvent) => {
+    e.preventDefault();
 
-      <div className="relative mx-auto max-w-7xl">
-        <div className="grid gap-6 lg:grid-cols-[1.02fr_0.98fr] lg:items-stretch">
-          <section className="overflow-hidden rounded-[2rem] border border-white/10 bg-neutral-950/80 shadow-[0_24px_120px_rgba(0,0,0,0.65)]">
-            <div className="relative h-full p-6 sm:p-8 lg:p-10">
-              <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),transparent_34%),radial-gradient(circle_at_top_right,rgba(250,204,21,0.10),transparent_38%)]" />
+    if (step === "email") {
+      await checkEmailAndContinue();
+      return;
+    }
 
-              <div className="relative">
-                <div className="inline-flex items-center gap-2 rounded-full border border-yellow-500/25 bg-yellow-500/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.22em] text-yellow-300">
-                  <span className="h-1.5 w-1.5 rounded-full bg-yellow-300 shadow-[0_0_18px_rgba(250,204,21,0.9)]" />
-                  VirtualBook Football
-                </div>
+    if (step === "profile") {
+      await checkProfileAndContinue();
+      return;
+    }
 
-                <h1 className="mt-7 max-w-2xl text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl">
-                  Dołącz do gry o piłkową wiedzę, kupony i{" "}
-                  <span className="bg-gradient-to-r from-yellow-200 via-yellow-400 to-amber-500 bg-clip-text text-transparent">
-                    VirtualBucks
-                  </span>
-                  .
-                </h1>
+    if (step === "password") {
+      checkPasswordAndContinue();
+      return;
+    }
 
-                <p className="mt-5 max-w-2xl text-sm leading-7 text-neutral-400 sm:text-base">
-                  Stwórz konto i wejdź do świata piłkowej rywalizacji bez
-                  prawdziwych pieniędzy. Typuj mecze, rozwiązuj quizy,
-                  odblokowuj kolejne poziomy i buduj swoją pozycję za pomocą
-                  wirtualnej waluty{" "}
-                  <span className="font-semibold text-yellow-200">
-                    VirtualBucks (VB)
-                  </span>
-                  .
-                </p>
+    if (step === "summary") {
+      await createAccount();
+    }
+  };
 
-                <div className="mt-7 grid gap-3 sm:grid-cols-3">
-                  <MiniStat label="Waluta" value="VirtualBucks" tone="yellow" />
-                  <MiniStat label="Ryzyko" value="0 PLN" />
-                  <MiniStat label="Tryb" value="Rywalizacja" />
-                </div>
+  const renderEmailStep = () => {
+    return (
+      <>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
+            Krok 1 z 4
+          </div>
 
-                <div className="mt-7 grid gap-3 xl:grid-cols-2">
-                  <FeatureCard
-                    eyebrow="VB"
-                    title="Zdobywaj VirtualBucks"
-                    text="Zbieraj VB za aktywność, quizy i skuteczne decyzje. To Twoja wirtualna waluta do zabawy w aplikacji."
-                  />
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+            Nie masz konta?
+          </h1>
 
-                  <FeatureCard
-                    eyebrow="Quiz dnia"
-                    title="Sprawdzaj piłkarską wiedzę"
-                    text="Codzienne quizy mają poziomy trudności, nagrody i system odblokowywania kolejnych etapów."
-                  />
-
-                  <FeatureCard
-                    eyebrow="Kupony"
-                    title="Typuj bez realnego ryzyka"
-                    text="Buduj kupony i testuj swoje przeczucie piłkarskie bez wpłacania prawdziwych pieniędzy."
-                  />
-
-                  <FeatureCard
-                    eyebrow="Ranking"
-                    title="Rywalizuj z innymi"
-                    text="Porównuj wyniki, pnij się w tabeli i pokaż, kto najlepiej czyta futbol."
-                  />
-                </div>
-
-                <div className="mt-7 rounded-3xl border border-white/10 bg-black/40 p-5">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
-                    Jak to działa
-                  </div>
-
-                  <div className="mt-4 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
-                      <div className="text-sm font-semibold text-white">
-                        1. Zakładasz konto
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-neutral-500">
-                        Wypełnij formularz i potwierdź adres e-mail.
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
-                      <div className="text-sm font-semibold text-white">
-                        2. Zdobywasz VB
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-neutral-500">
-                        Graj w quizy i korzystaj z funkcji aplikacji.
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4">
-                      <div className="text-sm font-semibold text-white">
-                        3. Rywalizujesz
-                      </div>
-                      <p className="mt-2 text-xs leading-5 text-neutral-500">
-                        Twórz kupony, zbieraj wyniki i walcz o ranking.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <p className="mt-5 text-xs leading-5 text-neutral-600">
-                  VirtualBook Football służy wyłącznie do rozrywki. VirtualBucks
-                  (VB) są walutą wirtualną i nie są prawdziwymi pieniędzmi.
-                </p>
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-[2rem] border border-white/10 bg-neutral-950/90 p-5 shadow-[0_24px_120px_rgba(0,0,0,0.65)] sm:p-6 lg:p-8">
-            <div className="rounded-[1.6rem] border border-neutral-800 bg-black/40 p-5 sm:p-6">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-neutral-500">
-                    Rejestracja
-                  </div>
-
-                  <h2 className="mt-2 text-2xl font-semibold tracking-tight text-white">
-                    Utwórz konto
-                  </h2>
-
-                  <p className="mt-2 text-sm leading-6 text-neutral-400">
-                    Wypełnij dane, a następnie aktywuj konto przez link wysłany
-                    na e-mail.
-                  </p>
-                </div>
-
-                <div className="rounded-2xl border border-yellow-500/25 bg-yellow-500/10 px-4 py-3 text-right">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-yellow-400/80">
-                    Start
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-yellow-100">
-                    VB ready
-                  </div>
-                </div>
-              </div>
-
-              {notice ? (
-                <div
-                  className={cn(
-                    "mt-5 rounded-2xl border p-4 text-sm leading-6",
-                    noticeClasses(notice.tone)
-                  )}
-                >
-                  {notice.text}
-                </div>
-              ) : null}
-
-              <form onSubmit={handleSignUp} className="mt-6 space-y-4">
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <InputField
-                    label="Imię"
-                    type="text"
-                    value={firstName}
-                    onChange={setFirstName}
-                    placeholder="Np. Jan"
-                    autoComplete="given-name"
-                  />
-
-                  <InputField
-                    label="Nazwisko"
-                    type="text"
-                    value={lastName}
-                    onChange={setLastName}
-                    placeholder="Np. Kowalski"
-                    autoComplete="family-name"
-                  />
-                </div>
-
-                <InputField
-                  label="Nazwa użytkownika"
-                  type="text"
-                  value={username}
-                  onChange={(value) => setUsername(value.toLowerCase())}
-                  placeholder="np. typer_99"
-                  autoComplete="username"
-                  error={usernameError}
-                  help="Dozwolone: małe litery, cyfry i _. Bez spacji."
-                />
-
-                <InputField
-                  label="E-mail"
-                  type="email"
-                  value={email}
-                  onChange={setEmail}
-                  placeholder="twoj@email.com"
-                  autoComplete="email"
-                  error={emailError}
-                  help="Na ten adres wyślemy link potwierdzający konto."
-                />
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <InputField
-                    label="Hasło"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={setPassword}
-                    placeholder="Ustaw hasło"
-                    autoComplete="new-password"
-                    rightSlot={
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((v) => !v)}
-                        className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-300 transition hover:border-neutral-700 hover:bg-neutral-800"
-                      >
-                        {showPassword ? "Ukryj" : "Pokaż"}
-                      </button>
-                    }
-                  />
-
-                  <InputField
-                    label="Potwierdź hasło"
-                    type={showPassword2 ? "text" : "password"}
-                    value={password2}
-                    onChange={setPassword2}
-                    placeholder="Powtórz hasło"
-                    autoComplete="new-password"
-                    rightSlot={
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword2((v) => !v)}
-                        className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs font-medium text-neutral-300 transition hover:border-neutral-700 hover:bg-neutral-800"
-                      >
-                        {showPassword2 ? "Ukryj" : "Pokaż"}
-                      </button>
-                    }
-                    error={passwordMismatch ? "Hasła nie są identyczne." : null}
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <PasswordRule ok={passwordHasMin}>
-                    Minimum 8 znaków
-                  </PasswordRule>
-                  <PasswordRule ok={passwordHasUpper}>
-                    Jedna duża litera
-                  </PasswordRule>
-                  <PasswordRule ok={passwordHasLower}>
-                    Jedna mała litera
-                  </PasswordRule>
-                  <PasswordRule ok={passwordHasDigit}>Jedna cyfra</PasswordRule>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={!canSubmit}
-                  className={cn(
-                    "group relative w-full overflow-hidden rounded-2xl px-5 py-4 text-sm font-semibold transition",
-                    canSubmit
-                      ? "bg-white text-black shadow-[0_18px_60px_rgba(255,255,255,0.12)] hover:bg-neutral-200"
-                      : "cursor-not-allowed bg-neutral-800 text-neutral-500"
-                  )}
-                >
-                  <span className="relative z-10">
-                    {loading ? "Tworzenie konta..." : "Utwórz konto"}
-                  </span>
-
-                  {canSubmit ? (
-                    <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/50 to-transparent opacity-40 transition duration-700 group-hover:translate-x-full" />
-                  ) : null}
-                </button>
-
-                <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-sm leading-6 text-neutral-400">
-                  Masz już konto?{" "}
-                  <Link
-                    href="/login"
-                    className="font-semibold text-white underline underline-offset-4 transition hover:text-yellow-200"
-                  >
-                    Zaloguj się
-                  </Link>
-                </div>
-              </form>
-            </div>
-
-            <div className="mt-4 rounded-3xl border border-neutral-800 bg-black/30 p-5">
-              <div className="text-sm font-semibold text-white">
-                Po rejestracji otrzymasz link aktywacyjny.
-              </div>
-
-              <p className="mt-2 text-sm leading-6 text-neutral-500">
-                Po kliknięciu w link potwierdzający wrócisz do aplikacji i
-                będziesz mógł rozpocząć grę o VirtualBucks (VB).
-              </p>
-            </div>
-          </section>
+          <p className="mt-3 text-sm leading-6 text-neutral-400">
+            Podaj swój adres e-mail. Sprawdzimy, czy możesz użyć go do utworzenia
+            konta.
+          </p>
         </div>
-      </div>
+
+        <InputField
+          label="E-mail"
+          type="email"
+          value={email}
+          onChange={setEmail}
+          placeholder="twoj@email.com"
+          autoComplete="email"
+          error={emailError}
+          help="Na ten adres wyślemy link potwierdzający konto."
+        />
+
+        <button
+          type="submit"
+          disabled={loading || !isValidEmail(cleanEmail)}
+          className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+        >
+          {loading ? "Sprawdzanie..." : "Dalej"}
+        </button>
+      </>
+    );
+  };
+
+  const renderProfileStep = () => {
+    return (
+      <>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
+            Krok 2 z 4
+          </div>
+
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+            Uzupełnij dane
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-neutral-400">
+            Teraz podaj imię, nazwisko i nazwę użytkownika widoczną w aplikacji.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-sm text-neutral-400">
+          Rejestrujesz konto na adres:{" "}
+          <span className="font-semibold text-white">{cleanEmail}</span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <InputField
+            label="Imię"
+            type="text"
+            value={firstName}
+            onChange={setFirstName}
+            placeholder="Np. Jan"
+            autoComplete="given-name"
+          />
+
+          <InputField
+            label="Nazwisko"
+            type="text"
+            value={lastName}
+            onChange={setLastName}
+            placeholder="Np. Kowalski"
+            autoComplete="family-name"
+          />
+        </div>
+
+        <InputField
+          label="Nazwa użytkownika"
+          type="text"
+          value={username}
+          onChange={(value) => setUsername(value.toLowerCase())}
+          placeholder="np. typer_99"
+          autoComplete="username"
+          error={usernameError}
+          help="Dozwolone: małe litery, cyfry i _. Bez spacji."
+        />
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={goToEmailStep}
+            disabled={loading}
+            className="rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-semibold text-neutral-300 transition hover:bg-neutral-900 disabled:opacity-60"
+          >
+            Wstecz
+          </button>
+
+          <button
+            type="submit"
+            disabled={
+              loading ||
+              !firstName.trim() ||
+              !lastName.trim() ||
+              !cleanUsername ||
+              Boolean(usernameError)
+            }
+            className="rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+          >
+            {loading ? "Sprawdzanie..." : "Dalej"}
+          </button>
+        </div>
+      </>
+    );
+  };
+
+  const renderPasswordStep = () => {
+    return (
+      <>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
+            Krok 3 z 4
+          </div>
+
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+            Ustaw hasło
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-neutral-400">
+            Hasło zabezpiecza dostęp do Twojego konta. Użyj minimum 8 znaków.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <InputField
+            label="Hasło"
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={setPassword}
+            placeholder="Ustaw hasło"
+            autoComplete="new-password"
+            rightSlot={
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-neutral-800"
+              >
+                {showPassword ? "Ukryj" : "Pokaż"}
+              </button>
+            }
+          />
+
+          <InputField
+            label="Potwierdź hasło"
+            type={showPassword2 ? "text" : "password"}
+            value={password2}
+            onChange={setPassword2}
+            placeholder="Powtórz hasło"
+            autoComplete="new-password"
+            rightSlot={
+              <button
+                type="button"
+                onClick={() => setShowPassword2((v) => !v)}
+                className="rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-neutral-800"
+              >
+                {showPassword2 ? "Ukryj" : "Pokaż"}
+              </button>
+            }
+            error={passwordMismatch ? "Hasła nie są identyczne." : null}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <PasswordRule ok={passwordHasMin}>Minimum 8 znaków</PasswordRule>
+          <PasswordRule ok={passwordHasUpper}>Jedna duża litera</PasswordRule>
+          <PasswordRule ok={passwordHasLower}>Jedna mała litera</PasswordRule>
+          <PasswordRule ok={passwordHasDigit}>Jedna cyfra</PasswordRule>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={goToProfileStep}
+            className="rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-semibold text-neutral-300 transition hover:bg-neutral-900"
+          >
+            Wstecz
+          </button>
+
+          <button
+            type="submit"
+            disabled={!passwordValid || passwordMismatch || !password2}
+            className="rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+          >
+            Dalej
+          </button>
+        </div>
+      </>
+    );
+  };
+
+  const renderSummaryStep = () => {
+    return (
+      <>
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
+            Krok 4 z 4
+          </div>
+
+          <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white">
+            Sprawdź dane
+          </h1>
+
+          <p className="mt-3 text-sm leading-6 text-neutral-400">
+            Jeżeli wszystko się zgadza, utworzymy konto i wyślemy link
+            potwierdzający na podany adres e-mail.
+          </p>
+        </div>
+
+        <div className="space-y-3 rounded-3xl border border-neutral-800 bg-neutral-950/70 p-5">
+          <div className="flex items-center justify-between gap-4 border-b border-neutral-800 pb-3">
+            <span className="text-sm text-neutral-500">E-mail</span>
+            <span className="text-right text-sm font-semibold text-white">
+              {cleanEmail}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 border-b border-neutral-800 pb-3">
+            <span className="text-sm text-neutral-500">Imię i nazwisko</span>
+            <span className="text-right text-sm font-semibold text-white">
+              {firstName.trim()} {lastName.trim()}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            <span className="text-sm text-neutral-500">Nazwa użytkownika</span>
+            <span className="text-right text-sm font-semibold text-white">
+              @{cleanUsername}
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-yellow-500/25 bg-yellow-500/10 p-4 text-sm leading-6 text-yellow-100">
+          Po kliknięciu „Utwórz konto” wyślemy wiadomość na adres{" "}
+          <span className="font-semibold text-white">{cleanEmail}</span>. Konto
+          będzie wymagało potwierdzenia przez link w tej wiadomości.
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={goToPasswordStep}
+            disabled={loading}
+            className="rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-semibold text-neutral-300 transition hover:bg-neutral-900 disabled:opacity-60"
+          >
+            Wstecz
+          </button>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:bg-neutral-200 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+          >
+            {loading ? "Tworzenie konta..." : "Utwórz konto"}
+          </button>
+        </div>
+      </>
+    );
+  };
+
+  const renderSuccessStep = () => {
+    const emailToShow = confirmedEmail || cleanEmail;
+
+    return (
+      <>
+        <div className="rounded-full border border-green-500/30 bg-green-500/10 px-4 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-green-300">
+          Konto utworzone
+        </div>
+
+        <div className="text-center">
+          <h1 className="mt-5 text-3xl font-semibold tracking-tight text-white">
+            Potwierdź swój adres e-mail
+          </h1>
+
+          <p className="mt-4 text-sm leading-7 text-neutral-400">
+            Wysłaliśmy wiadomość aktywacyjną na adres:
+          </p>
+
+          <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">
+            {emailToShow}
+          </div>
+
+          <p className="mt-4 text-sm leading-7 text-neutral-400">
+            Otwórz swoją skrzynkę pocztową i kliknij link potwierdzający. Dopiero
+            po potwierdzeniu adresu e-mail konto będzie gotowe do logowania.
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-neutral-800 bg-neutral-950/70 p-4 text-sm leading-6 text-neutral-400">
+          Nie widzisz wiadomości? Sprawdź folder spam, oferty lub powiadomienia.
+        </div>
+
+        <Link
+          href={`/login?registered=1&email=${encodeURIComponent(emailToShow)}`}
+          className="block w-full rounded-2xl bg-white py-3 text-center text-sm font-semibold text-black transition hover:bg-neutral-200"
+        >
+          Przejdź do logowania
+        </Link>
+      </>
+    );
+  };
+
+  return (
+    <div className="mx-auto flex min-h-[calc(100vh-80px)] max-w-3xl items-center px-4 py-10">
+      <section className="w-full overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/80 shadow-[0_18px_80px_rgba(0,0,0,0.35)]">
+        <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_36%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <StepPill active={step === "email"} done={stepIndex > 1} label="E-mail" />
+            <StepPill
+              active={step === "profile"}
+              done={stepIndex > 2}
+              label="Dane"
+            />
+            <StepPill
+              active={step === "password"}
+              done={stepIndex > 3}
+              label="Hasło"
+            />
+            <StepPill
+              active={step === "summary"}
+              done={stepIndex > 4}
+              label="Koniec"
+            />
+          </div>
+        </div>
+
+        {notice ? (
+          <div
+            className={cn(
+              "border-b p-5 text-sm leading-6 sm:p-6",
+              noticeClasses(notice.tone)
+            )}
+          >
+            {notice.text}
+          </div>
+        ) : null}
+
+        <form onSubmit={handleFormSubmit} className="space-y-5 p-5 sm:p-6">
+          {step === "email" ? renderEmailStep() : null}
+          {step === "profile" ? renderProfileStep() : null}
+          {step === "password" ? renderPasswordStep() : null}
+          {step === "summary" ? renderSummaryStep() : null}
+          {step === "success" ? renderSuccessStep() : null}
+
+          {step !== "success" ? (
+            <div className="pt-2 text-sm text-neutral-400">
+              Masz już konto?{" "}
+              <Link
+                href="/login"
+                className="font-medium text-white underline underline-offset-2"
+              >
+                Zaloguj się
+              </Link>
+            </div>
+          ) : null}
+        </form>
+      </section>
     </div>
   );
 }
