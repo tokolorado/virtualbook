@@ -1,4 +1,3 @@
-// components/LeagueIcon.tsx
 "use client";
 
 import type { ReactNode } from "react";
@@ -28,7 +27,12 @@ export function LeagueIcon({
   const cleanSrc =
     typeof src === "string" && src.trim().length > 0 ? src.trim() : null;
 
-  const baseClassName = cn(
+  const imageClassName = cn(
+    "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-black/10 bg-white p-[2px]",
+    className
+  );
+
+  const fallbackClassName = cn(
     "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-white/[0.03]",
     className
   );
@@ -36,7 +40,7 @@ export function LeagueIcon({
   if (!cleanSrc || failed) {
     return (
       <span
-        className={baseClassName}
+        className={fallbackClassName}
         style={{ width: size, height: size }}
         aria-hidden="true"
       >
@@ -49,7 +53,7 @@ export function LeagueIcon({
 
   return (
     <span
-      className={baseClassName}
+      className={imageClassName}
       style={{ width: size, height: size }}
       title={alt}
     >

@@ -799,7 +799,7 @@ function LeagueButton({
         <LeagueIcon
           src={emblem}
           alt={label}
-          size={18}
+          size={20}
           fallback={label.slice(0, 1)}
           className={
             active ? "border-black/10 bg-black/5 text-black/60" : undefined
