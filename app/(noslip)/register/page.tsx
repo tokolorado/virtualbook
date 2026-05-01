@@ -833,26 +833,14 @@ export default function RegisterPage() {
   };
 
   return (
-  <div className="mx-auto grid h-[calc(100dvh-96px)] max-w-3xl place-items-center overflow-hidden px-4">
-    <section className="w-full max-h-[calc(100dvh-128px)] overflow-y-auto rounded-3xl border border-neutral-800 bg-neutral-950/80 shadow-[0_18px_80px_rgba(0,0,0,0.35)]">
-      <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_36%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
+    <div className="grid h-full min-h-0 w-full place-items-center">
+      <section className="w-full max-w-3xl overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/80 shadow-[0_18px_80px_rgba(0,0,0,0.35)]">
+        <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_36%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
           <div className="flex flex-wrap items-center gap-2">
             <StepPill active={step === "email"} done={stepIndex > 1} label="E-mail" />
-            <StepPill
-              active={step === "profile"}
-              done={stepIndex > 2}
-              label="Dane"
-            />
-            <StepPill
-              active={step === "password"}
-              done={stepIndex > 3}
-              label="Hasło"
-            />
-            <StepPill
-              active={step === "summary"}
-              done={stepIndex > 4}
-              label="Koniec"
-            />
+            <StepPill active={step === "profile"} done={stepIndex > 2} label="Dane" />
+            <StepPill active={step === "password"} done={stepIndex > 3} label="Hasło" />
+            <StepPill active={step === "summary"} done={stepIndex > 4} label="Koniec" />
           </div>
         </div>
 
