@@ -2456,13 +2456,9 @@ export default function MatchInsightsSection({
     <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
-          <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
             Match Center
           </div>
-
-          <h2 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-            Centrum meczu
-          </h2>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -2477,7 +2473,7 @@ export default function MatchInsightsSection({
         </div>
       </div>
 
-      <div className="mt-6">
+      <div className="mt-5">
         {activeTab === "lineups"
           ? renderLineups()
           : activeTab === "comparison"
