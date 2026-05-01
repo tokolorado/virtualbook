@@ -1356,39 +1356,58 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
   return (
     <div className="space-y-5">
-      <section className="overflow-hidden rounded-[32px] border border-white/10 bg-neutral-950/90 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+      <section className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[#050505]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_0%,rgba(255,255,255,0.10),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_42%)]" />
+
         {loading ? (
-          <div className="px-6 py-8 text-neutral-400 sm:px-8 sm:py-10">Ładowanie…</div>
+          <div className="relative px-6 py-8 text-neutral-400 sm:px-10 sm:py-11">
+            Ładowanie…
+          </div>
         ) : (
-          <div className="px-6 py-8 sm:px-8 sm:py-10">
-            <div className="max-w-4xl">
-              <div className="flex items-center gap-3 text-[11px] uppercase tracking-[0.24em] text-neutral-500">
-                <LeagueIcon
-                  src={matchUI.leagueEmblem}
-                  alt={matchUI.leagueName}
-                  size={18}
-                  fallback={matchUI.leagueName.slice(0, 1)}
-                />
-                <span className="truncate">{matchUI.leagueName}</span>
+          <div className="relative px-6 py-8 sm:px-10 sm:py-11">
+            <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-9 items-center justify-center rounded-full border border-white/10 bg-white/[0.04]">
+                    <LeagueIcon
+                      src={matchUI.leagueEmblem}
+                      alt={matchUI.leagueName}
+                      size={18}
+                      fallback={matchUI.leagueName.slice(0, 1)}
+                    />
+                  </div>
+
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-medium uppercase tracking-[0.28em] text-neutral-500">
+                      Rozgrywki
+                    </div>
+                    <div className="mt-1 truncate text-sm font-medium text-neutral-200">
+                      {matchUI.leagueName}
+                    </div>
+                  </div>
+                </div>
+
+                <h1 className="mt-8 max-w-5xl text-4xl font-semibold leading-[1.05] tracking-[-0.045em] text-white sm:text-5xl xl:text-6xl">
+                  {matchUI.home}
+                  <span className="mx-3 font-normal text-neutral-600">vs</span>
+                  {matchUI.away}
+                </h1>
+
+                {hasVisibleScore(matchUI) ? (
+                  <div className="mt-6 inline-flex items-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-lg font-semibold text-white">
+                    {matchUI.homeScore ?? 0} : {matchUI.awayScore ?? 0}
+                  </div>
+                ) : null}
               </div>
 
               {matchUI.kickoffLocal ? (
-                <div className="mt-5">
-                  <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-neutral-200">
+                <div className="shrink-0 rounded-[28px] border border-white/10 bg-white/[0.035] px-6 py-5 text-right shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                  <div className="text-[11px] font-medium uppercase tracking-[0.24em] text-neutral-500">
+                    Data meczu
+                  </div>
+                  <div className="mt-2 text-xl font-semibold tracking-[-0.02em] text-white sm:text-2xl">
                     {matchUI.kickoffLocal}
-                  </span>
-                </div>
-              ) : null}
-
-              <h1 className="mt-6 text-3xl font-semibold leading-tight tracking-[-0.02em] text-white sm:text-5xl">
-                {matchUI.home}{" "}
-                <span className="font-medium text-neutral-500">vs</span>{" "}
-                {matchUI.away}
-              </h1>
-
-              {hasVisibleScore(matchUI) ? (
-                <div className="mt-6 inline-flex items-center rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-lg font-semibold text-white">
-                  {matchUI.homeScore ?? 0} : {matchUI.awayScore ?? 0}
+                  </div>
                 </div>
               ) : null}
             </div>
