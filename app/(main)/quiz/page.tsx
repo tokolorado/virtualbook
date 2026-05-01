@@ -1,9 +1,12 @@
+// app/(main)/quiz/page.tsx
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
 type OptionKey = "A" | "B" | "C" | "D";
+
+type QuizLevelSlug = "very_easy" | "easy" | "medium" | "hard" | "very_hard";
 
 type QuizQuestion = {
   attempt_id: number;
@@ -25,11 +28,71 @@ type QuizResult = {
   balance_after?: number | null;
 };
 
+type QuizAttemptRow = {
+  id: number | string;
+  status: string | null;
+  score: number | string | null;
+  total_questions: number | string | null;
+  reward_granted: boolean | null;
+  reward_amount: number | string | null;
+  level_slug?: string | null;
+};
+
 type SelectedAnswers = Record<number, OptionKey | null>;
 
 type QuizMode = "checking" | "idle" | "running" | "completed";
 
 const QUESTION_TIME_SECONDS = 10;
+
+const QUIZ_LEVELS: Array<{
+  slug: QuizLevelSlug;
+  label: string;
+  shortLabel: string;
+  description: string;
+  mix: string;
+  reward: number;
+}> = [
+  {
+    slug: "very_easy",
+    label: "Bardzo łatwy",
+    shortLabel: "Bardzo łatwy",
+    description: "Najprostsze pytania piłkarskie. Dobry poziom na rozgrzewkę.",
+    mix: "4 bardzo łatwe + 1 łatwe",
+    reward: 50,
+  },
+  {
+    slug: "easy",
+    label: "Łatwy",
+    shortLabel: "Łatwy",
+    description: "Spokojny poziom z jednym pytaniem średnim.",
+    mix: "3 bardzo łatwe + 1 łatwe + 1 średnie",
+    reward: 50,
+  },
+  {
+    slug: "medium",
+    label: "Średni",
+    shortLabel: "Średni",
+    description: "Standardowy quiz dla regularnych fanów piłki.",
+    mix: "1 łatwe + 3 średnie + 1 trudne",
+    reward: 50,
+  },
+  {
+    slug: "hard",
+    label: "Trudny",
+    shortLabel: "Trudny",
+    description: "Wymaga dobrej wiedzy o klubach, ligach i historii futbolu.",
+    mix: "1 średnie + 3 trudne + 1 bardzo trudne",
+    reward: 50,
+  },
+  {
+    slug: "very_hard",
+    label: "Bardzo trudny",
+    shortLabel: "Bardzo trudny",
+    description: "Poziom ekspercki. Najtrudniejszy wariant quizu dnia.",
+    mix: "1 średnie + 2 trudne + 2 bardzo trudne",
+    reward: 50,
+  },
+];
 
 const OPTIONS = [
   { key: "A", field: "option_a" },
@@ -40,6 +103,15 @@ const OPTIONS = [
 
 function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
+}
+
+function toNumber(value: unknown, fallback = 0) {
+  const n = Number(value ?? fallback);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function isQuizLevelSlug(value: unknown): value is QuizLevelSlug {
+  return QUIZ_LEVELS.some((level) => level.slug === value);
 }
 
 function formatTomorrowLabel() {
@@ -53,11 +125,18 @@ function formatTomorrowLabel() {
   });
 }
 
+function formatBalance(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value.toFixed(2);
+}
+
 export default function QuizPage() {
   const [mode, setMode] = useState<QuizMode>("checking");
 
   const [starting, setStarting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const [selectedLevel, setSelectedLevel] = useState<QuizLevelSlug>("easy");
 
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -70,6 +149,10 @@ export default function QuizPage() {
   const answerLockRef = useRef(false);
 
   const currentQuestion = questions[currentIndex] ?? null;
+
+  const selectedLevelMeta = useMemo(() => {
+    return QUIZ_LEVELS.find((level) => level.slug === selectedLevel) ?? QUIZ_LEVELS[1];
+  }, [selectedLevel]);
 
   const answeredCount = useMemo(() => {
     return Object.keys(answers).length;
@@ -89,7 +172,9 @@ export default function QuizPage() {
 
     const { data, error } = await supabase
       .from("quiz_daily_attempts")
-      .select("id, status, score, total_questions, reward_granted, reward_amount")
+      .select(
+        "id, status, score, total_questions, reward_granted, reward_amount, level_slug"
+      )
       .eq("quiz_date", today)
       .maybeSingle();
 
@@ -98,13 +183,19 @@ export default function QuizPage() {
       return;
     }
 
-    if (data?.status === "completed") {
+    const row = (data ?? null) as QuizAttemptRow | null;
+
+    if (isQuizLevelSlug(row?.level_slug)) {
+      setSelectedLevel(row.level_slug);
+    }
+
+    if (row?.status === "completed") {
       setResult({
-        attempt_id: Number(data.id),
-        score: Number(data.score ?? 0),
-        total_questions: Number(data.total_questions ?? 5),
-        reward_granted: Boolean(data.reward_granted),
-        reward_amount: Number(data.reward_amount ?? 0),
+        attempt_id: toNumber(row.id),
+        score: toNumber(row.score),
+        total_questions: toNumber(row.total_questions, 5),
+        reward_granted: Boolean(row.reward_granted),
+        reward_amount: toNumber(row.reward_amount),
         balance_after: null,
       });
 
@@ -135,7 +226,9 @@ export default function QuizPage() {
     answerLockRef.current = false;
 
     try {
-      const { data, error } = await supabase.rpc("start_daily_quiz");
+      const { data, error } = await supabase.rpc("start_daily_quiz", {
+        p_level_slug: selectedLevel,
+      });
 
       if (error) {
         const msg = String(error.message || "");
@@ -197,12 +290,30 @@ export default function QuizPage() {
         }
 
         const first = Array.isArray(data) ? data[0] : null;
-        const quizResult = first as QuizResult | null;
+
+        if (!first) {
+          setError("Nie udało się odczytać wyniku quizu.");
+          return;
+        }
+
+        const raw = first as Record<string, unknown>;
+
+        const quizResult: QuizResult = {
+          attempt_id: toNumber(raw.attempt_id),
+          score: toNumber(raw.score),
+          total_questions: toNumber(raw.total_questions, 5),
+          reward_granted: Boolean(raw.reward_granted),
+          reward_amount: toNumber(raw.reward_amount),
+          balance_after:
+            raw.balance_after === null || raw.balance_after === undefined
+              ? null
+              : toNumber(raw.balance_after),
+        };
 
         setResult(quizResult);
         setMode("completed");
 
-        if (quizResult?.reward_granted) {
+        if (quizResult.reward_granted) {
           window.dispatchEvent(
             new CustomEvent("vb:refresh-balance", {
               detail: {
@@ -287,17 +398,16 @@ export default function QuizPage() {
     return (
       <div className="p-5 sm:p-6">
         <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
-          <div className="max-w-2xl">
+          <div className="max-w-3xl">
             <div className="text-xl font-semibold text-white">
               Gotowy na quiz dnia?
             </div>
 
             <p className="mt-3 text-sm leading-7 text-neutral-400">
-              Po kliknięciu start system wylosuje 5 pytań. Każde pytanie
-              pojawi się pojedynczo, a na odpowiedź masz{" "}
+              Wybierz poziom trudności i kliknij start. System wylosuje 5 pytań.
+              Każde pytanie pojawi się pojedynczo, a na odpowiedź masz{" "}
               <span className="font-semibold text-white">10 sekund</span>.
-              Po wybraniu odpowiedzi automatycznie przejdziesz do kolejnego
-              pytania.
+              Po wybraniu odpowiedzi automatycznie przejdziesz dalej.
             </p>
 
             <div className="mt-5 grid gap-3 sm:grid-cols-3">
@@ -322,17 +432,69 @@ export default function QuizPage() {
                   Nagroda
                 </div>
                 <div className="mt-2 text-2xl font-semibold text-yellow-200">
-                  50 VB
+                  {selectedLevelMeta.reward} VB
                 </div>
               </div>
             </div>
+          </div>
 
+          <div className="mt-7">
+            <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+              Wybierz poziom
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {QUIZ_LEVELS.map((level) => {
+                const active = selectedLevel === level.slug;
+
+                return (
+                  <button
+                    key={level.slug}
+                    type="button"
+                    disabled={starting}
+                    onClick={() => setSelectedLevel(level.slug)}
+                    className={cn(
+                      "rounded-2xl border p-4 text-left transition",
+                      starting && "cursor-not-allowed opacity-70",
+                      active
+                        ? "border-white bg-white text-black shadow-[0_12px_50px_rgba(255,255,255,0.08)]"
+                        : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-neutral-700 hover:bg-neutral-900"
+                    )}
+                  >
+                    <div className="text-sm font-semibold">{level.label}</div>
+
+                    <div
+                      className={cn(
+                        "mt-2 text-xs leading-5",
+                        active ? "text-black/70" : "text-neutral-500"
+                      )}
+                    >
+                      {level.description}
+                    </div>
+
+                    <div
+                      className={cn(
+                        "mt-3 rounded-xl border px-3 py-2 text-[11px] leading-5",
+                        active
+                          ? "border-black/10 bg-black/5 text-black/70"
+                          : "border-neutral-800 bg-neutral-900 text-neutral-400"
+                      )}
+                    >
+                      {level.mix}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
             <button
               type="button"
               onClick={startQuiz}
               disabled={starting}
               className={cn(
-                "mt-6 rounded-2xl px-5 py-3 text-sm font-semibold transition",
+                "rounded-2xl px-5 py-3 text-sm font-semibold transition",
                 starting
                   ? "cursor-not-allowed bg-neutral-800 text-neutral-500"
                   : "bg-white text-black hover:bg-neutral-200"
@@ -340,6 +502,13 @@ export default function QuizPage() {
             >
               {starting ? "Losuję pytania…" : "Rozpocznij quiz"}
             </button>
+
+            <div className="text-sm text-neutral-500">
+              Wybrany poziom:{" "}
+              <span className="font-semibold text-white">
+                {selectedLevelMeta.label}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -359,7 +528,11 @@ export default function QuizPage() {
               </div>
 
               <div className="mt-2 text-sm text-neutral-400">
-                Wybierz odpowiedź. Po kliknięciu przejdziesz dalej.
+                Poziom:{" "}
+                <span className="font-semibold text-neutral-200">
+                  {selectedLevelMeta.label}
+                </span>
+                . Wybierz odpowiedź. Po kliknięciu przejdziesz dalej.
               </div>
             </div>
 
@@ -446,6 +619,8 @@ export default function QuizPage() {
     const score = result?.score ?? 0;
     const total = result?.total_questions ?? 5;
     const wonReward = Boolean(result?.reward_granted);
+    const rewardAmount = toNumber(result?.reward_amount, selectedLevelMeta.reward);
+    const balanceAfter = formatBalance(result?.balance_after);
 
     return (
       <div className="p-5 sm:p-6">
@@ -465,18 +640,25 @@ export default function QuizPage() {
             Wynik: {score}/{total}
           </div>
 
+          <div className="mt-2 text-sm text-neutral-400">
+            Poziom:{" "}
+            <span className="font-semibold text-white">
+              {selectedLevelMeta.label}
+            </span>
+          </div>
+
           <div className="mt-3 max-w-2xl text-sm leading-7 text-neutral-300">
             {wonReward ? (
               <>
                 Brawo. Wszystkie odpowiedzi są poprawne. Otrzymujesz{" "}
                 <span className="font-semibold text-white">
-                  {Number(result?.reward_amount ?? 50).toFixed(0)} VB
+                  {rewardAmount.toFixed(0)} VB
                 </span>
-                {typeof result?.balance_after === "number" ? (
+                {balanceAfter ? (
                   <>
                     . Nowe saldo:{" "}
                     <span className="font-semibold text-white">
-                      {Number(result.balance_after).toFixed(2)} VB
+                      {balanceAfter} VB
                     </span>
                     .
                   </>
@@ -487,8 +669,10 @@ export default function QuizPage() {
             ) : (
               <>
                 Nie udało się zdobyć nagrody. Aby otrzymać{" "}
-                <span className="font-semibold text-white">50 VB</span>, trzeba
-                odpowiedzieć poprawnie na wszystkie 5 pytań.
+                <span className="font-semibold text-white">
+                  {selectedLevelMeta.reward} VB
+                </span>
+                , trzeba odpowiedzieć poprawnie na wszystkie 5 pytań.
               </>
             )}
           </div>
@@ -521,8 +705,12 @@ export default function QuizPage() {
               </h1>
 
               <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
-                5 pytań, 10 sekund na każde pytanie. Odpowiedz bezbłędnie i
-                zgarnij <span className="font-semibold text-white">50 VB</span>.
+                5 pytań, 10 sekund na każde pytanie. Wybierz poziom trudności,
+                odpowiedz bezbłędnie i zgarnij{" "}
+                <span className="font-semibold text-white">
+                  {selectedLevelMeta.reward} VB
+                </span>
+                .
               </p>
             </div>
 
@@ -550,7 +738,7 @@ export default function QuizPage() {
                   Nagroda
                 </div>
                 <div className="mt-2 text-2xl font-semibold text-yellow-200">
-                  50 VB
+                  {selectedLevelMeta.reward} VB
                 </div>
               </div>
             </div>
