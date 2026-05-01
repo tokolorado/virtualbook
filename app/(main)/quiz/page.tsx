@@ -232,6 +232,32 @@ export default function QuizPage() {
     );
   }, [levels]);
 
+  const isLevelUnlocked = useCallback(
+  (level: QuizLevel) => {
+    const levelIndex = levels.findIndex((item) => item.slug === level.slug);
+
+    if (levelIndex <= 0) return true;
+
+    const previousLevel = levels[levelIndex - 1];
+
+    if (!previousLevel) return true;
+
+    return attempts[previousLevel.slug]?.status === "completed";
+  },
+  [attempts, levels]
+);
+
+    const getPreviousLevelName = useCallback(
+    (level: QuizLevel) => {
+        const levelIndex = levels.findIndex((item) => item.slug === level.slug);
+
+        if (levelIndex <= 0) return null;
+
+        return levels[levelIndex - 1]?.name ?? null;
+    },
+    [levels]
+    );
+
   const rewardEarnedToday = useMemo(() => {
     return Object.values(attempts).reduce((sum, attempt) => {
       if (attempt.status !== "completed") return sum;
@@ -298,8 +324,20 @@ export default function QuizPage() {
     void loadQuizState();
   }, [loadQuizState]);
 
-  const startQuiz = async (level: QuizLevel) => {
-    if (startingLevelSlug || submitting || mode === "running") return;
+    const startQuiz = async (level: QuizLevel) => {
+  if (startingLevelSlug || submitting || mode === "running") return;
+
+  if (!isLevelUnlocked(level)) {
+    const previousLevelName = getPreviousLevelName(level);
+
+    setError(
+      previousLevelName
+        ? `Ten quiz jest jeszcze zablokowany. Najpierw ukończ poziom: ${previousLevelName}.`
+        : "Ten quiz jest jeszcze zablokowany."
+    );
+
+    return;
+  }
 
     setStartingLevelSlug(level.slug);
     setError(null);
@@ -512,6 +550,10 @@ export default function QuizPage() {
     const starting = startingLevelSlug === level.slug;
     const accent = getLevelAccent(level.slug);
 
+    const unlocked = isLevelUnlocked(level);
+    const previousLevelName = getPreviousLevelName(level);
+    const locked = !completed && !unlocked;
+
     const rewardAmount = toNumber(level.reward_amount, 50);
     const questionCount = Number(level.question_count || 5);
     const timeLimit = Number(level.time_limit_seconds || 10);
@@ -519,14 +561,16 @@ export default function QuizPage() {
     return (
       <div
         key={level.slug}
-        className={cn(
-          "rounded-3xl border p-5 transition",
-          wonReward
-            ? "border-green-500/30 bg-green-950/40 shadow-[0_0_36px_rgba(34,197,94,0.10)]"
-            : lostReward
-              ? "border-red-500/30 bg-red-950/40 shadow-[0_0_36px_rgba(239,68,68,0.10)]"
-              : "border-neutral-800 bg-neutral-950/70 hover:border-neutral-700"
-        )}
+            className={cn(
+            "rounded-3xl border p-5 transition",
+            wonReward
+                ? "border-green-500/30 bg-green-950/40 shadow-[0_0_36px_rgba(34,197,94,0.10)]"
+                : lostReward
+                ? "border-red-500/30 bg-red-950/40 shadow-[0_0_36px_rgba(239,68,68,0.10)]"
+                : locked
+                    ? "border-neutral-800 bg-neutral-950/40 opacity-60"
+                    : "border-neutral-800 bg-neutral-950/70 hover:border-neutral-700"
+            )}
       >
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
@@ -542,19 +586,23 @@ export default function QuizPage() {
                 {level.name}
               </div>
 
-              {wonReward ? (
+                {wonReward ? (
                 <div className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] font-semibold text-green-300">
-                  Ukończony dzisiaj · Nagroda przyznana
+                    Ukończony dzisiaj · Nagroda przyznana
                 </div>
-              ) : lostReward ? (
+                ) : lostReward ? (
                 <div className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-semibold text-red-300">
-                  Ukończony dzisiaj · Bez nagrody
+                    Ukończony dzisiaj · Bez nagrody
                 </div>
-              ) : (
+                ) : locked ? (
+                <div className="rounded-full border border-neutral-700 bg-neutral-900 px-3 py-1 text-[11px] font-semibold text-neutral-500">
+                    Zablokowany
+                </div>
+                ) : (
                 <div className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[11px] font-semibold text-neutral-300">
-                  Dostępny
+                    Dostępny
                 </div>
-              )}
+                )}
             </div>
 
             <div className="mt-3 text-xl font-semibold text-white">
@@ -565,6 +613,13 @@ export default function QuizPage() {
               {level.description ||
                 "Osobny quiz dzienny dla tego poziomu trudności."}
             </div>
+
+            {locked && previousLevelName ? (
+            <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-400">
+                Odblokujesz ten poziom po ukończeniu quizu:{" "}
+                <span className="font-semibold text-white">{previousLevelName}</span>.
+            </div>
+            ) : null}
 
             <div className="mt-4 flex flex-wrap gap-2 text-xs text-neutral-300">
               <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
@@ -623,7 +678,7 @@ export default function QuizPage() {
             <button
               type="button"
               onClick={() => void startQuiz(level)}
-              disabled={completed || starting || mode === "running"}
+              disabled={completed || locked || starting || mode === "running"}
               className={cn(
                 "rounded-2xl px-5 py-3 text-sm font-semibold transition",
                 completed || mode === "running"
@@ -633,13 +688,23 @@ export default function QuizPage() {
                     : "bg-white text-black hover:bg-neutral-200"
               )}
             >
-              {completed ? "Zrobiony" : starting ? "Losuję…" : "Rozpocznij"}
+              {completed
+                ? "Zrobiony"
+                : locked
+                    ? "Zablokowany"
+                    : starting
+                    ? "Losuję…"
+                    : "Rozpocznij"}
             </button>
 
             {completed ? (
-              <div className="text-center text-xs text-neutral-500">
+            <div className="text-center text-xs text-neutral-500">
                 Dostępny jutro
-              </div>
+            </div>
+            ) : locked && previousLevelName ? (
+            <div className="text-center text-xs text-neutral-500">
+                Najpierw: {previousLevelName}
+            </div>
             ) : null}
           </div>
         </div>
