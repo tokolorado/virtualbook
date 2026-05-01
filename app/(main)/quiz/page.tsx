@@ -78,8 +78,13 @@ function toNumber(value: number | string | null | undefined, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function todayYmd() {
-  return new Date().toISOString().slice(0, 10);
+function todayWarsawYmd() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Warsaw",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 function formatMix(mix: Record<string, number> | null | undefined) {
@@ -181,6 +186,7 @@ function StatBox({
 
 export default function QuizPage() {
   const [mode, setMode] = useState<QuizMode>("checking");
+  const [quizDate, setQuizDate] = useState(() => todayWarsawYmd());
 
   const [levels, setLevels] = useState<QuizLevel[]>([]);
   const [attempts, setAttempts] = useState<Record<string, QuizAttempt>>({});
@@ -293,7 +299,7 @@ export default function QuizPage() {
         .select(
           "id, level_slug, status, score, total_questions, reward_granted, reward_amount, completed_at"
         )
-        .eq("quiz_date", todayYmd()),
+        .eq("quiz_date", quizDate),
     ]);
 
     if (levelsResult.error) {
@@ -326,11 +332,32 @@ export default function QuizPage() {
     setLevels(loadedLevels);
     setAttempts(loadedAttempts);
     setMode("idle");
-  }, []);
+  }, [quizDate]);
 
   useEffect(() => {
     void loadQuizState();
   }, [loadQuizState]);
+
+ useEffect(() => {
+    const checkQuizDate = () => {
+      const nextDate = todayWarsawYmd();
+
+      setQuizDate((currentDate) => {
+        return currentDate === nextDate ? currentDate : nextDate;
+      });
+    };
+
+    const intervalId = window.setInterval(checkQuizDate, 60_000);
+
+    window.addEventListener("focus", checkQuizDate);
+    document.addEventListener("visibilitychange", checkQuizDate);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", checkQuizDate);
+      document.removeEventListener("visibilitychange", checkQuizDate);
+    };
+  }, []);
 
   const startQuiz = async (level: QuizLevel) => {
     if (startingLevelSlug || submitting || mode === "running") return;
