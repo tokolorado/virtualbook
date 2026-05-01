@@ -1365,7 +1365,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
             </div>
           ) : (
             <div className="relative px-6 py-8 sm:px-10 sm:py-10 xl:px-12 xl:py-12">
-              <div className="flex flex-col gap-10">
+              <div className="flex flex-col gap-8">
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
@@ -1402,7 +1402,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                 </div>
 
                 <div>
-                  <h1 className="max-w-full text-[clamp(2.45rem,5.2vw,5.6rem)] font-semibold leading-[0.98] tracking-[-0.06em] text-white lg:overflow-hidden lg:text-ellipsis lg:whitespace-nowrap">
+                  <h1 className="max-w-full text-[clamp(2rem,3.2vw,4.25rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-white lg:overflow-hidden lg:text-ellipsis lg:whitespace-nowrap">
                     <span>{matchUI.home}</span>
                     <span className="mx-3 font-normal text-neutral-600">vs</span>
                     <span>{matchUI.away}</span>
