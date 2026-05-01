@@ -1316,7 +1316,6 @@ export default function MatchInsightsSection({
 }: MatchInsightsSectionProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("lineups");
   const [refreshTick, setRefreshTick] = useState(0);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
 
   const [lineupsWidgetMapped, setLineupsWidgetMapped] = useState<boolean | null>(
     null
@@ -1347,10 +1346,6 @@ export default function MatchInsightsSection({
   const [timelineError, setTimelineError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineResponse | null>(null);
 
-  const subtitle = useMemo(() => {
-    const league = competitionCode?.trim() ? ` • ${competitionCode}` : "";
-    return `Sekcja informacyjna dla meczu ${homeTeam} vs ${awayTeam}${league}.`;
-  }, [competitionCode, homeTeam, awayTeam]);
 
   const isPreMatch = useMemo(() => {
     return isPreMatchState(matchStatus, isLive, isFinished);
@@ -1751,11 +1746,7 @@ export default function MatchInsightsSection({
       loadH2H(),
       loadTable(),
       loadTimeline(),
-    ]).then(() => {
-      if (!controller.signal.aborted) {
-        setLastRefreshedAt(new Date().toISOString());
-      }
-    });
+    ]);
 
     return () => {
       controller.abort();
@@ -1787,14 +1778,6 @@ export default function MatchInsightsSection({
       table?.competition?.season ?? null
     );
   }, [table]);
-
-  const isRefreshing =
-    (lineupsLoading && !!lineups) ||
-    (liveStatsLoading && !!liveStats) ||
-    (comparisonLoading && !!comparison) ||
-    (h2hLoading && !!h2h) ||
-    (tableLoading && !!table) ||
-    (timelineLoading && !!timeline);
 
   const meaningfulLiveStatsItems = useMemo(() => {
     return (liveStats?.items ?? []).filter((item) => {
@@ -2468,15 +2451,6 @@ export default function MatchInsightsSection({
     }
   };
 
-  const premiumStatusLabel = isLive
-    ? "Live center"
-    : isFinished
-      ? "Post-match"
-      : "Pre-match scout";
-
-  const premiumDataLabel = championsLeague
-    ? "SofaScore, football-data, CL widgets"
-    : "SofaScore i football-data";
 
   return (
     <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-5 sm:p-6">
