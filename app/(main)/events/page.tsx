@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import DayBar from "@/components/DayBar";
+import { LeagueIcon } from "@/components/LeagueIcon";
 import { todayLocalYYYYMMDD, localDateKeyFromISO } from "@/lib/date";
 import { useBetSlip } from "@/lib/BetSlipContext";
 
@@ -45,6 +46,16 @@ type Odds1x2DbRow = {
 type League = {
   code: string;
   name: string;
+};
+type CompetitionMeta = {
+  name: string;
+  emblem: string | null;
+};
+
+type CompetitionDbRow = {
+  id: string;
+  name: string | null;
+  emblem: string | null;
 };
 
 type StandingsRowUI = {
@@ -764,11 +775,13 @@ function LeagueButton({
   active,
   label,
   count,
+  emblem,
   onClick,
 }: {
   active: boolean;
   label: string;
   count: number;
+  emblem?: string | null;
   onClick: () => void;
 }) {
   return (
@@ -782,10 +795,23 @@ function LeagueButton({
           : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-neutral-700 hover:bg-neutral-900"
       )}
     >
-      <span className="min-w-0 truncate text-sm font-semibold">{label}</span>
+      <span className="flex min-w-0 items-center gap-3">
+        <LeagueIcon
+          src={emblem}
+          alt={label}
+          size={18}
+          fallback={label.slice(0, 1)}
+          className={
+            active ? "border-black/10 bg-black/5 text-black/60" : undefined
+          }
+        />
+
+        <span className="min-w-0 truncate text-sm font-semibold">{label}</span>
+      </span>
+
       <span
         className={cn(
-          "ml-3 rounded-full border px-2 py-0.5 text-xs",
+          "ml-3 shrink-0 rounded-full border px-2 py-0.5 text-xs",
           active
             ? "border-black/15 bg-black/5 text-black"
             : "border-neutral-700 text-neutral-300"
@@ -836,6 +862,9 @@ export default function EventsPage() {
 
   const [syncingOdds, setSyncingOdds] = useState(false);
   const oddsSyncInFlightRef = useRef(false);
+  const [competitionMetaByCode, setCompetitionMetaByCode] = useState<
+    Record<string, CompetitionMeta>
+  >({});
 
   const matchesCacheRef = useRef<Record<string, Match[]>>({});
   const matchesLoadedAtCacheRef = useRef<Record<string, string | null>>({});
@@ -845,6 +874,41 @@ export default function EventsPage() {
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 10_000);
     return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCompetitions = async () => {
+      const { data, error } = await supabase
+        .from("competitions")
+        .select("id, name, emblem");
+
+      if (cancelled || error) return;
+
+      const map: Record<string, CompetitionMeta> = {};
+
+      for (const row of (data ?? []) as CompetitionDbRow[]) {
+        const id = String(row.id || "").trim();
+        if (!id) continue;
+
+        map[id] = {
+          name: row.name ? String(row.name) : id,
+          emblem:
+            typeof row.emblem === "string" && row.emblem.trim().length > 0
+              ? row.emblem.trim()
+              : null,
+        };
+      }
+
+      setCompetitionMetaByCode(map);
+    };
+
+    void loadCompetitions();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -2122,24 +2186,26 @@ export default function EventsPage() {
                   active={selectedLeague === "ALL"}
                   label="Wszystkie ligi"
                   count={leagueCounts.ALL ?? 0}
+                  emblem={null}
                   onClick={() => {
                     setSelectedLeague("ALL");
                     setActiveRightTab("matches");
                   }}
                 />
 
-                {FREE_TIER_LEAGUES.map((lg) => (
-                  <LeagueButton
-                    key={lg.code}
-                    active={selectedLeague === lg.code}
-                    label={lg.name}
-                    count={leagueCounts[lg.code] ?? 0}
-                    onClick={() => {
-                      setSelectedLeague(lg.code);
-                      setActiveRightTab("matches");
-                    }}
-                  />
-                ))}
+              {FREE_TIER_LEAGUES.map((lg) => (
+                <LeagueButton
+                  key={lg.code}
+                  active={selectedLeague === lg.code}
+                  label={lg.name}
+                  count={leagueCounts[lg.code] ?? 0}
+                  emblem={competitionMetaByCode[lg.code]?.emblem ?? null}
+                  onClick={() => {
+                    setSelectedLeague(lg.code);
+                    setActiveRightTab("matches");
+                  }}
+                />
+              ))}
               </div>
             </SurfaceCard>
           </div>
@@ -2161,10 +2227,30 @@ export default function EventsPage() {
                     : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
                 )}
               >
-                Wszystkie
-                <span className="rounded-full border border-neutral-700 px-2 py-0.5 text-xs">
-                  {leagueCounts.ALL ?? 0}
-                </span>
+              <LeagueIcon
+                src={null}
+                alt="Wszystkie ligi"
+                size={16}
+                fallback="W"
+                className={
+                  selectedLeague === "ALL"
+                    ? "border-black/10 bg-black/5 text-black/60"
+                    : undefined
+                }
+              />
+
+              <span>Wszystkie</span>
+
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-0.5 text-xs",
+                  selectedLeague === "ALL"
+                    ? "border-black/15 text-black"
+                    : "border-neutral-700 text-neutral-300"
+                )}
+              >
+                {leagueCounts.ALL ?? 0}
+              </span>
               </button>
 
               {FREE_TIER_LEAGUES.map((lg) => (
@@ -2182,10 +2268,30 @@ export default function EventsPage() {
                       : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
                   )}
                 >
-                  {lg.name}
-                  <span className="rounded-full border border-neutral-700 px-2 py-0.5 text-xs">
-                    {leagueCounts[lg.code] ?? 0}
-                  </span>
+                <LeagueIcon
+                  src={competitionMetaByCode[lg.code]?.emblem ?? null}
+                  alt={lg.name}
+                  size={16}
+                  fallback={lg.name.slice(0, 1)}
+                  className={
+                    selectedLeague === lg.code
+                      ? "border-black/10 bg-black/5 text-black/60"
+                      : undefined
+                  }
+                />
+
+                <span>{lg.name}</span>
+
+                <span
+                  className={cn(
+                    "rounded-full border px-2 py-0.5 text-xs",
+                    selectedLeague === lg.code
+                      ? "border-black/15 text-black"
+                      : "border-neutral-700 text-neutral-300"
+                  )}
+                >
+                  {leagueCounts[lg.code] ?? 0}
+                </span>
                 </button>
               ))}
             </div>

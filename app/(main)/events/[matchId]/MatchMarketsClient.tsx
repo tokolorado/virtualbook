@@ -2,6 +2,7 @@
 "use client";
 
 import MatchInsightsSection from "@/components/match/MatchInsightsSection";
+import { LeagueIcon } from "@/components/LeagueIcon";
 import { formatOdd } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
 import { useBetSlip } from "@/lib/BetSlipContext";
@@ -21,6 +22,7 @@ type MatchUI = {
   home: string;
   away: string;
   leagueName: string;
+  leagueEmblem: string | null;
   kickoffLocal: string;
   status: string;
   isLive: boolean;
@@ -919,6 +921,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     home: homeNameQS || "Home",
     away: awayNameQS || "Away",
     leagueName: competitionCode || "Liga",
+    leagueEmblem: null,
     kickoffLocal: kickoffUtcQS ? new Date(kickoffUtcQS).toLocaleString() : "",
     status: "SCHEDULED",
     isLive: false,
@@ -1081,13 +1084,13 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           { data: marketData, error: marketErr },
           { data: selectionData, error: selectionErr },
         ] = await Promise.all([
-          supabase
-            .from("matches")
-            .select(
-              "home_team, away_team, competition_name, utc_date, status, home_score, away_score, minute, injury_time"
-            )
-            .eq("id", matchIdNum)
-            .maybeSingle(),
+        supabase
+          .from("matches")
+          .select(
+            "home_team, away_team, competition_id, competition_name, utc_date, status, home_score, away_score, minute, injury_time"
+          )
+          .eq("id", matchIdNum)
+          .maybeSingle(),
 
           supabase
             .from("odds")
@@ -1140,6 +1143,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           | {
               home_team?: string | null;
               away_team?: string | null;
+              competition_id?: string | null;
               competition_name?: string | null;
               utc_date?: string | null;
               status?: string | null;
@@ -1152,9 +1156,33 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
         const home = row?.home_team ? String(row.home_team) : homeNameQS || "Home";
         const away = row?.away_team ? String(row.away_team) : awayNameQS || "Away";
+
+        const leagueCode = row?.competition_id
+          ? String(row.competition_id)
+          : competitionCode;
+
         const leagueName = row?.competition_name
           ? String(row.competition_name)
-          : competitionCode || "Liga";
+          : leagueCode || "Liga";
+
+        let leagueEmblem: string | null = null;
+
+        if (leagueCode) {
+          const { data: competitionRow } = await supabase
+            .from("competitions")
+            .select("emblem")
+            .eq("id", leagueCode)
+            .maybeSingle();
+
+          const emblem = (competitionRow as { emblem?: string | null } | null)
+            ?.emblem;
+
+          leagueEmblem =
+            typeof emblem === "string" && emblem.trim().length > 0
+              ? emblem.trim()
+              : null;
+        }
+
         const kickoff = row?.utc_date ? String(row.utc_date) : kickoffUtcQS || "";
         const status = row?.status ? String(row.status) : "SCHEDULED";
 
@@ -1172,6 +1200,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
             home,
             away,
             leagueName,
+            leagueEmblem,
             kickoffLocal,
             status,
             isLive,
@@ -1391,8 +1420,15 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           <>
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-                  {matchUI.leagueName}
+                <div className="inline-flex max-w-full items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+                  <LeagueIcon
+                    src={matchUI.leagueEmblem}
+                    alt={matchUI.leagueName}
+                    size={16}
+                    fallback={matchUI.leagueName.slice(0, 1)}
+                  />
+
+                  <span className="min-w-0 truncate">{matchUI.leagueName}</span>
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-2">
