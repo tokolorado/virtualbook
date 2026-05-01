@@ -4,6 +4,7 @@
 import MatchInsightsSection from "@/components/match/MatchInsightsSection";
 import { LeagueIcon } from "@/components/LeagueIcon";
 import { formatOdd } from "@/lib/format";
+import { formatPolishDateTime } from "@/lib/date";
 import { supabase } from "@/lib/supabase";
 import { useBetSlip } from "@/lib/BetSlipContext";
 import { useSearchParams } from "next/navigation";
@@ -922,7 +923,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     away: awayNameQS || "Away",
     leagueName: competitionCode || "Liga",
     leagueEmblem: null,
-    kickoffLocal: kickoffUtcQS ? new Date(kickoffUtcQS).toLocaleString() : "",
+    kickoffLocal: kickoffUtcQS ? formatPolishDateTime(kickoffUtcQS) : "",
     status: "SCHEDULED",
     isLive: false,
     isFinished: false,
@@ -1193,7 +1194,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           normalizedStatus === "PAUSED";
         const isFinished = normalizedStatus === "FINISHED";
 
-        const kickoffLocal = kickoff ? new Date(kickoff).toLocaleString() : "";
+        const kickoffLocal = kickoff ? formatPolishDateTime(kickoff) : "";
 
         if (!cancelled) {
           setMatchUI({
@@ -1300,7 +1301,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
       .filter(Number.isFinite)
       .sort((a, b) => b - a)[0];
 
-    return Number.isFinite(latest) ? new Date(latest).toLocaleString() : null;
+    return Number.isFinite(latest) ? formatPolishDateTime(new Date(latest)) : null;
   }, [oddsRows]);
 
   const engineVersionLabel = useMemo(() => {
