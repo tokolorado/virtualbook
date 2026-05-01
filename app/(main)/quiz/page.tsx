@@ -78,17 +78,6 @@ function toNumber(value: number | string | null | undefined, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function formatTomorrowLabel() {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  return tomorrow.toLocaleDateString("pl-PL", {
-    weekday: "long",
-    day: "2-digit",
-    month: "2-digit",
-  });
-}
-
 function todayYmd() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -207,9 +196,15 @@ export default function QuizPage() {
   const [result, setResult] = useState<QuizResult | null>(null);
 
   const [timeLeft, setTimeLeft] = useState(DEFAULT_QUESTION_TIME_SECONDS);
+  const [timerAnimationKey, setTimerAnimationKey] = useState(0);
+  const [timerAnimating, setTimerAnimating] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
 
   const answerLockRef = useRef(false);
+  const answerCurrentQuestionRef = useRef<
+    ((selectedOption: OptionKey | null) => Promise<void>) | null
+  >(null);
 
   const currentQuestion = questions[currentIndex] ?? null;
 
@@ -229,14 +224,6 @@ export default function QuizPage() {
   const totalRewardAvailable = useMemo(() => {
     return levels.reduce((sum, level) => sum + toNumber(level.reward_amount, 0), 0);
   }, [levels]);
-
-  const progressPercent = questions.length
-    ? ((currentIndex + 1) / questions.length) * 100
-    : 0;
-
-  const timerPercent = questionTimeSeconds
-    ? (timeLeft / questionTimeSeconds) * 100
-    : 0;
 
   const loadQuizState = useCallback(async () => {
     setMode("checking");
@@ -303,6 +290,7 @@ export default function QuizPage() {
     setAnswers({});
     setCurrentIndex(0);
     setTimeLeft(Number(level.time_limit_seconds || DEFAULT_QUESTION_TIME_SECONDS));
+    setTimerAnimating(false);
     setActiveLevel(level);
     setActiveAttemptId(null);
     answerLockRef.current = false;
@@ -439,6 +427,7 @@ export default function QuizPage() {
 
       setCurrentIndex((value) => value + 1);
       setTimeLeft(questionTimeSeconds);
+      setTimerAnimating(false);
 
       window.setTimeout(() => {
         answerLockRef.current = false;
@@ -456,10 +445,26 @@ export default function QuizPage() {
   );
 
   useEffect(() => {
+    answerCurrentQuestionRef.current = answerCurrentQuestion;
+  }, [answerCurrentQuestion]);
+
+  useEffect(() => {
     if (mode !== "running") return;
     if (!currentQuestion) return;
 
+    answerLockRef.current = false;
     setTimeLeft(questionTimeSeconds);
+    setTimerAnimating(false);
+    setTimerAnimationKey((value) => value + 1);
+
+    let frameOne: number | null = null;
+    let frameTwo: number | null = null;
+
+    frameOne = window.requestAnimationFrame(() => {
+      frameTwo = window.requestAnimationFrame(() => {
+        setTimerAnimating(true);
+      });
+    });
 
     const intervalId = window.setInterval(() => {
       setTimeLeft((previous) => {
@@ -468,21 +473,23 @@ export default function QuizPage() {
       });
     }, 1000);
 
+    const timeoutId = window.setTimeout(() => {
+      void answerCurrentQuestionRef.current?.(null);
+    }, Math.max(questionTimeSeconds, 1) * 1000);
+
     return () => {
+      if (frameOne !== null) window.cancelAnimationFrame(frameOne);
+      if (frameTwo !== null) window.cancelAnimationFrame(frameTwo);
       window.clearInterval(intervalId);
+      window.clearTimeout(timeoutId);
     };
   }, [currentIndex, currentQuestion, mode, questionTimeSeconds]);
-
-  useEffect(() => {
-    if (mode !== "running") return;
-    if (timeLeft !== 0) return;
-
-    void answerCurrentQuestion(null);
-  }, [answerCurrentQuestion, mode, timeLeft]);
 
   const renderLevelCard = (level: QuizLevel) => {
     const attempt = attempts[level.slug] ?? null;
     const completed = attempt?.status === "completed";
+    const completedWithReward = completed && Boolean(attempt?.reward_granted);
+    const completedWithoutReward = completed && !Boolean(attempt?.reward_granted);
     const starting = startingLevelSlug === level.slug;
     const accent = getLevelAccent(level.slug);
 
@@ -495,9 +502,11 @@ export default function QuizPage() {
         key={level.slug}
         className={cn(
           "rounded-3xl border bg-neutral-950/70 p-5 transition",
-          completed
+          completedWithReward
             ? "border-green-500/20 bg-green-500/10"
-            : "border-neutral-800 hover:border-neutral-700"
+            : completedWithoutReward
+              ? "border-red-500/20 bg-red-500/10"
+              : "border-neutral-800 hover:border-neutral-700"
         )}
       >
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -514,9 +523,13 @@ export default function QuizPage() {
                 {level.name}
               </div>
 
-              {completed ? (
+              {completedWithReward ? (
                 <div className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] font-semibold text-green-300">
-                  Ukończony dzisiaj
+                  Ukończony dzisiaj · Nagroda przyznana
+                </div>
+              ) : completedWithoutReward ? (
+                <div className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-semibold text-red-300">
+                  Ukończony dzisiaj · Bez nagrody
                 </div>
               ) : (
                 <div className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[11px] font-semibold text-neutral-300">
@@ -561,7 +574,7 @@ export default function QuizPage() {
                 <span className="font-semibold text-white">
                   {Number(attempt?.score ?? 0)}/{Number(attempt?.total_questions ?? 5)}
                 </span>
-                {attempt?.reward_granted ? (
+                {completedWithReward ? (
                   <>
                     {" "}
                     · Nagroda:{" "}
@@ -572,7 +585,7 @@ export default function QuizPage() {
                 ) : (
                   <>
                     {" "}
-                    · <span className="text-neutral-500">Bez nagrody</span>
+                    · <span className="font-semibold text-red-300">Bez nagrody</span>
                   </>
                 )}
               </div>
@@ -593,11 +606,7 @@ export default function QuizPage() {
                     : "bg-white text-black hover:bg-neutral-200"
               )}
             >
-              {completed
-                ? "Zrobiony"
-                : starting
-                  ? "Losuję…"
-                  : "Rozpocznij"}
+              {completed ? "Zrobiony" : starting ? "Losuję…" : "Rozpocznij"}
             </button>
 
             {completed ? (
@@ -705,18 +714,19 @@ export default function QuizPage() {
 
           <div className="mt-5 h-2 overflow-hidden rounded-full bg-neutral-800">
             <div
-              className="h-full rounded-full bg-white transition-all duration-300"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-neutral-800">
-            <div
+              key={timerAnimationKey}
               className={cn(
-                "h-full rounded-full transition-all duration-300",
+                "h-full rounded-full",
                 timeLeft <= 3 ? "bg-red-400" : "bg-yellow-300"
               )}
-              style={{ width: `${timerPercent}%` }}
+              style={{
+                width: timerAnimating ? "0%" : "100%",
+                transitionProperty: "width",
+                transitionTimingFunction: "linear",
+                transitionDuration: timerAnimating
+                  ? `${Math.max(questionTimeSeconds, 1)}s`
+                  : "0ms",
+              }}
             />
           </div>
 
@@ -773,7 +783,7 @@ export default function QuizPage() {
             "rounded-3xl border p-6",
             wonReward
               ? "border-green-500/20 bg-green-500/10"
-              : "border-neutral-800 bg-neutral-900/40"
+              : "border-red-500/20 bg-red-500/10"
           )}
         >
           <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
@@ -786,6 +796,14 @@ export default function QuizPage() {
 
           <div className="mt-3 text-3xl font-semibold text-white">
             Wynik: {score}/{total}
+          </div>
+
+          <div className="mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-semibold">
+            {wonReward ? (
+              <span className="text-green-300">Nagroda przyznana</span>
+            ) : (
+              <span className="text-red-300">Bez nagrody</span>
+            )}
           </div>
 
           <div className="mt-3 max-w-2xl text-sm leading-7 text-neutral-300">
@@ -809,8 +827,9 @@ export default function QuizPage() {
               </>
             ) : (
               <>
-                Nie udało się zdobyć nagrody. Aby otrzymać nagrodę, trzeba
-                odpowiedzieć poprawnie na wszystkie pytania w tym quizie.
+                Quiz został ukończony, ale nagroda nie została przyznana. Aby
+                otrzymać nagrodę, trzeba odpowiedzieć poprawnie na wszystkie
+                pytania w tym quizie.
               </>
             )}
           </div>
@@ -831,6 +850,7 @@ export default function QuizPage() {
               setAnswers({});
               setCurrentIndex(0);
               setTimeLeft(DEFAULT_QUESTION_TIME_SECONDS);
+              setTimerAnimating(false);
             }}
             className="mt-5 rounded-2xl bg-white px-5 py-3 text-sm font-semibold text-black transition hover:bg-neutral-200"
           >
