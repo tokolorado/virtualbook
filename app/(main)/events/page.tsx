@@ -1991,11 +1991,6 @@ export default function EventsPage() {
                 Mecze, kursy i typy
               </h1>
 
-              <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
-                Bukmacherski feed spotkań z kursami 1X2, filtrowaniem lig,
-                szybkim kuponem i kontrolą dostępności typowania.
-              </p>
-
               <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 <StatMiniCard
                   label="Mecze"
