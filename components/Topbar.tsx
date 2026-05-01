@@ -32,7 +32,7 @@ const BASE_NAV: NavItem[] = [
   { href: "/events", label: "Mecze" },
   { href: "/leaderboard", label: "Ranking" },
   { href: "/bets", label: "Kupony", requiresAuth: true },
-  { href: "/quiz", label: "Quiz", requiresAuth: true },
+  { href: "/quiz", label: "Quizy", requiresAuth: true },
   { href: "/missions", label: "Misje", requiresAuth: true },
   { href: "/groups", label: "Grupy", requiresAuth: true },
   { href: "/admin", label: "Admin", requiresAuth: true, adminOnly: true },
