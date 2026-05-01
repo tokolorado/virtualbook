@@ -472,17 +472,26 @@ export default function QuizPage() {
         return;
       }
 
-      const first = Array.isArray(data)
-        ? ((data[0] ?? null) as QuizResetResult | null)
-        : null;
+    const first = Array.isArray(data)
+    ? ((data[0] ?? null) as QuizResetResult | null)
+    : null;
 
-      window.dispatchEvent(
-        new CustomEvent("vb:refresh-balance", {
-          detail: {
-            balanceAfter: first?.balance_after ?? null,
-          },
-        })
-      );
+    if (!first) {
+    setError(
+        "Reset nie zwrócił wyniku. Odśwież stronę i sprawdź, czy funkcja reset_daily_quiz_attempt używa daty Europe/Warsaw."
+    );
+    await loadQuizState();
+    setMode("idle");
+    return;
+    }
+
+    window.dispatchEvent(
+    new CustomEvent("vb:refresh-balance", {
+        detail: {
+        balanceAfter: first.balance_after,
+        },
+    })
+    );
 
       setResult(null);
       setActiveLevel(null);
