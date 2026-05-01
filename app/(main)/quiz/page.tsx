@@ -1,4 +1,3 @@
-// app/(main)/quiz/page.tsx
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -166,6 +165,7 @@ function StatBox({
       >
         {label}
       </div>
+
       <div
         className={cn(
           "mt-2 text-2xl font-semibold",
@@ -187,7 +187,9 @@ export default function QuizPage() {
   const [activeLevel, setActiveLevel] = useState<QuizLevel | null>(null);
   const [activeAttemptId, setActiveAttemptId] = useState<number | null>(null);
 
-  const [startingLevelSlug, setStartingLevelSlug] = useState<string | null>(null);
+  const [startingLevelSlug, setStartingLevelSlug] = useState<string | null>(
+    null
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -217,12 +219,16 @@ export default function QuizPage() {
   }, [answers]);
 
   const completedCount = useMemo(() => {
-    return Object.values(attempts).filter((attempt) => attempt.status === "completed")
-      .length;
+    return Object.values(attempts).filter(
+      (attempt) => attempt.status === "completed"
+    ).length;
   }, [attempts]);
 
   const totalRewardAvailable = useMemo(() => {
-    return levels.reduce((sum, level) => sum + toNumber(level.reward_amount, 0), 0);
+    return levels.reduce(
+      (sum, level) => sum + toNumber(level.reward_amount, 0),
+      0
+    );
   }, [levels]);
 
   const loadQuizState = useCallback(async () => {
@@ -247,7 +253,9 @@ export default function QuizPage() {
     ]);
 
     if (levelsResult.error) {
-      setError(levelsResult.error.message || "Nie udało się pobrać poziomów quizu.");
+      setError(
+        levelsResult.error.message || "Nie udało się pobrać poziomów quizu."
+      );
       setMode("idle");
       return;
     }
@@ -345,6 +353,7 @@ export default function QuizPage() {
   const submitQuiz = useCallback(
     async (finalAnswers: SelectedAnswers) => {
       if (submitting) return;
+
       if (!activeAttemptId) {
         setError("Brak aktywnej próby quizu.");
         return;
@@ -488,8 +497,8 @@ export default function QuizPage() {
   const renderLevelCard = (level: QuizLevel) => {
     const attempt = attempts[level.slug] ?? null;
     const completed = attempt?.status === "completed";
-    const completedWithReward = completed && Boolean(attempt?.reward_granted);
-    const completedWithoutReward = completed && !Boolean(attempt?.reward_granted);
+    const wonReward = completed && Boolean(attempt?.reward_granted);
+    const lostReward = completed && !Boolean(attempt?.reward_granted);
     const starting = startingLevelSlug === level.slug;
     const accent = getLevelAccent(level.slug);
 
@@ -501,12 +510,12 @@ export default function QuizPage() {
       <div
         key={level.slug}
         className={cn(
-          "rounded-3xl border bg-neutral-950/70 p-5 transition",
-          completedWithReward
-            ? "border-green-500/20 bg-green-500/10"
-            : completedWithoutReward
-              ? "border-red-500/20 bg-red-500/10"
-              : "border-neutral-800 hover:border-neutral-700"
+          "rounded-3xl border p-5 transition",
+          wonReward
+            ? "border-green-500/30 bg-green-950/40 shadow-[0_0_36px_rgba(34,197,94,0.10)]"
+            : lostReward
+              ? "border-red-500/30 bg-red-950/40 shadow-[0_0_36px_rgba(239,68,68,0.10)]"
+              : "border-neutral-800 bg-neutral-950/70 hover:border-neutral-700"
         )}
       >
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -523,11 +532,11 @@ export default function QuizPage() {
                 {level.name}
               </div>
 
-              {completedWithReward ? (
+              {wonReward ? (
                 <div className="rounded-full border border-green-500/30 bg-green-500/10 px-3 py-1 text-[11px] font-semibold text-green-300">
                   Ukończony dzisiaj · Nagroda przyznana
                 </div>
-              ) : completedWithoutReward ? (
+              ) : lostReward ? (
                 <div className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-semibold text-red-300">
                   Ukończony dzisiaj · Bez nagrody
                 </div>
@@ -543,19 +552,23 @@ export default function QuizPage() {
             </div>
 
             <div className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
-              {level.description || "Osobny quiz dzienny dla tego poziomu trudności."}
+              {level.description ||
+                "Osobny quiz dzienny dla tego poziomu trudności."}
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2 text-xs text-neutral-300">
               <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
                 {questionCount} pytań
               </span>
+
               <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
                 {timeLimit}s / pytanie
               </span>
+
               <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1">
                 Mix: {formatMix(level.mix)}
               </span>
+
               <span
                 className={cn(
                   "rounded-full border px-3 py-1",
@@ -572,14 +585,15 @@ export default function QuizPage() {
               <div className="mt-4 text-sm text-neutral-300">
                 Wynik:{" "}
                 <span className="font-semibold text-white">
-                  {Number(attempt?.score ?? 0)}/{Number(attempt?.total_questions ?? 5)}
+                  {Number(attempt?.score ?? 0)}/
+                  {Number(attempt?.total_questions ?? 5)}
                 </span>
-                {completedWithReward ? (
+                {wonReward ? (
                   <>
                     {" "}
                     · Nagroda:{" "}
                     <span className="font-semibold text-green-300">
-                      {toNumber(attempt.reward_amount, 0).toFixed(0)} VB
+                      {toNumber(attempt?.reward_amount, 0).toFixed(0)} VB
                     </span>
                   </>
                 ) : (
@@ -629,6 +643,7 @@ export default function QuizPage() {
               <div className="text-xl font-semibold text-white">
                 Wybierz quiz dzienny
               </div>
+
               <p className="mt-2 max-w-3xl text-sm leading-7 text-neutral-400">
                 Każdy poziom to osobny quiz. Każdy z nich możesz zrobić tylko raz
                 dziennie. Poziomy są wylistowane osobno, więc możesz dziś zagrać
@@ -640,6 +655,7 @@ export default function QuizPage() {
               <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                 Ukończone dzisiaj
               </div>
+
               <div className="mt-2 text-2xl font-semibold text-white">
                 {completedCount}/{levels.length || 5}
               </div>
@@ -701,6 +717,7 @@ export default function QuizPage() {
               <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
                 Czas
               </div>
+
               <div
                 className={cn(
                   "mt-1 text-2xl font-semibold",
@@ -761,8 +778,8 @@ export default function QuizPage() {
 
             <div className="mt-5 text-sm text-neutral-500">
               Odpowiedzi zapisane:{" "}
-              <span className="font-semibold text-white">{answeredCount}</span>
-              /{questions.length}
+              <span className="font-semibold text-white">{answeredCount}</span>/
+              {questions.length}
             </div>
           </div>
         </div>
@@ -782,8 +799,8 @@ export default function QuizPage() {
           className={cn(
             "rounded-3xl border p-6",
             wonReward
-              ? "border-green-500/20 bg-green-500/10"
-              : "border-red-500/20 bg-red-500/10"
+              ? "border-green-500/30 bg-green-950/40 shadow-[0_0_36px_rgba(34,197,94,0.10)]"
+              : "border-red-500/30 bg-red-950/40 shadow-[0_0_36px_rgba(239,68,68,0.10)]"
           )}
         >
           <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
@@ -798,12 +815,15 @@ export default function QuizPage() {
             Wynik: {score}/{total}
           </div>
 
-          <div className="mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-semibold">
-            {wonReward ? (
-              <span className="text-green-300">Nagroda przyznana</span>
-            ) : (
-              <span className="text-red-300">Bez nagrody</span>
+          <div
+            className={cn(
+              "mt-3 inline-flex rounded-full border px-3 py-1 text-xs font-semibold",
+              wonReward
+                ? "border-green-500/30 bg-green-500/10 text-green-300"
+                : "border-red-500/30 bg-red-500/10 text-red-300"
             )}
+          >
+            {wonReward ? "Nagroda przyznana" : "Bez nagrody"}
           </div>
 
           <div className="mt-3 max-w-2xl text-sm leading-7 text-neutral-300">
@@ -883,7 +903,9 @@ export default function QuizPage() {
 
             <div className="grid grid-cols-3 gap-3 sm:min-w-[420px]">
               <StatBox label="Quizy" value={`${completedCount}/${levels.length || 5}`} />
+
               <StatBox label="Czas" value={`${DEFAULT_QUESTION_TIME_SECONDS}s`} />
+
               <StatBox
                 label="Nagrody"
                 value={`${totalRewardAvailable.toFixed(0)} VB`}
@@ -904,6 +926,7 @@ export default function QuizPage() {
             <div className="animate-pulse rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6">
               <div className="h-5 w-52 rounded bg-neutral-800" />
               <div className="mt-4 h-4 w-96 max-w-full rounded bg-neutral-800" />
+
               <div className="mt-6 space-y-3">
                 {Array.from({ length: 5 }).map((_, index) => (
                   <div key={index} className="h-24 rounded-3xl bg-neutral-800" />
