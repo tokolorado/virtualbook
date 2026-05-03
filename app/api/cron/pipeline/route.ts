@@ -136,17 +136,16 @@ export async function POST(req: Request) {
 
     // 2) BSD odds hot sync — tylko najbliższe 3 dni.
     // Pełny 14-dniowy horizon robi osobny GitHub cron co godzinę.
-    const bsdOddsSyncDays = 3;
+    const bsdOddsSyncDays = 4;
 
     const rBsd = await fetch(`${origin}/api/odds/sync`, {
       method: "POST",
       headers,
       body: JSON.stringify({
-        dateFrom: utcDateYYYYMMDD(now),
+        dateFrom: utcDateYYYYMMDD(addUtcDays(now, -1)),
         days: bsdOddsSyncDays,
         dryRun: false,
         tz: "Europe/Warsaw",
-        stopOnError: false,
       }),
       cache: "no-store",
     });
