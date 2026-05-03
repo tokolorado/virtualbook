@@ -21,12 +21,11 @@ type RunnerBody = {
   // opcjonalnie ogranicz liczbę dni wprzód (np. +30)
   maxAheadDays?: number;
 
-  // parametry do /api/odds/sync
+  // parametry zostawione dla kompatybilności UI; BSD sync aktualnie ignoruje model params
   leagues?: string[];
   throttleMs?: number;
   maxRetries?: number;
 
-  // model params
   maxGoals?: number;
   homeAdv?: number;
   drawBoost?: number;
@@ -111,14 +110,12 @@ export async function POST(req: Request) {
 
   const baseUrl = `${proto}://${host}`;
 
-  const postInternal = async (path: string, body?: unknown) => {
+  const getInternal = async (path: string) => {
     const res = await fetch(`${baseUrl}${path}`, {
-      method: "POST",
+      method: "GET",
       headers: {
-        "Content-Type": "application/json",
         "x-cron-secret": cronSecret,
       },
-      body: body === undefined ? undefined : JSON.stringify(body),
       cache: "no-store",
     });
 
@@ -133,38 +130,27 @@ export async function POST(req: Request) {
     return data;
   };
 
-  const callOddsSync = async (args: {
+  const callBsdMatchesSync = async (args: {
     date: string;
-    phase: "FETCH_1" | "FETCH_2";
-    body: RunnerBody;
+    dryRun?: boolean;
   }) => {
-    const payload = {
-      date: args.date,
-      leagues: args.body.leagues,
-      throttleMs: args.body.throttleMs ?? 1200,
-      maxRetries: args.body.maxRetries ?? 6,
+    const qs = new URLSearchParams();
+    qs.set("date", args.date);
+    if (args.dryRun) qs.set("dryRun", "1");
 
-      maxGoals: args.body.maxGoals ?? 7,
-      homeAdv: args.body.homeAdv ?? 1.1,
-      drawBoost: args.body.drawBoost ?? 1.05,
-      margin: args.body.margin ?? 1.06,
-
-      phase: args.phase,
-    };
-
-    return await postInternal("/api/odds/sync", payload);
+    return await getInternal(`/api/admin/bsd/matches/sync?${qs.toString()}`);
   };
 
-  const sb = supabaseAdmin();
-  const nowIso = new Date().toISOString();
+    const sb = supabaseAdmin();
+    const nowIso = new Date().toISOString();
 
-  let body: RunnerBody = {};
-  try {
-    const t = await req.text();
-    body = t ? (JSON.parse(t) as RunnerBody) : {};
-  } catch {
-    body = {};
-  }
+    let body: RunnerBody = {};
+    try {
+      const t = await req.text();
+      body = t ? (JSON.parse(t) as RunnerBody) : {};
+    } catch {
+      body = {};
+    }
 
   // 0) opcjonalny reset kursora (tylko jeśli podasz startDate)
   if (body.startDate && !isYYYYMMDD(body.startDate)) {
@@ -266,12 +252,12 @@ export async function POST(req: Request) {
     let extra: any = null;
 
     try {
-      const res = await callOddsSync({ date: cursorDate, phase, body });
+        const res = await callBsdMatchesSync({ date: cursorDate });
 
-      stepOk = true;
-      extra = res;
-      matchesUpserted = Number(res?.matchesUpserted ?? 0) || 0;
-      oddsUpserted = Number(res?.oddsUpserted ?? 0) || 0;
+        stepOk = true;
+        extra = res;
+        matchesUpserted = Number(res?.upsertedMatchesCount ?? 0) || 0;
+        oddsUpserted = Number(res?.upsertedOddsCount ?? 0) || 0;
     } catch (e: any) {
       stepOk = false;
       message = e?.message ?? "runner_call_error";
@@ -298,18 +284,7 @@ export async function POST(req: Request) {
     // 5) update state
     const nextRunAt = plusSecondsIso(nowIso, COOLDOWN_SECONDS);
 
-    if (stepOk) {
-      if (phase === "FETCH_1") {
-        await sb
-          .from("sync_state")
-          .update({
-            phase: "FETCH_2",
-            next_run_at: nextRunAt,
-            updated_at: nowIso,
-            is_running: false,
-          })
-          .eq("id", 1);
-      } else {
+      if (stepOk) {
         await sb
           .from("sync_state")
           .update({
@@ -320,8 +295,7 @@ export async function POST(req: Request) {
             is_running: false,
           })
           .eq("id", 1);
-      }
-    } else {
+      } else {
       await sb
         .from("sync_state")
         .update({

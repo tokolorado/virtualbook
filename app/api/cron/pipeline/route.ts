@@ -1,3 +1,4 @@
+//app/api/cron/pipeline/route.ts
 import { NextResponse } from "next/server";
 import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
 import { getCronSecretAuthResult } from "@/lib/requireCronSecret";
@@ -128,20 +129,40 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2) odds sync — HORYZONT, nie tylko dziś
-    const r0 = await fetch(`${origin}/api/odds/sync`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        oddsTtlHours: 6,
-        batchLimit: 80,
-        throttleMs: 800,
-        maxRetries: 2,
-        engine: "v2",
-      }),
-      cache: "no-store",
-    });
-    const odds = await readJsonSafe(r0);
+    // 2) BSD odds sync — dziś + jutro, bez starego /api/odds/sync
+    const bsdSyncDays = [
+      utcDateYYYYMMDD(now),
+      utcDateYYYYMMDD(addUtcDays(now, 1)),
+    ];
+
+    const bsdOddsSyncResults: EnqueueStepResult[] = [];
+
+    for (const day of bsdSyncDays) {
+      const qs = new URLSearchParams();
+      qs.set("date", day);
+
+      const r = await fetch(
+        `${origin}/api/admin/bsd/matches/sync?${qs.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            "x-cron-secret": cronSecret,
+          },
+          cache: "no-store",
+        }
+      );
+
+      const body = await readJsonSafe(r);
+
+      bsdOddsSyncResults.push({
+        day,
+        ok: r.ok,
+        status: r.status,
+        body,
+      });
+
+      if (!r.ok) break;
+    }
 
     // 3) results (stale-timed)
     const r1 = await fetch(
@@ -192,7 +213,11 @@ export async function POST(req: Request) {
           ),
           items: fetchQueueRuns,
         },
-        odds_sync_horizon: { ok: r0.ok, status: r0.status, body: odds },
+          bsd_odds_sync: {
+          total: bsdOddsSyncResults.length,
+          ok: bsdOddsSyncResults.every((x) => x.ok),
+          items: bsdOddsSyncResults,
+        },
         results_stale_timed: { ok: r1.ok, status: r1.status, body: results1 },
         results_range: { ok: r1b.ok, status: r1b.status, body: results1b },
         settle: { ok: r2.ok, status: r2.status, body: settle },

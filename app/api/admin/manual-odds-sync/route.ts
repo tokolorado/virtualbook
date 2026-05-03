@@ -7,16 +7,7 @@ export const dynamic = "force-dynamic";
 
 type ManualOddsSyncBody = {
   date?: string;
-  leagues?: string[];
-  oddsTtlHours?: number;
-  batchLimit?: number;
-  throttleMs?: number;
-  maxRetries?: number;
-  maxGoals?: number;
-  homeAdv?: number;
-  drawBoost?: number;
-  margin?: number;
-  phase?: "FETCH_1" | "FETCH_2";
+  dryRun?: boolean;
 };
 
 function isYYYYMMDD(s: unknown): s is string {
@@ -73,25 +64,15 @@ export async function POST(req: Request) {
   }
 
   try {
-    const res = await fetch(`${baseUrl}/api/odds/sync`, {
-      method: "POST",
+    const url = new URL(`${baseUrl}/api/admin/bsd/matches/sync`);
+    url.searchParams.set("date", body.date);
+    if (body.dryRun) url.searchParams.set("dryRun", "1");
+
+    const res = await fetch(url.toString(), {
+      method: "GET",
       headers: {
-        "Content-Type": "application/json",
         "x-cron-secret": cronSecret,
       },
-      body: JSON.stringify({
-        date: body.date,
-        leagues: body.leagues,
-        oddsTtlHours: body.oddsTtlHours ?? 6,
-        batchLimit: body.batchLimit ?? 30,
-        throttleMs: body.throttleMs ?? 800,
-        maxRetries: body.maxRetries ?? 2,
-        maxGoals: body.maxGoals,
-        homeAdv: body.homeAdv,
-        drawBoost: body.drawBoost,
-        margin: body.margin,
-        phase: body.phase,
-      }),
       cache: "no-store",
     });
 
@@ -101,7 +82,10 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error: data?.error ?? data?.message ?? `odds/sync failed (${res.status})`,
+          error:
+            data?.error ??
+            data?.message ??
+            `bsd/matches/sync failed (${res.status})`,
           upstream: data,
         },
         { status: res.status }
@@ -110,15 +94,18 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       ok: true,
+      provider: "bsd",
       upstream: data,
+      matchesUpserted: Number(data?.upsertedMatchesCount ?? 0) || 0,
+      oddsUpserted: Number(data?.upsertedOddsCount ?? 0) || 0,
     });
-    } catch (e: unknown) {
+  } catch (e: unknown) {
     return NextResponse.json(
-        {
+      {
         ok: false,
-        error: e instanceof Error ? e.message : "manual_odds_sync_failed",
-        },
-            { status: 500 }
-        );
-    }
+        error: e instanceof Error ? e.message : "manual_bsd_sync_failed",
+      },
+      { status: 500 }
+    );
+  }
 }
