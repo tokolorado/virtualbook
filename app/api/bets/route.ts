@@ -53,11 +53,12 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Server error";
 }
 
-function jsonError(message: string, status = 500, extra?: Record<string, unknown>) {
-  return NextResponse.json(
-    { error: message, ...(extra ?? {}) },
-    { status }
-  );
+function jsonError(
+  message: string,
+  status = 500,
+  extra?: Record<string, unknown>
+) {
+  return NextResponse.json({ error: message, ...(extra ?? {}) }, { status });
 }
 
 export async function POST(req: Request) {
@@ -130,16 +131,19 @@ export async function POST(req: Request) {
       }
 
       let kickoff = null;
+
       if (item.kickoffUtc) {
         const date = new Date(String(item.kickoffUtc));
+
         if (Number.isNaN(date.getTime())) {
           throw new Error("Nieprawidlowy kickoffUtc.");
         }
+
         kickoff = date.toISOString();
       }
 
       return {
-        match_id_bigint: matchId,
+        match_id_bigint: Math.trunc(matchId),
         league: nonEmpty(item.league) || nonEmpty(item.competitionCode),
         home: nonEmpty(item.home),
         away: nonEmpty(item.away),
@@ -183,6 +187,7 @@ export async function POST(req: Request) {
     }
 
     const admin = supabaseAdmin();
+
     const { data: oddsRows, error: oddsError } = await admin
       .from("odds")
       .select("market_id,selection,fair_prob,book_odds")
@@ -208,7 +213,13 @@ export async function POST(req: Request) {
       });
     }
 
-    const { data, error } = await admin.rpc("place_bet_builder", {
+    /*
+      Ważne:
+      place_bet_builder wywołujemy przez user.supabase, nie przez admin.rpc.
+      Dzięki temu funkcja SQL widzi auth.uid() zalogowanego użytkownika.
+      Wcześniej admin.rpc mogło powodować błąd: "Not authenticated".
+    */
+    const { data, error } = await user.supabase.rpc("place_bet_builder", {
       p_user_id: user.userId,
       p_stake: stake,
       p_items: payloadItems,
