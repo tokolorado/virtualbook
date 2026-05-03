@@ -1,4 +1,4 @@
-//app/api/cron/pipeline/route.ts
+// app/api/cron/pipeline/route.ts
 import { NextResponse } from "next/server";
 import { cronLogStart, cronLogSuccess, cronLogError } from "@/lib/cronLogger";
 import { getCronSecretAuthResult } from "@/lib/requireCronSecret";
@@ -47,6 +47,10 @@ function addUtcDays(base: Date, days: number) {
   return d;
 }
 
+function isAlreadyExistingReason(value: unknown) {
+  return typeof value === "string" && value.startsWith("already_exists");
+}
+
 export async function POST(req: Request) {
   let logId: number | null = null;
 
@@ -60,6 +64,7 @@ export async function POST(req: Request) {
         job: "pipeline",
         reason: auth.reason,
       });
+
       return json(auth.status, { ok: false, error: auth.error });
     }
 
@@ -81,7 +86,7 @@ export async function POST(req: Request) {
     const horizonDays = 14;
     const enqueueResults: EnqueueStepResult[] = [];
 
-    for (let i = 0; i < horizonDays; i++) {
+    for (let i = 0; i < horizonDays; i += 1) {
       const day = utcDateYYYYMMDD(addUtcDays(now, i));
 
       const r = await fetch(`${origin}/api/cron/enqueue-day`, {
@@ -107,7 +112,7 @@ export async function POST(req: Request) {
     const fetchQueueRuns: PipelineStepResult[] = [];
     const maxFetchQueueRuns = 16;
 
-    for (let i = 0; i < maxFetchQueueRuns; i++) {
+    for (let i = 0; i < maxFetchQueueRuns; i += 1) {
       const r = await fetch(`${origin}/api/cron/fetch-queue`, {
         method: "POST",
         headers,
@@ -129,8 +134,9 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2) BSD odds horizon sync — rolling 14 days via delegated BSD endpoint
-    const bsdOddsSyncDays = 14;
+    // 2) BSD odds hot sync — tylko najbliższe 3 dni.
+    // Pełny 14-dniowy horizon robi osobny GitHub cron co godzinę.
+    const bsdOddsSyncDays = 3;
 
     const rBsd = await fetch(`${origin}/api/odds/sync`, {
       method: "POST",
@@ -140,13 +146,14 @@ export async function POST(req: Request) {
         days: bsdOddsSyncDays,
         dryRun: false,
         tz: "Europe/Warsaw",
+        stopOnError: false,
       }),
       cache: "no-store",
     });
 
     const bsdOddsSync = await readJsonSafe(rBsd);
 
-    // 3) results (stale-timed)
+    // 3) results stale-timed
     const r1 = await fetch(
       `${origin}/api/cron/results?mode=stale-timed&limit=50`,
       {
@@ -155,9 +162,10 @@ export async function POST(req: Request) {
         cache: "no-store",
       }
     );
+
     const results1 = await readJsonSafe(r1);
 
-    // 3b) range: wczoraj -> dzisiaj
+    // 3b) results range: wczoraj -> dzisiaj
     const r1b = await fetch(
       `${origin}/api/cron/results?mode=range&dateFrom=${dateFrom}&dateTo=${dateTo}&limit=200`,
       {
@@ -166,6 +174,7 @@ export async function POST(req: Request) {
         cache: "no-store",
       }
     );
+
     const results1b = await readJsonSafe(r1b);
 
     // 4) settle
@@ -174,6 +183,7 @@ export async function POST(req: Request) {
       headers,
       cache: "no-store",
     });
+
     const settle = await readJsonSafe(r2);
 
     const responseBody = {
@@ -182,8 +192,8 @@ export async function POST(req: Request) {
         enqueue_horizon: {
           total: enqueueResults.length,
           inserted: enqueueResults.filter((x) => x.body?.inserted).length,
-          skipped_existing: enqueueResults.filter(
-            (x) => x.body?.reason === "already_exists"
+          skipped_existing: enqueueResults.filter((x) =>
+            isAlreadyExistingReason(x.body?.reason)
           ).length,
           items: enqueueResults,
         },
@@ -201,9 +211,21 @@ export async function POST(req: Request) {
           days: bsdOddsSyncDays,
           body: bsdOddsSync,
         },
-        results_stale_timed: { ok: r1.ok, status: r1.status, body: results1 },
-        results_range: { ok: r1b.ok, status: r1b.status, body: results1b },
-        settle: { ok: r2.ok, status: r2.status, body: settle },
+        results_stale_timed: {
+          ok: r1.ok,
+          status: r1.status,
+          body: results1,
+        },
+        results_range: {
+          ok: r1b.ok,
+          status: r1b.status,
+          body: results1b,
+        },
+        settle: {
+          ok: r2.ok,
+          status: r2.status,
+          body: settle,
+        },
       },
     };
 
