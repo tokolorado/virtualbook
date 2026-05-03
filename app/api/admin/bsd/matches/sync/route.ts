@@ -627,42 +627,42 @@ function collectOddsInputs(event: UnknownRecord): OddsInput[] {
     },
     {
       marketId: "ou_1_5",
-      selection: "OVER",
+      selection: "over",
       field: "odds_over_15",
     },
     {
       marketId: "ou_1_5",
-      selection: "UNDER",
+      selection: "under",
       field: "odds_under_15",
     },
     {
       marketId: "ou_2_5",
-      selection: "OVER",
+      selection: "over",
       field: "odds_over_25",
     },
     {
       marketId: "ou_2_5",
-      selection: "UNDER",
+      selection: "under",
       field: "odds_under_25",
     },
     {
       marketId: "ou_3_5",
-      selection: "OVER",
+      selection: "over",
       field: "odds_over_35",
     },
     {
       marketId: "ou_3_5",
-      selection: "UNDER",
+      selection: "under",
       field: "odds_under_35",
     },
     {
       marketId: "btts",
-      selection: "YES",
+      selection: "yes",
       field: "odds_btts_yes",
     },
     {
       marketId: "btts",
-      selection: "NO",
+      selection: "no",
       field: "odds_btts_no",
     },
   ];
