@@ -785,9 +785,9 @@ async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
       return {
         ...m,
         odds: {
-          "1": dbOdds?.["1"] ?? m.odds["1"],
-          X: dbOdds?.X ?? m.odds.X,
-          "2": dbOdds?.["2"] ?? m.odds["2"],
+          "1": dbOdds?.["1"] ?? null,
+          X: dbOdds?.X ?? null,
+          "2": dbOdds?.["2"] ?? null,
         },
       };
     }),

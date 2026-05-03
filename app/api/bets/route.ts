@@ -186,7 +186,8 @@ export async function POST(req: Request) {
     const { data: oddsRows, error: oddsError } = await admin
       .from("odds")
       .select("market_id,selection,fair_prob,book_odds")
-      .eq("match_id", matchIds[0]);
+      .eq("match_id", matchIds[0])
+      .eq("source", "bsd");
 
     if (oddsError) {
       return jsonError("Nie udalo sie pobrac kursow do Bet Buildera.", 500, {

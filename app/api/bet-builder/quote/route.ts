@@ -58,7 +58,8 @@ export async function POST(req: Request) {
   const { data: oddsRows, error: oddsError } = await supabase
     .from("odds")
     .select("market_id,selection,fair_prob,book_odds")
-    .eq("match_id", matchId);
+    .eq("match_id", matchId)
+    .eq("source", "bsd");
 
   if (oddsError) {
     return jsonError("Nie udało się pobrać kursów do Bet Buildera.", 500, {

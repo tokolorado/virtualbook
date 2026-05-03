@@ -467,7 +467,8 @@ export async function GET(req: Request) {
       .from("odds")
       .select("match_id, market_id, selection, book_odds")
       .in("match_id", safeIds)
-      .eq("market_id", MARKET_ID_1X2);
+      .eq("market_id", MARKET_ID_1X2)
+      .eq("source", "bsd");
 
     if (error) {
       throw new Error(`DB odds read error: ${error.message}`);

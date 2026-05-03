@@ -118,6 +118,10 @@ type OddsUpsertRow = {
   book_odds: number;
   book_prob: number;
 
+  margin: number;
+  risk_adjustment: number;
+  implied_probability: number;
+
   home_team: string | null;
   away_team: string | null;
 
@@ -125,8 +129,8 @@ type OddsUpsertRow = {
   source_event_id: string;
   pricing_method: string;
   raw_count: number;
-  margin: number;
-  implied_probability: number;
+
+  updated_at: string;
   provider_fetched_at: string;
   raw_source: UnknownRecord;
 };
@@ -236,12 +240,64 @@ function readBool(obj: UnknownRecord, key: string): boolean | null {
   return null;
 }
 
+function uniqueBy<T>(items: T[], keyFn: (item: T) => string): T[] {
+  const map = new Map<string, T>();
+
+  for (const item of items) {
+    map.set(keyFn(item), item);
+  }
+
+  return Array.from(map.values());
+}
+
+function dedupeEventsByBsdId(events: UnknownRecord[]): {
+  events: UnknownRecord[];
+  duplicateEventIds: string[];
+} {
+  const byId = new Map<string, UnknownRecord>();
+  const duplicateEventIds = new Set<string>();
+
+  for (const event of events) {
+    const id = readString(event, "id");
+
+    if (!id) {
+      continue;
+    }
+
+    if (byId.has(id)) {
+      duplicateEventIds.add(id);
+    }
+
+    byId.set(id, event);
+  }
+
+  return {
+    events: Array.from(byId.values()),
+    duplicateEventIds: Array.from(duplicateEventIds).sort(),
+  };
+}
+
 function normalizeStatus(status: string | null): string {
-  const s = normalizeBsdText(status ?? "");
+  const raw = status ?? "";
+  const s = normalizeBsdText(raw);
+  const compact = s.replace(/[\s_-]+/g, "");
 
-  if (!s) return "SCHEDULED";
+  if (!s) return "TIMED";
 
-  if (["notstarted", "not_started", "scheduled", "timed"].includes(s)) {
+  if (
+    [
+      "notstarted",
+      "not_started",
+      "not started",
+      "scheduled",
+      "timed",
+      "fixture",
+      "pre match",
+      "pre_match",
+      "prematch",
+    ].includes(s) ||
+    ["notstarted", "scheduled", "timed", "fixture", "prematch"].includes(compact)
+  ) {
     return "TIMED";
   }
 
@@ -250,23 +306,58 @@ function normalizeStatus(status: string | null): string {
       "live",
       "inplay",
       "in_play",
+      "in play",
       "1sthalf",
-      "2ndhalf",
+      "1st half",
       "firsthalf",
+      "first half",
+      "2ndhalf",
+      "2nd half",
       "secondhalf",
-    ].includes(s)
+      "second half",
+    ].includes(s) ||
+    [
+      "live",
+      "inplay",
+      "1sthalf",
+      "firsthalf",
+      "2ndhalf",
+      "secondhalf",
+    ].includes(compact)
   ) {
     return "IN_PLAY";
   }
 
-  if (["halftime", "half_time", "paused"].includes(s)) return "PAUSED";
-  if (["finished", "ended", "ft"].includes(s)) return "FINISHED";
+  if (
+    [
+      "halftime",
+      "half_time",
+      "half time",
+      "ht",
+      "paused",
+      "break",
+      "interval",
+    ].includes(s) ||
+    ["halftime", "ht", "paused", "break", "interval"].includes(compact)
+  ) {
+    return "PAUSED";
+  }
+
+  if (
+    ["finished", "ended", "ft", "fulltime", "full_time", "full time"].includes(
+      s
+    ) ||
+    ["finished", "ended", "ft", "fulltime"].includes(compact)
+  ) {
+    return "FINISHED";
+  }
+
   if (["cancelled", "canceled"].includes(s)) return "CANCELLED";
   if (s === "postponed") return "POSTPONED";
   if (s === "suspended") return "SUSPENDED";
   if (s === "awarded") return "AWARDED";
 
-  return s.toUpperCase();
+  return "TIMED";
 }
 
 function isFinishedStatus(status: string): boolean {
@@ -613,61 +704,21 @@ function buildMatchRow(args: {
 
 function collectOddsInputs(event: UnknownRecord): OddsInput[] {
   const specs = [
-    {
-      marketId: "1x2",
-      selection: "1",
-      field: "odds_home",
-    },
-    {
-      marketId: "1x2",
-      selection: "X",
-      field: "odds_draw",
-    },
-    {
-      marketId: "1x2",
-      selection: "2",
-      field: "odds_away",
-    },
-    {
-      marketId: "ou_1_5",
-      selection: "over",
-      field: "odds_over_15",
-    },
-    {
-      marketId: "ou_1_5",
-      selection: "under",
-      field: "odds_under_15",
-    },
-    {
-      marketId: "ou_2_5",
-      selection: "over",
-      field: "odds_over_25",
-    },
-    {
-      marketId: "ou_2_5",
-      selection: "under",
-      field: "odds_under_25",
-    },
-    {
-      marketId: "ou_3_5",
-      selection: "over",
-      field: "odds_over_35",
-    },
-    {
-      marketId: "ou_3_5",
-      selection: "under",
-      field: "odds_under_35",
-    },
-    {
-      marketId: "btts",
-      selection: "yes",
-      field: "odds_btts_yes",
-    },
-    {
-      marketId: "btts",
-      selection: "no",
-      field: "odds_btts_no",
-    },
+    { marketId: "1x2", selection: "1", field: "odds_home" },
+    { marketId: "1x2", selection: "X", field: "odds_draw" },
+    { marketId: "1x2", selection: "2", field: "odds_away" },
+
+    { marketId: "ou_1_5", selection: "over", field: "odds_over_15" },
+    { marketId: "ou_1_5", selection: "under", field: "odds_under_15" },
+
+    { marketId: "ou_2_5", selection: "over", field: "odds_over_25" },
+    { marketId: "ou_2_5", selection: "under", field: "odds_under_25" },
+
+    { marketId: "ou_3_5", selection: "over", field: "odds_over_35" },
+    { marketId: "ou_3_5", selection: "under", field: "odds_under_35" },
+
+    { marketId: "btts", selection: "yes", field: "odds_btts_yes" },
+    { marketId: "btts", selection: "no", field: "odds_btts_no" },
   ];
 
   const inputs: OddsInput[] = [];
@@ -747,6 +798,10 @@ function buildOddsRows(args: {
         book_odds: input.bookOdds,
         book_prob: impliedProbability,
 
+        margin,
+        risk_adjustment: 0,
+        implied_probability: impliedProbability,
+
         home_team: args.homeTeam,
         away_team: args.awayTeam,
 
@@ -754,9 +809,10 @@ function buildOddsRows(args: {
         source_event_id: sourceEventId,
         pricing_method: "bsd_market_normalized",
         raw_count: marketInputs.length,
-        margin,
-        implied_probability: impliedProbability,
+
+        updated_at: args.fetchedAt,
         provider_fetched_at: args.fetchedAt,
+
         raw_source: {
           event_id: sourceEventId,
           market_id: marketId,
@@ -834,7 +890,8 @@ export async function GET(req: Request): Promise<Response> {
         { maxPages: 20 }
       );
 
-    const events = rawEvents.filter(isRecord);
+    const fetchedEvents = rawEvents.filter(isRecord);
+    const { events, duplicateEventIds } = dedupeEventsByBsdId(fetchedEvents);
 
     const eligibleEvents = events.filter((event) => {
       const providerLeagueId = readProviderLeagueId(event);
@@ -976,13 +1033,20 @@ export async function GET(req: Request): Promise<Response> {
       });
     }
 
+    const uniqueMatchRows = uniqueBy(matchRows, (row) => String(row.id));
+
+    const uniqueOddsRows = uniqueBy(
+      oddsRows,
+      (row) => `${row.match_id}__${row.market_id}__${row.selection}`
+    );
+
     let upsertedMatchesCount = 0;
     let upsertedOddsCount = 0;
 
-    if (!dryRun && matchRows.length > 0) {
+    if (!dryRun && uniqueMatchRows.length > 0) {
       const { error: matchesUpsertError } = await supabase
         .from("matches")
-        .upsert(matchRows, { onConflict: "id" });
+        .upsert(uniqueMatchRows, { onConflict: "id" });
 
       if (matchesUpsertError) {
         return jsonError("matches upsert failed", 500, {
@@ -990,16 +1054,15 @@ export async function GET(req: Request): Promise<Response> {
         });
       }
 
-      upsertedMatchesCount = matchRows.length;
+      upsertedMatchesCount = uniqueMatchRows.length;
     }
 
-    if (!dryRun && oddsRows.length > 0) {
-      const { error: oddsUpsertError } = await supabase.from("odds").upsert(
-        oddsRows,
-        {
+    if (!dryRun && uniqueOddsRows.length > 0) {
+      const { error: oddsUpsertError } = await supabase
+        .from("odds")
+        .upsert(uniqueOddsRows, {
           onConflict: "match_id,market_id,selection",
-        }
-      );
+        });
 
       if (oddsUpsertError) {
         return jsonError("odds upsert failed", 500, {
@@ -1007,7 +1070,7 @@ export async function GET(req: Request): Promise<Response> {
         });
       }
 
-      upsertedOddsCount = oddsRows.length;
+      upsertedOddsCount = uniqueOddsRows.length;
     }
 
     const createdNewCount = previewRows.filter(
@@ -1031,8 +1094,15 @@ export async function GET(req: Request): Promise<Response> {
         (a, b) => a - b
       ),
 
-      fetchedEventsCount: events.length,
+      fetchedEventsCount: fetchedEvents.length,
+      uniqueEventsCount: events.length,
+      duplicateEventIds,
       eligibleEventsCount: eligibleEvents.length,
+
+      builtMatchRowsCount: matchRows.length,
+      uniqueMatchRowsCount: uniqueMatchRows.length,
+      builtOddsRowsCount: oddsRows.length,
+      uniqueOddsRowsCount: uniqueOddsRows.length,
 
       upsertedMatchesCount,
       upsertedOddsCount,
