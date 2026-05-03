@@ -69,7 +69,7 @@ type Odds1x2DbRow = {
   selection: string;
   book_odds: number | string | null;
   updated_at: string | null;
-  engine_version: string | null;
+  source: string | null;
 };
 
 type League = {
@@ -744,10 +744,10 @@ async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
 
   const { data, error } = await supabase
     .from("odds")
-    .select("match_id, selection, book_odds, updated_at, engine_version")
+    .select("match_id, selection, book_odds, updated_at, source")
     .in("match_id", matchIds)
     .eq("market_id", MARKET_ID_1X2)
-    .eq("engine_version", "v2");
+    .eq("source", "bsd");
 
   if (error) {
     throw new Error(`Nie udało się pobrać kursów 1X2 z bazy: ${error.message}`);

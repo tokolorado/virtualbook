@@ -126,7 +126,7 @@ function buildBetTimeline(bet: BetRow, items: BetItemRow[]): BetTimelineStep[] {
         id: `${item.id}-kickoff`,
         at: item.kickoff_at,
         title: "Start meczu",
-        description: `${item.home} vs ${item.away} · ${labels.marketLabel}: ${labels.selectionLabel}.`,
+        description: `${item.home} vs ${item.away} · ${labels}.`,
         tone: "neutral",
       });
     }
@@ -137,7 +137,7 @@ function buildBetTimeline(bet: BetRow, items: BetItemRow[]): BetTimelineStep[] {
         id: `${item.id}-settled`,
         at: item.settled_at ?? bet.settled_at ?? item.created_at,
         title: "Pozycja rozliczona",
-        description: `${labels.marketLabel}: ${labels.selectionLabel} · wynik: ${itemResultLabel(item.result)}.`,
+        description: `${labels} · wynik: ${itemResultLabel(item.result)}.`,
         tone:
           result === "won"
             ? "green"

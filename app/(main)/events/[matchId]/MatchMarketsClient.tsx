@@ -16,7 +16,7 @@ type OddsRow = {
   selection: string;
   book_odds: number;
   updated_at: string;
-  engine_version?: string | null;
+  source?: string | null;
 };
 
 type MatchUI = {
@@ -1096,9 +1096,10 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           supabase
             .from("odds")
             .select(
-              "match_id, market_id, selection, book_odds, updated_at, engine_version"
+              "match_id, market_id, selection, book_odds, updated_at, source"
             )
             .eq("match_id", matchIdNum)
+            .eq("source", "bsd")
             .order("market_id", { ascending: true })
             .order("selection", { ascending: true }),
 

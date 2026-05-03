@@ -234,7 +234,6 @@ CREATE TABLE public.odds (
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   home_team text,
   away_team text,
-  engine_version text,
   CONSTRAINT odds_pkey PRIMARY KEY (match_id, market_id, selection),
   CONSTRAINT odds_match_id_fkey FOREIGN KEY (match_id) REFERENCES public.matches(id),
   CONSTRAINT odds_market_id_fkey FOREIGN KEY (market_id) REFERENCES public.markets(id)
@@ -242,7 +241,6 @@ CREATE TABLE public.odds (
 CREATE TABLE public.odds_engine_runs (
   id bigint GENERATED ALWAYS AS IDENTITY NOT NULL,
   match_id bigint NOT NULL,
-  engine_version text NOT NULL,
   competition_id text,
   home_team_id bigint,
   away_team_id bigint,

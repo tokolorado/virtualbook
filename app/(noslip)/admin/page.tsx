@@ -2489,7 +2489,7 @@ export default function AdminPage() {
                                   <div className="min-w-0">
                                     <div className="text-xs text-neutral-500">
                                       {item.league || "Liga"} •{" "}
-                                      {labels.marketLabel}
+                                      {labels.marketLabel}: {labels.selectionLabel}
                                     </div>
                                     <div className="mt-2 text-sm font-semibold text-white">
                                       {item.home || "Gospodarze"}{" "}
@@ -2523,7 +2523,6 @@ export default function AdminPage() {
                                 <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-3 text-sm text-neutral-300">
                                   Typ:{" "}
                                   <span className="font-semibold text-white">
-                                    {labels.selectionLabel}
                                   </span>
                                 </div>
                               </div>
