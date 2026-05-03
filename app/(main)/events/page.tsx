@@ -1673,6 +1673,16 @@ export default function EventsPage() {
       .slice(0, 3);
   }, [liveMatches, openMatches]);
 
+  const featuredMatchIds = useMemo(
+  () => new Set(featuredMatches.map((m) => m.id)),
+  [featuredMatches]
+);
+
+  const regularOpenMatches = useMemo(
+    () => openMatches.filter((m) => !featuredMatchIds.has(m.id)),
+    [openMatches, featuredMatchIds]
+  );
+
   const leagueCounts = useMemo(() => {
     const map: Record<string, number> = { ALL: matches.length };
 
@@ -2599,15 +2609,15 @@ export default function EventsPage() {
                   </div>
                 ) : null}
 
-                {openMatches.length > 0 ? (
+                {regularOpenMatches.length > 0 ? (
                   <div className="space-y-3">
                     <SectionHeader
                       title={openSectionTitle}
-                      count={openMatches.length}
+                      count={regularOpenMatches.length}
                       subtitle="Zakłady zamykają się minutę przed startem meczu."
                     />
                     <div className="space-y-3">
-                      {openMatches.map((m) => renderMatchCard(m))}
+                      {regularOpenMatches.map((m) => renderMatchCard(m))}
                     </div>
                   </div>
                 ) : null}
