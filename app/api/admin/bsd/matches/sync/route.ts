@@ -1,7 +1,7 @@
-// app/api/admin/bsd/matches/sync/route.ts
+﻿// app/api/admin/bsd/matches/sync/route.ts
 
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/lib/supabaseServer";
 import { bsdFetchPaginated, normalizeBsdText } from "@/lib/bsd/client";
 
 export const runtime = "nodejs";
@@ -166,18 +166,7 @@ function requireCronSecret(req: Request): AuthResult {
 }
 
 function getSupabaseAdmin() {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl) {
-    throw new Error("Missing SUPABASE_URL in env");
-  }
-
-  if (!serviceKey) {
-    throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY in env");
-  }
-
-  return createClient(supabaseUrl, serviceKey);
+  return supabaseAdmin();
 }
 
 function isRecord(value: unknown): value is UnknownRecord {
