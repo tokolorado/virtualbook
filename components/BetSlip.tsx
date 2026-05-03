@@ -438,14 +438,31 @@ export default function BetSlip({ variant }: { variant?: string }) {
     try {
       setSubmitting(true);
 
+    const getFreshAccessToken = async () => {
       const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData.session?.access_token;
+
+      let session = sessionData.session;
+      let token = session?.access_token ?? null;
+
+      const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : null;
+      const shouldRefresh =
+        !token || (expiresAtMs != null && expiresAtMs <= Date.now() + 60_000);
+
+      if (shouldRefresh) {
+        const { data: refreshedData } = await supabase.auth.refreshSession();
+        session = refreshedData.session;
+        token = session?.access_token ?? null;
+      }
 
       if (!token) {
         throw new Error("Nie jesteś zalogowany.");
       }
 
-      const r = await fetch("/api/bets", {
+      return { token, userId: session?.user?.id ?? null };
+    };
+
+    const postBet = async (token: string) => {
+      return fetch("/api/bets", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -459,6 +476,24 @@ export default function BetSlip({ variant }: { variant?: string }) {
           mode,
         }),
       });
+    };
+
+    let { token, userId } = await getFreshAccessToken();
+
+    let r = await postBet(token);
+
+    if (r.status === 401) {
+      const refreshed = await supabase.auth.refreshSession();
+      const retryToken = refreshed.data.session?.access_token;
+
+      if (!retryToken) {
+        throw new Error("Sesja wygasła — zaloguj się ponownie.");
+      }
+
+      token = retryToken;
+      userId = refreshed.data.session?.user?.id ?? userId;
+      r = await postBet(token);
+    }
 
       const text = await r.text();
       let j: Record<string, unknown> = {};
@@ -507,7 +542,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
       }
 
       try {
-        const uid = sessionData.session?.user?.id;
+        const uid = userId;
         if (uid) {
           const { data: p, error: pErr } = await supabase
             .from("profiles")
