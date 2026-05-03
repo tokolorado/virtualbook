@@ -544,6 +544,41 @@ function shortPickLabel(pick: Pick) {
   return "2";
 }
 
+
+function readTeamName(team: any, fallback: string) {
+  if (!team) return fallback;
+
+  if (typeof team === "string" && team.trim()) return team.trim();
+
+  const candidates = [
+    team.name,
+    team.shortName,
+    team.short_name,
+    team.fullName,
+    team.full_name,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return fallback;
+}
+
+function readTeamId(team: any): number | null {
+  if (!team) return null;
+
+  const raw =
+    typeof team === "number" || typeof team === "string"
+      ? team
+      : team.id ?? team.team_id ?? team.teamId;
+
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
   const all: Match[] = [];
 
@@ -563,13 +598,23 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
 
       const time = formatLocalTime(utc);
 
-      const homeId =
-        typeof m?.homeTeam?.id === "number" ? m.homeTeam.id : null;
-      const awayId =
-        typeof m?.awayTeam?.id === "number" ? m.awayTeam.id : null;
+      const homeTeamRaw =
+        m?.homeTeam ??
+        m?.home_team_obj ??
+        m?.home_team ??
+        m?.home;
 
-      const homeName = m?.homeTeam?.name ?? "Home";
-      const awayName = m?.awayTeam?.name ?? "Away";
+      const awayTeamRaw =
+        m?.awayTeam ??
+        m?.away_team_obj ??
+        m?.away_team ??
+        m?.away;
+
+      const homeId = readTeamId(homeTeamRaw);
+      const awayId = readTeamId(awayTeamRaw);
+
+      const homeName = readTeamName(homeTeamRaw, "Home");
+      const awayName = readTeamName(awayTeamRaw, "Away");
       const displayHomeScore = safeNum(m?.displayScore?.home);
       const displayAwayScore = safeNum(m?.displayScore?.away);
       const canonicalHomeScore = safeNum(m?.score?.fullTime?.home);
