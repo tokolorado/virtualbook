@@ -213,13 +213,7 @@ export async function POST(req: Request) {
       });
     }
 
-    /*
-      Ważne:
-      place_bet_builder wywołujemy przez user.supabase, nie przez admin.rpc.
-      Dzięki temu funkcja SQL widzi auth.uid() zalogowanego użytkownika.
-      Wcześniej admin.rpc mogło powodować błąd: "Not authenticated".
-    */
-    const { data, error } = await user.supabase.rpc("place_bet_builder", {
+    const { data, error } = await admin.rpc("place_bet_builder", {
       p_user_id: user.userId,
       p_stake: stake,
       p_items: payloadItems,
