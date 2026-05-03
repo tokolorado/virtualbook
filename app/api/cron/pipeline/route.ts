@@ -129,40 +129,22 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2) BSD odds sync — dziś + jutro, bez starego /api/odds/sync
-    const bsdSyncDays = [
-      utcDateYYYYMMDD(now),
-      utcDateYYYYMMDD(addUtcDays(now, 1)),
-    ];
+    // 2) BSD odds horizon sync — rolling 14 days via delegated BSD endpoint
+    const bsdOddsSyncDays = 14;
 
-    const bsdOddsSyncResults: EnqueueStepResult[] = [];
+    const rBsd = await fetch(`${origin}/api/odds/sync`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        dateFrom: utcDateYYYYMMDD(now),
+        days: bsdOddsSyncDays,
+        dryRun: false,
+        tz: "Europe/Warsaw",
+      }),
+      cache: "no-store",
+    });
 
-    for (const day of bsdSyncDays) {
-      const qs = new URLSearchParams();
-      qs.set("date", day);
-
-      const r = await fetch(
-        `${origin}/api/admin/bsd/matches/sync?${qs.toString()}`,
-        {
-          method: "GET",
-          headers: {
-            "x-cron-secret": cronSecret,
-          },
-          cache: "no-store",
-        }
-      );
-
-      const body = await readJsonSafe(r);
-
-      bsdOddsSyncResults.push({
-        day,
-        ok: r.ok,
-        status: r.status,
-        body,
-      });
-
-      if (!r.ok) break;
-    }
+    const bsdOddsSync = await readJsonSafe(rBsd);
 
     // 3) results (stale-timed)
     const r1 = await fetch(
@@ -213,10 +195,11 @@ export async function POST(req: Request) {
           ),
           items: fetchQueueRuns,
         },
-          bsd_odds_sync: {
-          total: bsdOddsSyncResults.length,
-          ok: bsdOddsSyncResults.every((x) => x.ok),
-          items: bsdOddsSyncResults,
+        bsd_odds_sync: {
+          ok: rBsd.ok,
+          status: rBsd.status,
+          days: bsdOddsSyncDays,
+          body: bsdOddsSync,
         },
         results_stale_timed: { ok: r1.ok, status: r1.status, body: results1 },
         results_range: { ok: r1b.ok, status: r1b.status, body: results1b },
