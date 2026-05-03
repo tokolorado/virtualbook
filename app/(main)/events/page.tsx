@@ -579,6 +579,69 @@ function readTeamId(team: any): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function firstText(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function readTeamNameFromMatch(m: any, side: "home" | "away") {
+  if (side === "home") {
+    return (
+      firstText(
+        m?.homeTeam?.name,
+        m?.homeTeam?.shortName,
+        m?.homeTeam?.short_name,
+        m?.home_team_obj?.name,
+        m?.home_team_obj?.short_name,
+        m?.home_team_name,
+        m?.homeTeamName,
+        m?.home_name,
+        m?.home_team,
+        m?.home
+      ) ?? "Home"
+    );
+  }
+
+  return (
+    firstText(
+      m?.awayTeam?.name,
+      m?.awayTeam?.shortName,
+      m?.awayTeam?.short_name,
+      m?.away_team_obj?.name,
+      m?.away_team_obj?.short_name,
+      m?.away_team_name,
+      m?.awayTeamName,
+      m?.away_name,
+      m?.away_team,
+      m?.away
+    ) ?? "Away"
+  );
+}
+
+function readTeamIdFromMatch(m: any, side: "home" | "away") {
+  const raw =
+    side === "home"
+      ? m?.homeTeam?.id ??
+        m?.home_team_obj?.id ??
+        m?.home_team_id ??
+        m?.homeTeamId ??
+        null
+      : m?.awayTeam?.id ??
+        m?.away_team_obj?.id ??
+        m?.away_team_id ??
+        m?.awayTeamId ??
+        null;
+
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+
 function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
   const all: Match[] = [];
 
@@ -610,11 +673,20 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
         m?.away_team ??
         m?.away;
 
-      const homeId = readTeamId(homeTeamRaw);
-      const awayId = readTeamId(awayTeamRaw);
+      const homeId = readTeamIdFromMatch(m, "home");
+      const awayId = readTeamIdFromMatch(m, "away");
 
-      const homeName = readTeamName(homeTeamRaw, "Home");
-      const awayName = readTeamName(awayTeamRaw, "Away");
+      const homeName = readTeamNameFromMatch(m, "home");
+      const awayName = readTeamNameFromMatch(m, "away");
+      if (String(m?.id) === "552095") {
+          console.log("MATCH 552095 RAW:", m);
+          console.log("MATCH 552095 NAMES:", {
+            homeTeamName: m?.homeTeam?.name,
+            awayTeamName: m?.awayTeam?.name,
+            homeName,
+            awayName,
+          });
+        }
       const displayHomeScore = safeNum(m?.displayScore?.home);
       const displayAwayScore = safeNum(m?.displayScore?.away);
       const canonicalHomeScore = safeNum(m?.score?.fullTime?.home);

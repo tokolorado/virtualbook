@@ -50,6 +50,65 @@ function safeInt(value: unknown): number | null {
   return Math.trunc(n);
 }
 
+function cleanString(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.trim();
+}
+
+function isPlaceholderTeamName(value: unknown, side?: "home" | "away") {
+  const s = cleanString(value).toLowerCase();
+
+  if (!s) return true;
+
+  if (s === "tbd") return true;
+  if (s === "to be decided") return true;
+  if (s === "unknown") return true;
+  if (s === "n/a") return true;
+
+  if (side === "home" && s === "home") return true;
+  if (side === "away" && s === "away") return true;
+
+  return false;
+}
+
+function safeTeamId(value: unknown): number | null {
+  const n = safeInt(value);
+  if (n === null) return null;
+
+  // Football-Data czasem zwraca id: 0 dla placeholderów Home/Away.
+  if (n <= 0) return null;
+
+  return n;
+}
+
+function pickTeamName(args: {
+  upstreamName: unknown;
+  existingName: unknown;
+  fallback: string;
+  side: "home" | "away";
+}) {
+  const upstream = cleanString(args.upstreamName);
+  const existing = cleanString(args.existingName);
+
+  if (!isPlaceholderTeamName(upstream, args.side)) return upstream;
+  if (!isPlaceholderTeamName(existing, args.side)) return existing;
+
+  return args.fallback;
+}
+
+function pickTeamId(args: {
+  upstreamId: unknown;
+  existingId: unknown;
+}) {
+  const upstream = safeTeamId(args.upstreamId);
+  if (upstream !== null) return upstream;
+
+  const existing = safeTeamId(args.existingId);
+  if (existing !== null) return existing;
+
+  return null;
+}
+
 function pickMatchScore(match: any, side: "home" | "away"): number | null {
   const fullTime = safeScore(match?.score?.fullTime?.[side]);
   if (fullTime !== null) return fullTime;
@@ -162,8 +221,8 @@ type DbMatchRow = {
   status: string | null;
   matchday: number | null;
   season: string | null;
-  home_team: string;
-  away_team: string;
+  home_team: string | null;
+  away_team: string | null;
   home_score: number | null;
   away_score: number | null;
   minute: number | null;
@@ -173,6 +232,14 @@ type DbMatchRow = {
   home_team_id: number | null;
   away_team_id: number | null;
   last_sync_at: string | null;
+};
+
+type ExistingTeamRow = {
+  id: number;
+  home_team: string | null;
+  away_team: string | null;
+  home_team_id: number | null;
+  away_team_id: number | null;
 };
 
 type DisplayScore = {
@@ -356,6 +423,34 @@ export async function GET(req: Request) {
     return (data ?? []) as DbMatchRow[];
   }
 
+  async function readExistingTeamRows(matchIds: number[]) {
+    const safeIds = Array.from(
+      new Set(matchIds.filter((x) => Number.isFinite(x)))
+    );
+
+    const map = new Map<number, ExistingTeamRow>();
+
+    if (!safeIds.length) return map;
+
+    const { data, error } = await supabase
+      .from("matches")
+      .select("id, home_team, away_team, home_team_id, away_team_id")
+      .in("id", safeIds);
+
+    if (error) {
+      throw new Error(`DB existing team rows read error: ${error.message}`);
+    }
+
+    for (const row of (data ?? []) as ExistingTeamRow[]) {
+      const id = Number(row.id);
+      if (!Number.isFinite(id)) continue;
+
+      map.set(id, row);
+    }
+
+    return map;
+  }
+
   async function readOddsMapFromDb(matchIds: number[]) {
     const safeIds = Array.from(
       new Set(matchIds.filter((x) => Number.isFinite(x)))
@@ -404,8 +499,7 @@ export async function GET(req: Request) {
     return oddsMap;
   }
 
-
-    async function readPredictionsMapFromDb(matchIds: number[]) {
+  async function readPredictionsMapFromDb(matchIds: number[]) {
     const safeIds = Array.from(
       new Set(matchIds.filter((x) => Number.isFinite(x)))
     );
@@ -505,6 +599,24 @@ export async function GET(req: Request) {
       ? (fx.data as any).matches
       : [];
 
+    const ids = list
+      .map((m: any) => Number(m?.id))
+      .filter((id: number) => Number.isFinite(id));
+
+    let existingById = new Map<number, ExistingTeamRow>();
+
+    try {
+      existingById = await readExistingTeamRows(ids);
+    } catch (e: any) {
+      return {
+        ok: false,
+        status: 500,
+        data: {
+          error: e?.message ?? String(e),
+        },
+      };
+    }
+
     const nowIso = new Date().toISOString();
 
     const rows = list
@@ -515,6 +627,8 @@ export async function GET(req: Request) {
         const utc = m?.utcDate ? new Date(String(m.utcDate)).toISOString() : null;
         if (!utc) return null;
 
+        const existing = existingById.get(id) ?? null;
+
         const status = normalizeStatus(m?.status);
         const matchday = Number.isFinite(Number(m?.matchday))
           ? Number(m.matchday)
@@ -524,15 +638,29 @@ export async function GET(req: Request) {
           ? String(m.season.startDate).slice(0, 4)
           : null;
 
-        const home = m?.homeTeam?.name ? String(m.homeTeam.name) : "Home";
-        const away = m?.awayTeam?.name ? String(m.awayTeam.name) : "Away";
+        const home = pickTeamName({
+          upstreamName: m?.homeTeam?.name,
+          existingName: existing?.home_team,
+          fallback: "Home",
+          side: "home",
+        });
 
-        const homeTeamId = Number.isFinite(Number(m?.homeTeam?.id))
-          ? Number(m.homeTeam.id)
-          : null;
-        const awayTeamId = Number.isFinite(Number(m?.awayTeam?.id))
-          ? Number(m.awayTeam.id)
-          : null;
+        const away = pickTeamName({
+          upstreamName: m?.awayTeam?.name,
+          existingName: existing?.away_team,
+          fallback: "Away",
+          side: "away",
+        });
+
+        const homeTeamId = pickTeamId({
+          upstreamId: m?.homeTeam?.id,
+          existingId: existing?.home_team_id,
+        });
+
+        const awayTeamId = pickTeamId({
+          upstreamId: m?.awayTeam?.id,
+          existingId: existing?.away_team_id,
+        });
 
         const hs = pickMatchScore(m, "home");
         const as = pickMatchScore(m, "away");
@@ -553,7 +681,7 @@ export async function GET(req: Request) {
           id,
           competition_id: String(leagueCode),
           competition_name: String(leagueName),
-          utc_date: utc ?? nowIso,
+          utc_date: utc,
           status,
           matchday,
           season,
@@ -616,7 +744,8 @@ export async function GET(req: Request) {
       }
 
       const upstreamMatch =
-        (detail.data as any)?.match && typeof (detail.data as any).match === "object"
+        (detail.data as any)?.match &&
+        typeof (detail.data as any).match === "object"
           ? (detail.data as any).match
           : detail.data;
 
@@ -718,18 +847,6 @@ export async function GET(req: Request) {
     allDbMatches = [];
   }
 
-  const matchesByLeague = new Map<string, DbMatchRow[]>();
-
-  for (const lg of LEAGUES) {
-    matchesByLeague.set(lg.code, []);
-  }
-
-  for (const m of allDbMatches) {
-    const arr = matchesByLeague.get(m.competition_id) ?? [];
-    arr.push(m);
-    matchesByLeague.set(m.competition_id, arr);
-  }
-
   for (const lg of LEAGUES) {
     const fxRefreshKey = `fx_refresh:${lg.code}:${dateFrom}:${dateTo}`;
 
@@ -811,7 +928,7 @@ export async function GET(req: Request) {
     });
   }
 
-    let predictionsMap = new Map<number, PredictionDisplay>();
+  let predictionsMap = new Map<number, PredictionDisplay>();
 
   try {
     const allMatchIds = allDbMatches
@@ -845,6 +962,9 @@ export async function GET(req: Request) {
 
         const prediction = predictionsMap.get(Number(m.id)) ?? null;
 
+        const homeName = cleanString(m.home_team) || "Home";
+        const awayName = cleanString(m.away_team) || "Away";
+
         return {
           id: m.id,
           utcDate: m.utc_date,
@@ -857,8 +977,14 @@ export async function GET(req: Request) {
           injuryTime: isLive ? m.injury_time : null,
           matchday: m.matchday,
           season: m.season ? { startDate: `${m.season}-01-01` } : null,
-          homeTeam: { id: m.home_team_id ?? null, name: m.home_team },
-          awayTeam: { id: m.away_team_id ?? null, name: m.away_team },
+          homeTeam: {
+            id: safeTeamId(m.home_team_id),
+            name: homeName,
+          },
+          awayTeam: {
+            id: safeTeamId(m.away_team_id),
+            name: awayName,
+          },
           score: {
             fullTime: { home: m.home_score, away: m.away_score },
           },
