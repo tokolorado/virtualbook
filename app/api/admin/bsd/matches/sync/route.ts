@@ -135,6 +135,28 @@ type OddsUpsertRow = {
   raw_source: UnknownRecord;
 };
 
+type MatchResultSyncRow = {
+  match_id: number;
+  status: string;
+  home_score: number;
+  away_score: number;
+  updated_at: string;
+};
+
+type ExistingMatchResultRow = {
+  match_id: number | string;
+  status: string | null;
+  home_score: number | null;
+  away_score: number | null;
+};
+
+type MatchResultsSyncStats = {
+  attempted: number;
+  inserted: number;
+  updated: number;
+  unchanged: number;
+};
+
 function jsonError(
   message: string,
   status = 500,
@@ -821,6 +843,123 @@ function buildOddsRows(args: {
   return rows;
 }
 
+
+function buildMatchResultRows(matchRows: MatchUpsertRow[]): MatchResultSyncRow[] {
+  const rows = matchRows
+    .filter((row) => {
+      return (
+        row.status === "FINISHED" &&
+        row.home_score !== null &&
+        row.away_score !== null
+      );
+    })
+    .map((row) => ({
+      match_id: row.id,
+      status: "FINISHED",
+      home_score: row.home_score as number,
+      away_score: row.away_score as number,
+      updated_at: row.last_sync_at,
+    }));
+
+  return uniqueBy(rows, (row) => String(row.match_id));
+}
+
+async function syncFinishedMatchResults(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  rows: MatchResultSyncRow[]
+): Promise<MatchResultsSyncStats> {
+  if (!rows.length) {
+    return {
+      attempted: 0,
+      inserted: 0,
+      updated: 0,
+      unchanged: 0,
+    };
+  }
+
+  const matchIds = rows.map((row) => row.match_id);
+
+  const { data: existingData, error: existingError } = await supabase
+    .from("match_results")
+    .select("match_id,status,home_score,away_score")
+    .in("match_id", matchIds);
+
+  if (existingError) {
+    throw new Error(`match_results read failed: ${existingError.message}`);
+  }
+
+  const existingByMatchId = new Map<number, ExistingMatchResultRow>();
+
+  for (const row of (existingData ?? []) as ExistingMatchResultRow[]) {
+    existingByMatchId.set(Number(row.match_id), row);
+  }
+
+  const rowsToInsert = rows.filter(
+    (row) => !existingByMatchId.has(row.match_id)
+  );
+
+  if (rowsToInsert.length > 0) {
+    const { error: insertError } = await supabase
+      .from("match_results")
+      .insert(rowsToInsert);
+
+    if (insertError) {
+      throw new Error(`match_results insert failed: ${insertError.message}`);
+    }
+  }
+
+  let updated = 0;
+  let unchanged = 0;
+
+  for (const row of rows) {
+    const existing = existingByMatchId.get(row.match_id);
+
+    if (!existing) continue;
+
+    const existingHomeScore =
+      existing.home_score === null ? null : Number(existing.home_score);
+
+    const existingAwayScore =
+      existing.away_score === null ? null : Number(existing.away_score);
+
+    const isSame =
+      existing.status === row.status &&
+      existingHomeScore === row.home_score &&
+      existingAwayScore === row.away_score;
+
+    if (isSame) {
+      unchanged += 1;
+      continue;
+    }
+
+    const { error: updateError } = await supabase
+      .from("match_results")
+      .update({
+        status: row.status,
+        home_score: row.home_score,
+        away_score: row.away_score,
+        updated_at: row.updated_at,
+      })
+      .eq("match_id", row.match_id);
+
+    if (updateError) {
+      throw new Error(
+        `match_results update failed for match ${row.match_id}: ${updateError.message}`
+      );
+    }
+
+    updated += 1;
+  }
+
+  return {
+    attempted: rows.length,
+    inserted: rowsToInsert.length,
+    updated,
+    unchanged,
+  };
+}
+
+
 export async function GET(req: Request): Promise<Response> {
   const auth = requireCronSecret(req);
   if (!auth.ok) return auth.response;
@@ -1029,8 +1168,17 @@ export async function GET(req: Request): Promise<Response> {
       (row) => `${row.match_id}__${row.market_id}__${row.selection}`
     );
 
+    const matchResultRows = buildMatchResultRows(uniqueMatchRows);
+
     let upsertedMatchesCount = 0;
     let upsertedOddsCount = 0;
+
+    let matchResultsSync: MatchResultsSyncStats = {
+      attempted: matchResultRows.length,
+      inserted: 0,
+      updated: 0,
+      unchanged: 0,
+    };
 
     if (!dryRun && uniqueMatchRows.length > 0) {
       const { error: matchesUpsertError } = await supabase
@@ -1060,6 +1208,13 @@ export async function GET(req: Request): Promise<Response> {
       }
 
       upsertedOddsCount = uniqueOddsRows.length;
+    }
+
+    if (!dryRun && matchResultRows.length > 0) {
+      matchResultsSync = await syncFinishedMatchResults(
+        supabase,
+        matchResultRows
+      );
     }
 
     const createdNewCount = previewRows.filter(
@@ -1092,6 +1247,12 @@ export async function GET(req: Request): Promise<Response> {
       uniqueMatchRowsCount: uniqueMatchRows.length,
       builtOddsRowsCount: oddsRows.length,
       uniqueOddsRowsCount: uniqueOddsRows.length,
+      builtMatchResultRowsCount: matchResultRows.length,
+      syncedMatchResultsCount:
+        matchResultsSync.inserted + matchResultsSync.updated,
+      insertedMatchResultsCount: matchResultsSync.inserted,
+      updatedMatchResultsCount: matchResultsSync.updated,
+      unchangedMatchResultsCount: matchResultsSync.unchanged,
 
       upsertedMatchesCount,
       upsertedOddsCount,
