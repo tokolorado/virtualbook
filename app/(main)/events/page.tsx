@@ -14,6 +14,34 @@ import { useBetSlip } from "@/lib/BetSlipContext";
 type Pick = "1" | "X" | "2";
 type SortMode = "smart" | "time" | "league";
 
+type MatchPrediction = {
+  source: string | null;
+  market: string | null;
+  predictedScore: string | null;
+  predictedHomeScore: number | null;
+  predictedAwayScore: number | null;
+  predictedResult: string | null;
+  predictedLabel: string | null;
+  expectedHomeGoals: number | null;
+  expectedAwayGoals: number | null;
+  probabilities: {
+    homeWin: number | null;
+    draw: number | null;
+    awayWin: number | null;
+    over15: number | null;
+    over25: number | null;
+    over35: number | null;
+    bttsYes: number | null;
+  };
+  confidence: number | null;
+  modelVersion: string | null;
+  matchConfidence: string | null;
+  matchScore: number | null;
+  sourcePredictionId: string | null;
+  sourceEventId: string | null;
+  updatedAt: string | null;
+};
+
 type Match = {
   id: string;
   competitionCode: string;
@@ -33,6 +61,7 @@ type Match = {
   minute: number | null;
   injuryTime: number | null;
   odds: { "1": number | null; X: number | null; "2": number | null };
+  prediction: MatchPrediction | null;
 };
 
 type Odds1x2DbRow = {
@@ -116,6 +145,94 @@ function safeInt(v: unknown): number | null {
   const n = typeof v === "number" ? v : Number(v);
   if (!Number.isFinite(n)) return null;
   return Math.trunc(n);
+}
+
+function safeString(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+
+  const s = String(v).trim();
+  return s.length > 0 ? s : null;
+}
+
+function buildPredictionFromPayload(raw: any): MatchPrediction | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const predictedHomeScore = safeInt(raw?.predictedHomeScore);
+  const predictedAwayScore = safeInt(raw?.predictedAwayScore);
+
+  const predictedScore =
+    safeString(raw?.predictedScore) ??
+    (predictedHomeScore !== null && predictedAwayScore !== null
+      ? `${predictedHomeScore}-${predictedAwayScore}`
+      : null);
+
+  const probabilitiesRaw =
+    raw?.probabilities && typeof raw.probabilities === "object"
+      ? raw.probabilities
+      : {};
+
+  const prediction: MatchPrediction = {
+    source: safeString(raw?.source),
+    market: safeString(raw?.market),
+    predictedScore,
+    predictedHomeScore,
+    predictedAwayScore,
+    predictedResult: safeString(raw?.predictedResult),
+    predictedLabel: safeString(raw?.predictedLabel),
+    expectedHomeGoals: safeNum(raw?.expectedHomeGoals),
+    expectedAwayGoals: safeNum(raw?.expectedAwayGoals),
+    probabilities: {
+      homeWin: safeNum(probabilitiesRaw?.homeWin),
+      draw: safeNum(probabilitiesRaw?.draw),
+      awayWin: safeNum(probabilitiesRaw?.awayWin),
+      over15: safeNum(probabilitiesRaw?.over15),
+      over25: safeNum(probabilitiesRaw?.over25),
+      over35: safeNum(probabilitiesRaw?.over35),
+      bttsYes: safeNum(probabilitiesRaw?.bttsYes),
+    },
+    confidence: safeNum(raw?.confidence),
+    modelVersion: safeString(raw?.modelVersion),
+    matchConfidence: safeString(raw?.matchConfidence),
+    matchScore: safeNum(raw?.matchScore),
+    sourcePredictionId: safeString(raw?.sourcePredictionId),
+    sourceEventId: safeString(raw?.sourceEventId),
+    updatedAt: safeString(raw?.updatedAt),
+  };
+
+  const hasUsefulData =
+    prediction.predictedScore ||
+    prediction.predictedHomeScore !== null ||
+    prediction.predictedAwayScore !== null ||
+    prediction.expectedHomeGoals !== null ||
+    prediction.expectedAwayGoals !== null ||
+    prediction.confidence !== null;
+
+  return hasUsefulData ? prediction : null;
+}
+
+function formatPredictionPercent(value: unknown) {
+  const n = safeNum(value);
+  if (n === null) return "—";
+
+  return `${n.toFixed(n >= 10 ? 0 : 1)}%`;
+}
+
+function formatPredictionNumber(value: unknown) {
+  const n = safeNum(value);
+  if (n === null) return "—";
+
+  return n.toFixed(2);
+}
+
+function predictionPickLabel(prediction: MatchPrediction) {
+  const result = String(prediction.predictedResult ?? "").toUpperCase();
+  const label = String(prediction.predictedLabel ?? "").toLowerCase();
+
+  if (result === "H" || label === "home") return "1";
+  if (result === "D" || label === "draw") return "X";
+  if (result === "A" || label === "away") return "2";
+
+  return "—";
 }
 
 function formatForm(form?: string | null) {
@@ -481,6 +598,7 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
           X: m?.odds?.X ?? null,
           "2": m?.odds?.["2"] ?? null,
         },
+        prediction: buildPredictionFromPayload(m?.prediction),
       });
     }
   }
@@ -769,6 +887,91 @@ function MatchStatusPill({
   }
 
   return <SmallPill tone="green">Pre-match</SmallPill>;
+}
+
+function PredictionPanel({
+  prediction,
+  compact = false,
+}: {
+  prediction: MatchPrediction | null;
+  compact?: boolean;
+}) {
+  if (!prediction) return null;
+
+  const pick = predictionPickLabel(prediction);
+  const source = prediction.source?.toUpperCase() ?? "AI";
+  const model = prediction.modelVersion ?? null;
+
+  return (
+    <div
+      className={cn(
+        "mt-4 rounded-2xl border border-sky-500/20 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.13),transparent_34%),linear-gradient(135deg,rgba(8,47,73,0.18),rgba(5,5,5,0.92))] p-3",
+        compact && "p-3"
+      )}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.2em] text-sky-300/80">
+            AI prediction
+          </div>
+          <div className="mt-1 text-xs text-neutral-400">
+            {source}
+            {model ? ` • ${model}` : ""}
+            {prediction.matchConfidence ? ` • ${prediction.matchConfidence}` : ""}
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div className="text-2xl font-black tracking-tight text-white">
+            {prediction.predictedScore ?? "—"}
+          </div>
+          <div className="mt-0.5 text-[11px] text-neutral-400">
+            typ {pick} • pewność {formatPredictionPercent(prediction.confidence)}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+        <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
+          <div className="text-neutral-500">1</div>
+          <div className="mt-1 font-semibold text-white">
+            {formatPredictionPercent(prediction.probabilities.homeWin)}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
+          <div className="text-neutral-500">X</div>
+          <div className="mt-1 font-semibold text-white">
+            {formatPredictionPercent(prediction.probabilities.draw)}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
+          <div className="text-neutral-500">2</div>
+          <div className="mt-1 font-semibold text-white">
+            {formatPredictionPercent(prediction.probabilities.awayWin)}
+          </div>
+        </div>
+      </div>
+
+      {!compact ? (
+        <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-neutral-400">
+          <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1">
+            xG {formatPredictionNumber(prediction.expectedHomeGoals)} :{" "}
+            {formatPredictionNumber(prediction.expectedAwayGoals)}
+          </span>
+
+          <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1">
+            O2.5 {formatPredictionPercent(prediction.probabilities.over25)}
+          </span>
+
+          <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1">
+            BTTS {formatPredictionPercent(prediction.probabilities.bttsYes)}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function LeagueButton({
@@ -1446,6 +1649,11 @@ export default function EventsPage() {
     [filteredMatches]
   );
 
+  const matchesWithPredictionsCount = useMemo(
+    () => filteredMatches.filter((m) => !!m.prediction).length,
+    [filteredMatches]
+  );
+
   const openSectionTitle =
     selectedDate === todayLocalYYYYMMDD() ? "Dziś" : "Zaplanowane";
 
@@ -1655,6 +1863,8 @@ export default function EventsPage() {
             highlight={hasVisibleScore(m)}
           />
         </div>
+        
+        <PredictionPanel prediction={m.prediction} compact />
 
         <div className="mt-4">{renderMarketButtons(m)}</div>
 
@@ -1704,6 +1914,8 @@ export default function EventsPage() {
               <TeamNameLine name={m.home} score={m.homeScore} />
               <TeamNameLine name={m.away} score={m.awayScore} />
             </div>
+
+            <PredictionPanel prediction={m.prediction} />
 
             <div className="mt-3 text-xs text-neutral-500 transition group-hover:text-neutral-300">
               Kliknij kartę, aby zobaczyć wszystkie rynki
@@ -2032,6 +2244,13 @@ export default function EventsPage() {
                     })}
                   </SmallPill>
                 ) : null}
+
+                <SmallPill tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}>
+                  AI predictions:{" "}
+                  <span className="ml-1 font-semibold text-white">
+                    {matchesWithPredictionsCount}
+                  </span>
+                </SmallPill>
 
                 {beyondHorizon ? (
                   <SmallPill tone="yellow">Poza horyzontem danych</SmallPill>
