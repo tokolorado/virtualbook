@@ -213,7 +213,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { data, error } = await admin.rpc("place_bet_builder", {
+    const { data, error } = await user.supabase.rpc("place_bet_builder", {
       p_user_id: user.userId,
       p_stake: stake,
       p_items: payloadItems,
