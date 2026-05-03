@@ -22,13 +22,21 @@ type BsdSyncPayload = {
   ok?: boolean;
   date?: string;
   dryRun?: boolean;
-  upsertedMatchesCount?: number;
-  upsertedOddsCount?: number;
+
+  fetchedEventsCount?: number;
+  eligibleEventsCount?: number;
   uniqueMatchRowsCount?: number;
   uniqueOddsRowsCount?: number;
-  eligibleEventsCount?: number;
-  fetchedEventsCount?: number;
+  upsertedMatchesCount?: number;
+  upsertedOddsCount?: number;
   skippedCount?: number;
+
+  builtMatchResultRowsCount?: number;
+  syncedMatchResultsCount?: number;
+  insertedMatchResultsCount?: number;
+  updatedMatchResultsCount?: number;
+  unchangedMatchResultsCount?: number;
+
   error?: string;
   details?: unknown;
 };
@@ -42,7 +50,10 @@ function jsonError(
   status = 400,
   extra?: Record<string, unknown>
 ) {
-  return NextResponse.json({ ok: false, error: message, ...(extra ?? {}) }, { status });
+  return NextResponse.json(
+    { ok: false, error: message, ...(extra ?? {}) },
+    { status }
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -242,6 +253,7 @@ export async function POST(req: Request) {
     date: string;
     ok: boolean;
     status: number;
+
     fetchedEventsCount: number;
     eligibleEventsCount: number;
     uniqueMatchRowsCount: number;
@@ -249,6 +261,13 @@ export async function POST(req: Request) {
     upsertedMatchesCount: number;
     upsertedOddsCount: number;
     skippedCount: number;
+
+    builtMatchResultRowsCount: number;
+    syncedMatchResultsCount: number;
+    insertedMatchResultsCount: number;
+    updatedMatchResultsCount: number;
+    unchangedMatchResultsCount: number;
+
     error: string | null;
   }> = [];
 
@@ -274,6 +293,7 @@ export async function POST(req: Request) {
       date,
       ok: result.ok,
       status: result.status,
+
       fetchedEventsCount: toNumber(payload.fetchedEventsCount),
       eligibleEventsCount: toNumber(payload.eligibleEventsCount),
       uniqueMatchRowsCount: toNumber(payload.uniqueMatchRowsCount),
@@ -281,6 +301,13 @@ export async function POST(req: Request) {
       upsertedMatchesCount: toNumber(payload.upsertedMatchesCount),
       upsertedOddsCount: toNumber(payload.upsertedOddsCount),
       skippedCount: toNumber(payload.skippedCount),
+
+      builtMatchResultRowsCount: toNumber(payload.builtMatchResultRowsCount),
+      syncedMatchResultsCount: toNumber(payload.syncedMatchResultsCount),
+      insertedMatchResultsCount: toNumber(payload.insertedMatchResultsCount),
+      updatedMatchResultsCount: toNumber(payload.updatedMatchResultsCount),
+      unchangedMatchResultsCount: toNumber(payload.unchangedMatchResultsCount),
+
       error: payload.error ?? null,
     });
 
@@ -305,6 +332,13 @@ export async function POST(req: Request) {
       acc.upsertedMatchesCount += row.upsertedMatchesCount;
       acc.upsertedOddsCount += row.upsertedOddsCount;
       acc.skippedCount += row.skippedCount;
+
+      acc.builtMatchResultRowsCount += row.builtMatchResultRowsCount;
+      acc.syncedMatchResultsCount += row.syncedMatchResultsCount;
+      acc.insertedMatchResultsCount += row.insertedMatchResultsCount;
+      acc.updatedMatchResultsCount += row.updatedMatchResultsCount;
+      acc.unchangedMatchResultsCount += row.unchangedMatchResultsCount;
+
       return acc;
     },
     {
@@ -315,6 +349,12 @@ export async function POST(req: Request) {
       upsertedMatchesCount: 0,
       upsertedOddsCount: 0,
       skippedCount: 0,
+
+      builtMatchResultRowsCount: 0,
+      syncedMatchResultsCount: 0,
+      insertedMatchResultsCount: 0,
+      updatedMatchResultsCount: 0,
+      unchangedMatchResultsCount: 0,
     }
   );
 
