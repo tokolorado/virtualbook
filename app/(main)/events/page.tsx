@@ -922,11 +922,14 @@ function PredictionPanel({
         </div>
 
         <div className="text-right">
-          <div className="text-2xl font-black tracking-tight text-white">
+          <div className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">
+            Najbardziej prawdopodobny wynik
+          </div>
+          <div className="mt-1 text-2xl font-black tracking-tight text-white">
             {prediction.predictedScore ?? "—"}
           </div>
           <div className="mt-0.5 text-[11px] text-neutral-400">
-            typ {pick} • pewność {formatPredictionPercent(prediction.confidence)}
+            faworyt {pick} • pewność {formatPredictionPercent(prediction.confidence)}
           </div>
         </div>
       </div>
