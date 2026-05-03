@@ -652,7 +652,7 @@ function buildMatchRow(args: {
   const homeTeamObj = readTeamObject(args.event, "home");
   const awayTeamObj = readTeamObject(args.event, "away");
 
-  const finalScoreAllowed = isFinishedStatus(status);
+  const scoreAllowed = isFinishedStatus(status) || isLiveStatus(status);
 
   return {
     id: args.existingMatch?.existingMatchId ?? syntheticMatchId(eventIdNumber),
@@ -669,8 +669,8 @@ function buildMatchRow(args: {
     home_team_id: readTeamId(args.event, "home"),
     away_team_id: readTeamId(args.event, "away"),
 
-    home_score: finalScoreAllowed ? readInt(args.event, "home_score") : null,
-    away_score: finalScoreAllowed ? readInt(args.event, "away_score") : null,
+    home_score: scoreAllowed ? readInt(args.event, "home_score") : null,
+    away_score: scoreAllowed ? readInt(args.event, "away_score") : null,
     minute: isLiveStatus(status) ? readInt(args.event, "current_minute") : null,
     injury_time: null,
     last_sync_at: args.fetchedAt,
