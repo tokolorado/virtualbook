@@ -183,6 +183,34 @@ type DisplayScore = {
   updatedAt: string;
 };
 
+type PredictionDisplay = {
+  source: string;
+  market: string;
+  predictedScore: string | null;
+  predictedHomeScore: number | null;
+  predictedAwayScore: number | null;
+  predictedResult: string | null;
+  predictedLabel: string | null;
+  expectedHomeGoals: number | null;
+  expectedAwayGoals: number | null;
+  probabilities: {
+    homeWin: number | null;
+    draw: number | null;
+    awayWin: number | null;
+    over15: number | null;
+    over25: number | null;
+    over35: number | null;
+    bttsYes: number | null;
+  };
+  confidence: number | null;
+  modelVersion: string | null;
+  matchConfidence: string | null;
+  matchScore: number | null;
+  sourcePredictionId: string | null;
+  sourceEventId: string | null;
+  updatedAt: string | null;
+};
+
 function hasAnyScore(home: number | null, away: number | null) {
   return home !== null || away !== null;
 }
@@ -374,6 +402,92 @@ export async function GET(req: Request) {
     }
 
     return oddsMap;
+  }
+
+
+    async function readPredictionsMapFromDb(matchIds: number[]) {
+    const safeIds = Array.from(
+      new Set(matchIds.filter((x) => Number.isFinite(x)))
+    );
+
+    const predictionsMap = new Map<number, PredictionDisplay>();
+
+    if (!safeIds.length) return predictionsMap;
+
+    const { data, error } = await supabase
+      .from("event_predictions")
+      .select(
+        "match_id, source, market, predicted_score, predicted_home_score, predicted_away_score, predicted_result, predicted_label, expected_home_goals, expected_away_goals, probability_home_win, probability_draw, probability_away_win, probability_over_15, probability_over_25, probability_over_35, probability_btts_yes, confidence, model_version, match_confidence, match_score, source_prediction_id, source_event_id, updated_at"
+      )
+      .in("match_id", safeIds)
+      .eq("source", "bsd")
+      .eq("market", "correct_score")
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      throw new Error(`DB predictions read error: ${error.message}`);
+    }
+
+    for (const row of data ?? []) {
+      const matchId = Number((row as any)?.match_id);
+
+      if (!Number.isFinite(matchId)) continue;
+      if (predictionsMap.has(matchId)) continue;
+
+      predictionsMap.set(matchId, {
+        source: String((row as any)?.source ?? "bsd"),
+        market: String((row as any)?.market ?? "correct_score"),
+
+        predictedScore: (row as any)?.predicted_score
+          ? String((row as any).predicted_score)
+          : null,
+        predictedHomeScore: safeInt((row as any)?.predicted_home_score),
+        predictedAwayScore: safeInt((row as any)?.predicted_away_score),
+
+        predictedResult: (row as any)?.predicted_result
+          ? String((row as any).predicted_result)
+          : null,
+        predictedLabel: (row as any)?.predicted_label
+          ? String((row as any).predicted_label)
+          : null,
+
+        expectedHomeGoals: safeScore((row as any)?.expected_home_goals),
+        expectedAwayGoals: safeScore((row as any)?.expected_away_goals),
+
+        probabilities: {
+          homeWin: safeScore((row as any)?.probability_home_win),
+          draw: safeScore((row as any)?.probability_draw),
+          awayWin: safeScore((row as any)?.probability_away_win),
+          over15: safeScore((row as any)?.probability_over_15),
+          over25: safeScore((row as any)?.probability_over_25),
+          over35: safeScore((row as any)?.probability_over_35),
+          bttsYes: safeScore((row as any)?.probability_btts_yes),
+        },
+
+        confidence: safeScore((row as any)?.confidence),
+        modelVersion: (row as any)?.model_version
+          ? String((row as any).model_version)
+          : null,
+
+        matchConfidence: (row as any)?.match_confidence
+          ? String((row as any).match_confidence)
+          : null,
+        matchScore: safeScore((row as any)?.match_score),
+
+        sourcePredictionId: (row as any)?.source_prediction_id
+          ? String((row as any).source_prediction_id)
+          : null,
+        sourceEventId: (row as any)?.source_event_id
+          ? String((row as any).source_event_id)
+          : null,
+
+        updatedAt: (row as any)?.updated_at
+          ? String((row as any).updated_at)
+          : null,
+      });
+    }
+
+    return predictionsMap;
   }
 
   async function fetchAndUpsertMatches(leagueCode: string, leagueName: string) {
@@ -697,6 +811,21 @@ export async function GET(req: Request) {
     });
   }
 
+    let predictionsMap = new Map<number, PredictionDisplay>();
+
+  try {
+    const allMatchIds = allDbMatches
+      .map((m) => Number(m.id))
+      .filter((x) => Number.isFinite(x));
+
+    predictionsMap = await readPredictionsMapFromDb(allMatchIds);
+  } catch (e: any) {
+    errors.push({
+      type: "db_predictions_read",
+      error: e?.message ?? String(e),
+    });
+  }
+
   for (const lg of LEAGUES) {
     const leagueMatches = finalMatchesByLeague.get(lg.code) ?? [];
 
@@ -713,6 +842,8 @@ export async function GET(req: Request) {
           X: null,
           "2": null,
         };
+
+        const prediction = predictionsMap.get(Number(m.id)) ?? null;
 
         return {
           id: m.id,
@@ -733,6 +864,7 @@ export async function GET(req: Request) {
           },
           displayScore,
           odds,
+          prediction,
         };
       }),
     };
