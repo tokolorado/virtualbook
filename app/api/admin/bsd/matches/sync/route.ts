@@ -118,6 +118,9 @@ type OddsUpsertRow = {
   book_odds: number;
   book_prob: number;
 
+  home_team: string | null;
+  away_team: string | null;
+
   source: string;
   source_event_id: string;
   pricing_method: string;
@@ -686,6 +689,8 @@ function collectOddsInputs(event: UnknownRecord): OddsInput[] {
 function buildOddsRows(args: {
   event: UnknownRecord;
   matchId: number;
+  homeTeam: string | null;
+  awayTeam: string | null;
   fetchedAt: string;
 }): OddsUpsertRow[] {
   const eventIdNumber = readInt(args.event, "id");
@@ -741,6 +746,9 @@ function buildOddsRows(args: {
         fair_odds: fairOdds,
         book_odds: input.bookOdds,
         book_prob: impliedProbability,
+
+        home_team: args.homeTeam,
+        away_team: args.awayTeam,
 
         source: "bsd",
         source_event_id: sourceEventId,
@@ -940,6 +948,8 @@ export async function GET(req: Request): Promise<Response> {
       const eventOddsRows = buildOddsRows({
         event,
         matchId: matchRow.id,
+        homeTeam: matchRow.home_team,
+        awayTeam: matchRow.away_team,
         fetchedAt,
       });
 
