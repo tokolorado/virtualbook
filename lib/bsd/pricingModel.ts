@@ -3,12 +3,15 @@
 type UnknownRecord = Record<string, unknown>;
 
 export const BSD_PRICING_MODEL_VERSION = "bsd_pricing_v2";
+const DEFAULT_MODEL_MARGIN = 0.08;
 
 export type OddsInput = {
   marketId: string;
   selection: string;
   field: string;
   bookOdds: number;
+  fairProbability?: number;
+  pricingMargin?: number;
 };
 
 export type PricingFeatureSnapshot = {
@@ -131,7 +134,10 @@ function roundNumber(value: number, digits = 4): number {
   return Number(value.toFixed(digits));
 }
 
-function oddFromProbability(probability: number, margin = 0.08): number {
+function oddFromProbability(
+  probability: number,
+  margin = DEFAULT_MODEL_MARGIN
+): number {
   const minOdd = 1.01;
   const maxOdd = 50;
 
@@ -536,17 +542,23 @@ export function buildModelOddsInputs(event: UnknownRecord): OddsInput[] {
       0.97
     );
 
-  const input = (
+    const input = (
     marketId: string,
     selection: string,
     probability: number,
     field: string
-  ): OddsInput => ({
-    marketId,
-    selection,
-    field,
-    bookOdds: oddFromProbability(probability),
-  });
+    ): OddsInput => {
+    const fairProbability = clamp(probability, 0.001, 0.999);
+
+    return {
+        marketId,
+        selection,
+        field,
+        bookOdds: oddFromProbability(fairProbability),
+        fairProbability,
+        pricingMargin: DEFAULT_MODEL_MARGIN,
+    };
+    };
 
   const rows: OddsInput[] = [];
 

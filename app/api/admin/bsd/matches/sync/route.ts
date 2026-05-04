@@ -15,6 +15,7 @@ export const dynamic = "force-dynamic";
 
 const SYNTHETIC_ID_OFFSET = 900_000_000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
+const NON_EXCLUSIVE_MARKET_IDS = new Set(["dc", "ht_dc"]);
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -112,6 +113,8 @@ type OddsInput = {
   selection: string;
   field: string;
   bookOdds: number;
+  fairProbability?: number;
+  pricingMargin?: number;
 };
 
 type OddsUpsertRow = {
@@ -801,19 +804,29 @@ function buildOddsRows(args: {
   for (const [marketId, marketInputs] of groups.entries()) {
     if (marketInputs.length < 2) continue;
 
+    const isNonExclusiveMarket = NON_EXCLUSIVE_MARKET_IDS.has(marketId);
+
     const impliedSum = marketInputs.reduce((sum, input) => {
       return sum + 1 / input.bookOdds;
     }, 0);
 
     if (!Number.isFinite(impliedSum) || impliedSum <= 0) continue;
 
-    const margin = impliedSum - 1;
+    const exclusiveMarketMargin = impliedSum - 1;
 
     for (const input of marketInputs) {
       const impliedProbability = 1 / input.bookOdds;
-      const fairProb = impliedProbability / impliedSum;
-      const fairOdds = 1 / fairProb;
       const isModel = input.field.startsWith("model_");
+
+      const fairProb = isNonExclusiveMarket
+        ? input.fairProbability ?? impliedProbability
+        : impliedProbability / impliedSum;
+
+      const fairOdds = 1 / fairProb;
+
+      const margin = isNonExclusiveMarket
+        ? input.pricingMargin ?? 0
+        : exclusiveMarketMargin;
 
       if (!Number.isFinite(impliedProbability) || impliedProbability <= 0) {
         continue;
@@ -861,8 +874,10 @@ function buildOddsRows(args: {
           selection: input.selection,
           field: input.field,
           book_odds: input.bookOdds,
+          fair_probability_source: input.fairProbability ?? null,
           implied_probability: impliedProbability,
           implied_sum: impliedSum,
+          market_is_exclusive: !isNonExclusiveMarket,
           fair_prob: fairProb,
           fair_odds: fairOdds,
           margin,
