@@ -137,9 +137,15 @@ type OddsUpsertRow = {
 
 type MatchResultSyncRow = {
   match_id: number;
-  status: string;
+  status: "FINISHED";
   home_score: number;
   away_score: number;
+  ht_home_score: number | null;
+  ht_away_score: number | null;
+  sh_home_score: number | null;
+  sh_away_score: number | null;
+  started_at: string | null;
+  finished_at: string;
   updated_at: string;
 };
 
@@ -148,6 +154,10 @@ type ExistingMatchResultRow = {
   status: string | null;
   home_score: number | null;
   away_score: number | null;
+  ht_home_score: number | null;
+  ht_away_score: number | null;
+  sh_home_score: number | null;
+  sh_away_score: number | null;
 };
 
 type MatchResultsSyncStats = {
@@ -853,13 +863,34 @@ function buildMatchResultRows(matchRows: MatchUpsertRow[]): MatchResultSyncRow[]
         row.away_score !== null
       );
     })
-    .map((row) => ({
-      match_id: row.id,
-      status: "FINISHED",
-      home_score: row.home_score as number,
-      away_score: row.away_score as number,
-      updated_at: row.last_sync_at,
-    }));
+    .map((row) => {
+      const htHomeScore = readInt(row.raw_bsd, "home_score_ht");
+      const htAwayScore = readInt(row.raw_bsd, "away_score_ht");
+
+      const hasHalfTimeScore = htHomeScore !== null && htAwayScore !== null;
+
+      const shHomeScore = hasHalfTimeScore
+        ? Math.max(0, Number(row.home_score) - htHomeScore)
+        : null;
+
+      const shAwayScore = hasHalfTimeScore
+        ? Math.max(0, Number(row.away_score) - htAwayScore)
+        : null;
+
+      return {
+        match_id: row.id,
+        status: "FINISHED" as const,
+        home_score: row.home_score as number,
+        away_score: row.away_score as number,
+        ht_home_score: htHomeScore,
+        ht_away_score: htAwayScore,
+        sh_home_score: shHomeScore,
+        sh_away_score: shAwayScore,
+        started_at: row.utc_date,
+        finished_at: row.last_sync_at,
+        updated_at: row.last_sync_at,
+      };
+    });
 
   return uniqueBy(rows, (row) => String(row.match_id));
 }
@@ -881,7 +912,9 @@ async function syncFinishedMatchResults(
 
   const { data: existingData, error: existingError } = await supabase
     .from("match_results")
-    .select("match_id,status,home_score,away_score")
+    .select(
+      "match_id,status,home_score,away_score,ht_home_score,ht_away_score,sh_home_score,sh_away_score"
+    )
     .in("match_id", matchIds);
 
   if (existingError) {
@@ -922,10 +955,26 @@ async function syncFinishedMatchResults(
     const existingAwayScore =
       existing.away_score === null ? null : Number(existing.away_score);
 
+    const existingHtHomeScore =
+      existing.ht_home_score === null ? null : Number(existing.ht_home_score);
+
+    const existingHtAwayScore =
+      existing.ht_away_score === null ? null : Number(existing.ht_away_score);
+
+    const existingShHomeScore =
+      existing.sh_home_score === null ? null : Number(existing.sh_home_score);
+
+    const existingShAwayScore =
+      existing.sh_away_score === null ? null : Number(existing.sh_away_score);
+
     const isSame =
       existing.status === row.status &&
       existingHomeScore === row.home_score &&
-      existingAwayScore === row.away_score;
+      existingAwayScore === row.away_score &&
+      existingHtHomeScore === row.ht_home_score &&
+      existingHtAwayScore === row.ht_away_score &&
+      existingShHomeScore === row.sh_home_score &&
+      existingShAwayScore === row.sh_away_score;
 
     if (isSame) {
       unchanged += 1;
@@ -938,6 +987,12 @@ async function syncFinishedMatchResults(
         status: row.status,
         home_score: row.home_score,
         away_score: row.away_score,
+        ht_home_score: row.ht_home_score,
+        ht_away_score: row.ht_away_score,
+        sh_home_score: row.sh_home_score,
+        sh_away_score: row.sh_away_score,
+        started_at: row.started_at,
+        finished_at: row.finished_at,
         updated_at: row.updated_at,
       })
       .eq("match_id", row.match_id);
