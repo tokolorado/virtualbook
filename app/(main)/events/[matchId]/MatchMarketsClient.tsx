@@ -17,6 +17,7 @@ type OddsRow = {
   book_odds: number;
   updated_at: string;
   source?: string | null;
+  pricing_method?: string | null;
 };
 
 type MatchUI = {
@@ -1096,7 +1097,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           supabase
             .from("odds")
             .select(
-              "match_id, market_id, selection, book_odds, updated_at, source"
+              "match_id, market_id, selection, book_odds, updated_at, source, pricing_method"
             )
             .eq("match_id", matchIdNum)
             .eq("source", "bsd")
@@ -1253,14 +1254,27 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   ]);
 
   const markets = useMemo(() => {
+    const filteredOddsRows =
+      effectiveIsLive || matchUI.isFinished
+        ? oddsRows.filter((row) => row.pricing_method === "bsd_market_normalized")
+        : oddsRows;
+
     return groupMarkets(
-      oddsRows,
+      filteredOddsRows,
       marketCatalog,
       selectionCatalog,
       matchUI.home,
       matchUI.away
     );
-  }, [oddsRows, marketCatalog, selectionCatalog, matchUI.home, matchUI.away]);
+  }, [
+    oddsRows,
+    marketCatalog,
+    selectionCatalog,
+    matchUI.home,
+    matchUI.away,
+    effectiveIsLive,
+    matchUI.isFinished,
+  ]);
 
   const groupedSections = useMemo(() => {
     const groups = new Map<
