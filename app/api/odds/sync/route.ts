@@ -30,6 +30,11 @@ type BsdSyncPayload = {
   upsertedMatchesCount?: number;
   upsertedOddsCount?: number;
   skippedCount?: number;
+  builtPricingFeatureRowsCount?: number;
+  upsertedPricingFeaturesCount?: number;
+  builtBsdEventFeatureRowsCount?: number;
+  upsertedBsdEventFeaturesCount?: number;
+  modelVersion?: string;
 
   builtMatchResultRowsCount?: number;
   syncedMatchResultsCount?: number;
@@ -261,6 +266,11 @@ export async function POST(req: Request) {
     upsertedMatchesCount: number;
     upsertedOddsCount: number;
     skippedCount: number;
+    builtPricingFeatureRowsCount: number;
+    upsertedPricingFeaturesCount: number;
+    builtBsdEventFeatureRowsCount: number;
+    upsertedBsdEventFeaturesCount: number;
+    modelVersion: string | null;
 
     builtMatchResultRowsCount: number;
     syncedMatchResultsCount: number;
@@ -301,6 +311,12 @@ export async function POST(req: Request) {
       upsertedMatchesCount: toNumber(payload.upsertedMatchesCount),
       upsertedOddsCount: toNumber(payload.upsertedOddsCount),
       skippedCount: toNumber(payload.skippedCount),
+      builtPricingFeatureRowsCount: toNumber(payload.builtPricingFeatureRowsCount),
+      upsertedPricingFeaturesCount: toNumber(payload.upsertedPricingFeaturesCount),
+      builtBsdEventFeatureRowsCount: toNumber(payload.builtBsdEventFeatureRowsCount),
+      upsertedBsdEventFeaturesCount: toNumber(payload.upsertedBsdEventFeaturesCount),
+      modelVersion:
+        typeof payload.modelVersion === "string" ? payload.modelVersion : null,
 
       builtMatchResultRowsCount: toNumber(payload.builtMatchResultRowsCount),
       syncedMatchResultsCount: toNumber(payload.syncedMatchResultsCount),
@@ -332,6 +348,10 @@ export async function POST(req: Request) {
       acc.upsertedMatchesCount += row.upsertedMatchesCount;
       acc.upsertedOddsCount += row.upsertedOddsCount;
       acc.skippedCount += row.skippedCount;
+      acc.builtPricingFeatureRowsCount += row.builtPricingFeatureRowsCount;
+      acc.upsertedPricingFeaturesCount += row.upsertedPricingFeaturesCount;
+      acc.builtBsdEventFeatureRowsCount += row.builtBsdEventFeatureRowsCount;
+      acc.upsertedBsdEventFeaturesCount += row.upsertedBsdEventFeaturesCount;
 
       acc.builtMatchResultRowsCount += row.builtMatchResultRowsCount;
       acc.syncedMatchResultsCount += row.syncedMatchResultsCount;
@@ -349,6 +369,10 @@ export async function POST(req: Request) {
       upsertedMatchesCount: 0,
       upsertedOddsCount: 0,
       skippedCount: 0,
+      builtPricingFeatureRowsCount: 0,
+      upsertedPricingFeaturesCount: 0,
+      builtBsdEventFeatureRowsCount: 0,
+      upsertedBsdEventFeaturesCount: 0,
 
       builtMatchResultRowsCount: 0,
       syncedMatchResultsCount: 0,

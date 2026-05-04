@@ -3,7 +3,12 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { bsdFetchPaginated, normalizeBsdText } from "@/lib/bsd/client";
-import { buildModelOddsInputs } from "@/lib/bsd/pricingModel";
+import {
+  buildBsdEventFeaturesSnapshot,
+  buildModelOddsInputs,
+  buildPricingFeatureSnapshot,
+  BSD_PRICING_MODEL_VERSION,
+} from "@/lib/bsd/pricingModel";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -118,6 +123,7 @@ type OddsUpsertRow = {
   fair_odds: number;
   book_odds: number;
   book_prob: number;
+  is_model: boolean;
 
   margin: number;
   risk_adjustment: number;
@@ -807,6 +813,7 @@ function buildOddsRows(args: {
       const impliedProbability = 1 / input.bookOdds;
       const fairProb = impliedProbability / impliedSum;
       const fairOdds = 1 / fairProb;
+      const isModel = input.field.startsWith("model_");
 
       if (!Number.isFinite(impliedProbability) || impliedProbability <= 0) {
         continue;
@@ -829,6 +836,7 @@ function buildOddsRows(args: {
         fair_odds: fairOdds,
         book_odds: input.bookOdds,
         book_prob: impliedProbability,
+        is_model: isModel,
 
         margin,
         risk_adjustment: 0,
@@ -839,9 +847,9 @@ function buildOddsRows(args: {
 
         source: "bsd",
         source_event_id: sourceEventId,
-        pricing_method: input.field.startsWith("model_")
-        ? "bsd_model_derived"
-        : "bsd_market_normalized",
+        pricing_method: isModel
+          ? "bsd_model_derived"
+          : "bsd_market_normalized",
         raw_count: marketInputs.length,
 
         updated_at: args.fetchedAt,
@@ -858,6 +866,10 @@ function buildOddsRows(args: {
           fair_prob: fairProb,
           fair_odds: fairOdds,
           margin,
+          is_model: isModel,
+          pricing_method: isModel
+            ? "bsd_model_derived"
+            : "bsd_market_normalized",
         },
       });
     }
@@ -1236,10 +1248,113 @@ export async function GET(req: Request): Promise<Response> {
       (row) => `${row.match_id}__${row.market_id}__${row.selection}`
     );
 
+    const oddsCountByMatch = new Map<number, number>();
+
+    for (const row of uniqueOddsRows) {
+      oddsCountByMatch.set(
+        row.match_id,
+        (oddsCountByMatch.get(row.match_id) ?? 0) + 1
+      );
+    }
+
+    const bsdEventFeatureRows = uniqueMatchRows.map((match) => {
+      const snapshot = buildBsdEventFeaturesSnapshot(match.raw_bsd);
+
+      return {
+        match_id: match.id,
+        source_event_id: match.source_event_id,
+        source_league_id: match.source_league_id,
+        source_season_id: match.source_season_id,
+        event_date: match.utc_date,
+
+        home_team: match.home_team,
+        away_team: match.away_team,
+
+        home_xg: snapshot.home_xg,
+        away_xg: snapshot.away_xg,
+        total_xg: snapshot.total_xg,
+
+        home_win_prob: snapshot.home_win_prob,
+        draw_prob: snapshot.draw_prob,
+        away_win_prob: snapshot.away_win_prob,
+        over25_prob: snapshot.over25_prob,
+        btts_prob: snapshot.btts_prob,
+
+        unavailable_home_count: snapshot.unavailable_home_count,
+        unavailable_away_count: snapshot.unavailable_away_count,
+        injured_home_count: snapshot.injured_home_count,
+        injured_away_count: snapshot.injured_away_count,
+        doubtful_home_count: snapshot.doubtful_home_count,
+        doubtful_away_count: snapshot.doubtful_away_count,
+
+        live_home_xg: snapshot.live_home_xg,
+        live_away_xg: snapshot.live_away_xg,
+        live_home_shots: snapshot.live_home_shots,
+        live_away_shots: snapshot.live_away_shots,
+        live_home_shots_on_target: snapshot.live_home_shots_on_target,
+        live_away_shots_on_target: snapshot.live_away_shots_on_target,
+        live_home_possession: snapshot.live_home_possession,
+        live_away_possession: snapshot.live_away_possession,
+
+        model_version: snapshot.model_version,
+        features: snapshot.features,
+        raw_unavailable_players: snapshot.raw_unavailable_players,
+        raw_live_stats: snapshot.raw_live_stats,
+
+        fetched_at: fetchedAt,
+        updated_at: fetchedAt,
+      };
+    });
+
+    const pricingFeatureRows = uniqueMatchRows.map((match) => {
+      const snapshot = buildPricingFeatureSnapshot(match.raw_bsd);
+      const rawFeatures = snapshot.raw_features;
+
+      return {
+        match_id: match.id,
+        source: match.source,
+        source_event_id: match.source_event_id,
+        competition_id: match.competition_id,
+        competition_name: match.competition_name,
+        utc_date: match.utc_date,
+        status: match.status,
+        home_team: match.home_team,
+        away_team: match.away_team,
+        home_team_id: match.home_team_id,
+        away_team_id: match.away_team_id,
+        home_score: match.home_score,
+        away_score: match.away_score,
+        expected_home_goals: snapshot.home_xg,
+        expected_away_goals: snapshot.away_xg,
+        probability_home_win: readNumber(rawFeatures, "probability_home_win"),
+        probability_draw: readNumber(rawFeatures, "probability_draw"),
+        probability_away_win: readNumber(rawFeatures, "probability_away_win"),
+        probability_over_15: readNumber(rawFeatures, "probability_over_15"),
+        probability_over_25: readNumber(rawFeatures, "probability_over_25"),
+        probability_over_35: readNumber(rawFeatures, "probability_over_35"),
+        probability_btts_yes: readNumber(rawFeatures, "probability_btts_yes"),
+        is_neutral_ground: match.is_neutral_ground,
+        is_local_derby: match.is_local_derby,
+        travel_distance_km: match.travel_distance_km,
+        weather_code: match.weather_code,
+        wind_speed: match.wind_speed,
+        temperature_c: match.temperature_c,
+        pitch_condition: match.pitch_condition,
+        attendance: match.attendance,
+        generated_odds_count: oddsCountByMatch.get(match.id) ?? 0,
+        model_version: BSD_PRICING_MODEL_VERSION,
+        last_priced_at: fetchedAt,
+        last_sync_at: fetchedAt,
+        raw_features: snapshot.raw_features,
+      };
+    });
+
     const matchResultRows = buildMatchResultRows(uniqueMatchRows);
 
     let upsertedMatchesCount = 0;
     let upsertedOddsCount = 0;
+    let upsertedPricingFeaturesCount = 0;
+    let upsertedBsdEventFeaturesCount = 0;
 
     let matchResultsSync: MatchResultsSyncStats = {
       attempted: matchResultRows.length,
@@ -1276,6 +1391,34 @@ export async function GET(req: Request): Promise<Response> {
       }
 
       upsertedOddsCount = uniqueOddsRows.length;
+    }
+
+    if (!dryRun && pricingFeatureRows.length > 0) {
+      const { error: pricingFeaturesUpsertError } = await supabase
+        .from("match_pricing_features")
+        .upsert(pricingFeatureRows, { onConflict: "match_id" });
+
+      if (pricingFeaturesUpsertError) {
+        return jsonError("match_pricing_features upsert failed", 500, {
+          details: pricingFeaturesUpsertError.message,
+        });
+      }
+
+      upsertedPricingFeaturesCount = pricingFeatureRows.length;
+    }
+
+    if (!dryRun && bsdEventFeatureRows.length > 0) {
+      const { error: bsdEventFeaturesUpsertError } = await supabase
+        .from("bsd_event_features")
+        .upsert(bsdEventFeatureRows, { onConflict: "match_id" });
+
+      if (bsdEventFeaturesUpsertError) {
+        return jsonError("bsd_event_features upsert failed", 500, {
+          details: bsdEventFeaturesUpsertError.message,
+        });
+      }
+
+      upsertedBsdEventFeaturesCount = bsdEventFeatureRows.length;
     }
 
     if (!dryRun && matchResultRows.length > 0) {
@@ -1315,6 +1458,12 @@ export async function GET(req: Request): Promise<Response> {
       uniqueMatchRowsCount: uniqueMatchRows.length,
       builtOddsRowsCount: oddsRows.length,
       uniqueOddsRowsCount: uniqueOddsRows.length,
+      builtPricingFeatureRowsCount: pricingFeatureRows.length,
+      upsertedPricingFeaturesCount,
+      builtBsdEventFeatureRowsCount: bsdEventFeatureRows.length,
+      upsertedBsdEventFeaturesCount,
+      modelVersion: BSD_PRICING_MODEL_VERSION,
+
       builtMatchResultRowsCount: matchResultRows.length,
       syncedMatchResultsCount:
         matchResultsSync.inserted + matchResultsSync.updated,
@@ -1340,6 +1489,8 @@ export async function GET(req: Request): Promise<Response> {
         syntheticIdOffset: SYNTHETIC_ID_OFFSET,
       },
     });
+
+
   } catch (e: unknown) {
     const err = e as {
       message?: string;
