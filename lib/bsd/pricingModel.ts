@@ -3,6 +3,7 @@
 type UnknownRecord = Record<string, unknown>;
 
 export const BSD_PRICING_MODEL_VERSION = "bsd_pricing_v2";
+
 const DEFAULT_MODEL_MARGIN = 0.08;
 
 export type OddsInput = {
@@ -100,11 +101,18 @@ function readText(obj: UnknownRecord, key: string): string | null {
 
 function readPositiveOdd(obj: UnknownRecord, key: string): number | null {
   const value = readNumber(obj, key);
-  if (value === null || value <= 1 || !Number.isFinite(value)) return null;
+
+  if (value === null || value <= 1 || !Number.isFinite(value)) {
+    return null;
+  }
+
   return value;
 }
 
-function readFirstNumber(obj: UnknownRecord | null, keys: string[]): number | null {
+function readFirstNumber(
+  obj: UnknownRecord | null,
+  keys: string[]
+): number | null {
   if (!obj) return null;
 
   for (const key of keys) {
@@ -115,7 +123,10 @@ function readFirstNumber(obj: UnknownRecord | null, keys: string[]): number | nu
   return null;
 }
 
-function readFirstText(obj: UnknownRecord | null, keys: string[]): string | null {
+function readFirstText(
+  obj: UnknownRecord | null,
+  keys: string[]
+): string | null {
   if (!obj) return null;
 
   for (const key of keys) {
@@ -150,7 +161,11 @@ function oddFromProbability(
 
 function normalizeProbabilities(values: number[]): number[] {
   const sum = values.reduce((acc, value) => acc + value, 0);
-  if (!Number.isFinite(sum) || sum <= 0) return values;
+
+  if (!Number.isFinite(sum) || sum <= 0) {
+    return values;
+  }
+
   return values.map((value) => value / sum);
 }
 
@@ -184,6 +199,35 @@ function readFeatureNumber(event: UnknownRecord, key: string): number | null {
   }
 
   return null;
+}
+
+function normalizeLiveText(value: string | null): string | null {
+  if (value === null) return null;
+  return value.toLowerCase().replace(/[\s_-]+/g, "");
+}
+
+function isLiveOrPausedEvent(event: UnknownRecord): boolean {
+  const status = normalizeLiveText(readText(event, "status"));
+  const period = normalizeLiveText(readText(event, "period"));
+
+  const liveValues = new Set<string>([
+    "live",
+    "inplay",
+    "1sthalf",
+    "firsthalf",
+    "2ndhalf",
+    "secondhalf",
+    "halftime",
+    "ht",
+    "paused",
+    "break",
+    "interval",
+  ]);
+
+  return (
+    (status !== null && liveValues.has(status)) ||
+    (period !== null && liveValues.has(period))
+  );
 }
 
 function estimate1x2Probabilities(event: UnknownRecord): {
@@ -278,16 +322,6 @@ function estimateExpectedGoals(event: UnknownRecord): {
   homeXg: number;
   awayXg: number;
 } {
-  const predictionHomeXg = readFeatureNumber(event, "expected_home_goals");
-  const predictionAwayXg = readFeatureNumber(event, "expected_away_goals");
-
-  if (predictionHomeXg !== null && predictionAwayXg !== null) {
-    return {
-      homeXg: clamp(predictionHomeXg, 0.05, 5.5),
-      awayXg: clamp(predictionAwayXg, 0.05, 5.5),
-    };
-  }
-
   const homeOdd = readPositiveOdd(event, "odds_home");
   const drawOdd = readPositiveOdd(event, "odds_draw");
   const awayOdd = readPositiveOdd(event, "odds_away");
@@ -295,13 +329,25 @@ function estimateExpectedGoals(event: UnknownRecord): {
   const under25Odd = readPositiveOdd(event, "odds_under_25");
 
   let homeStrength = 0.38;
-  let awayStrength = 0.3;
+  let awayStrength = 0.30;
 
-  const probabilities = estimate1x2Probabilities(event);
+  const probabilityHomeWin = readFeatureNumber(event, "probability_home_win");
+  const probabilityDraw = readFeatureNumber(event, "probability_draw");
+  const probabilityAwayWin = readFeatureNumber(event, "probability_away_win");
 
-  if (probabilities.homeWin !== null && probabilities.awayWin !== null) {
-    homeStrength = probabilities.homeWin;
-    awayStrength = probabilities.awayWin;
+  if (
+    probabilityHomeWin !== null &&
+    probabilityDraw !== null &&
+    probabilityAwayWin !== null
+  ) {
+    const [home, , away] = normalizeProbabilities([
+      probabilityHomeWin,
+      probabilityDraw,
+      probabilityAwayWin,
+    ]);
+
+    homeStrength = home;
+    awayStrength = away;
   } else if (homeOdd && drawOdd && awayOdd) {
     const [home, , away] = normalizeProbabilities([
       1 / homeOdd,
@@ -315,20 +361,34 @@ function estimateExpectedGoals(event: UnknownRecord): {
 
   let totalGoals = 2.65;
 
-  const probabilityOver25 = estimateOver25Probability(event);
+  const probabilityOver25 = readFeatureNumber(event, "probability_over_25");
 
   if (probabilityOver25 !== null) {
-    totalGoals = clamp(2.05 + probabilityOver25 * 1.45, 1.7, 4.2);
+    totalGoals = clamp(
+      2.05 + clamp(probabilityOver25, 0.01, 0.99) * 1.45,
+      1.7,
+      4.2
+    );
   } else if (over25Odd && under25Odd) {
     const [over25] = normalizeProbabilities([1 / over25Odd, 1 / under25Odd]);
     totalGoals = clamp(2.05 + over25 * 1.45, 1.7, 4.2);
   }
 
-  const probabilityBttsYes = estimateBttsProbability(event);
+  const probabilityBttsYes = readFeatureNumber(event, "probability_btts_yes");
 
   if (probabilityBttsYes !== null) {
-    totalGoals += (probabilityBttsYes - 0.52) * 0.35;
+    totalGoals += (clamp(probabilityBttsYes, 0.01, 0.99) - 0.52) * 0.35;
+  } else {
+    const bttsYesOdd = readPositiveOdd(event, "odds_btts_yes");
+    const bttsNoOdd = readPositiveOdd(event, "odds_btts_no");
+
+    if (bttsYesOdd && bttsNoOdd) {
+      const [bttsYes] = normalizeProbabilities([1 / bttsYesOdd, 1 / bttsNoOdd]);
+      totalGoals += (bttsYes - 0.52) * 0.35;
+    }
   }
+
+  totalGoals = clamp(totalGoals, 1.7, 4.2);
 
   const liveStats = readRecord(event, "live_stats");
   const homeStats = liveStats ? readRecord(liveStats, "home") : null;
@@ -337,7 +397,11 @@ function estimateExpectedGoals(event: UnknownRecord): {
   const homeLiveXg = homeStats ? readNumber(homeStats, "expected_goals") : null;
   const awayLiveXg = awayStats ? readNumber(awayStats, "expected_goals") : null;
 
-  if (homeLiveXg !== null && awayLiveXg !== null) {
+  if (
+    isLiveOrPausedEvent(event) &&
+    homeLiveXg !== null &&
+    awayLiveXg !== null
+  ) {
     return {
       homeXg: clamp(homeLiveXg, 0.05, 5.5),
       awayXg: clamp(awayLiveXg, 0.05, 5.5),
@@ -347,14 +411,14 @@ function estimateExpectedGoals(event: UnknownRecord): {
   const neutralGround = event.is_neutral_ground === true;
   const localDerby = event.is_local_derby === true;
 
-  let homeShare = clamp(
+  let marketHomeShare = clamp(
     0.5 + (homeStrength - awayStrength) * 0.85,
     0.24,
     0.76
   );
 
   if (neutralGround) {
-    homeShare = clamp(homeShare - 0.025, 0.24, 0.76);
+    marketHomeShare = clamp(marketHomeShare - 0.025, 0.24, 0.76);
   }
 
   if (localDerby) {
@@ -378,6 +442,33 @@ function estimateExpectedGoals(event: UnknownRecord): {
     ["poor", "bad", "heavy", "wet"].includes(pitchCondition)
   ) {
     totalGoals = clamp(totalGoals - 0.12, 1.7, 4.2);
+  }
+
+  const predictionHomeXg = readFeatureNumber(event, "expected_home_goals");
+  const predictionAwayXg = readFeatureNumber(event, "expected_away_goals");
+
+  let homeShare = marketHomeShare;
+
+  if (
+    predictionHomeXg !== null &&
+    predictionAwayXg !== null &&
+    predictionHomeXg > 0 &&
+    predictionAwayXg > 0
+  ) {
+    const predictionTotal = predictionHomeXg + predictionAwayXg;
+    const predictionHomeShare = predictionHomeXg / predictionTotal;
+
+    const marketFavoursHome = homeStrength >= awayStrength;
+    const predictionFavoursHome = predictionHomeXg >= predictionAwayXg;
+    const directionMatches = marketFavoursHome === predictionFavoursHome;
+
+    if (directionMatches) {
+      homeShare = clamp(
+        marketHomeShare * 0.75 + predictionHomeShare * 0.25,
+        0.24,
+        0.76
+      );
+    }
   }
 
   return {
@@ -542,23 +633,32 @@ export function buildModelOddsInputs(event: UnknownRecord): OddsInput[] {
       0.97
     );
 
-    const input = (
+  const rawProb = (predicate: (h: number, a: number) => boolean) =>
+    clamp(
+      matrix
+        .filter((row) => predicate(row.h, row.a))
+        .reduce((sum, row) => sum + row.p, 0),
+      0.0001,
+      0.999
+    );
+
+  const input = (
     marketId: string,
     selection: string,
     probability: number,
     field: string
-    ): OddsInput => {
-    const fairProbability = clamp(probability, 0.001, 0.999);
+  ): OddsInput => {
+    const fairProbability = clamp(probability, 0.0001, 0.999);
 
     return {
-        marketId,
-        selection,
-        field,
-        bookOdds: oddFromProbability(fairProbability),
-        fairProbability,
-        pricingMargin: DEFAULT_MODEL_MARGIN,
+      marketId,
+      selection,
+      field,
+      bookOdds: oddFromProbability(fairProbability),
+      fairProbability,
+      pricingMargin: DEFAULT_MODEL_MARGIN,
     };
-    };
+  };
 
   const rows: OddsInput[] = [];
 
@@ -573,6 +673,7 @@ export function buildModelOddsInputs(event: UnknownRecord): OddsInput[] {
   rows.push(
     input("dnb", "1", pHome / Math.max(pHome + pAway, 0.01), "model_dnb_1")
   );
+
   rows.push(
     input("dnb", "2", pAway / Math.max(pHome + pAway, 0.01), "model_dnb_2")
   );
@@ -729,7 +830,7 @@ export function buildModelOddsInputs(event: UnknownRecord): OddsInput[] {
 
   for (const score of exactScores) {
     const [h, a] = score.split(":").map(Number);
-    const p = prob((home, away) => home === h && away === a);
+    const p = rawProb((home, away) => home === h && away === a);
 
     listedExactScoreProb += p;
 
@@ -740,7 +841,7 @@ export function buildModelOddsInputs(event: UnknownRecord): OddsInput[] {
     input(
       "exact_score",
       "other",
-      Math.max(0.01, 1 - listedExactScoreProb),
+      Math.max(0.001, 1 - listedExactScoreProb),
       "model_exact_score_other"
     )
   );

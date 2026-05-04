@@ -818,15 +818,28 @@ function buildOddsRows(args: {
       const impliedProbability = 1 / input.bookOdds;
       const isModel = input.field.startsWith("model_");
 
-      const fairProb = isNonExclusiveMarket
-        ? input.fairProbability ?? impliedProbability
-        : impliedProbability / impliedSum;
+      const modelFairProbability =
+        isModel &&
+        typeof input.fairProbability === "number" &&
+        Number.isFinite(input.fairProbability) &&
+        input.fairProbability > 0
+          ? Math.min(Math.max(input.fairProbability, 0.001), 0.999)
+          : null;
+
+      const fairProb =
+        modelFairProbability ??
+        (isNonExclusiveMarket
+          ? impliedProbability
+          : impliedProbability / impliedSum);
 
       const fairOdds = 1 / fairProb;
 
-      const margin = isNonExclusiveMarket
-        ? input.pricingMargin ?? 0
-        : exclusiveMarketMargin;
+      const margin =
+        modelFairProbability !== null
+          ? input.pricingMargin ?? 0
+          : isNonExclusiveMarket
+            ? input.pricingMargin ?? 0
+            : exclusiveMarketMargin;
 
       if (!Number.isFinite(impliedProbability) || impliedProbability <= 0) {
         continue;
@@ -875,6 +888,12 @@ function buildOddsRows(args: {
           field: input.field,
           book_odds: input.bookOdds,
           fair_probability_source: input.fairProbability ?? null,
+          fair_probability_strategy:
+            modelFairProbability !== null
+              ? "model_input_probability"
+              : isNonExclusiveMarket
+                ? "raw_implied_probability"
+                : "normalized_market_implied_probability",
           implied_probability: impliedProbability,
           implied_sum: impliedSum,
           market_is_exclusive: !isNonExclusiveMarket,
