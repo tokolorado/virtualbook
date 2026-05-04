@@ -728,8 +728,14 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function oddFromProbability(probability: number, margin = 0.08): number {
-  const p = clamp(probability, 0.01, 0.97);
-  return Number((1 / (p * (1 + margin))).toFixed(3));
+  const MIN_ODD = 1.01;
+  const MAX_ODD = 1000;
+
+  const p = clamp(probability, 0.001, 0.999);
+  const pricedProbability = clamp(p * (1 + margin), 0.001, 0.99);
+  const odd = 1 / pricedProbability;
+
+  return Number(clamp(odd, MIN_ODD, MAX_ODD).toFixed(3));
 }
 
 function normalizeProbabilities(values: number[]): number[] {
@@ -1070,7 +1076,9 @@ function buildOddsRows(args: {
 
         source: "bsd",
         source_event_id: sourceEventId,
-        pricing_method: "bsd_market_normalized",
+        pricing_method: input.field.startsWith("model_")
+        ? "bsd_model_derived"
+        : "bsd_market_normalized",
         raw_count: marketInputs.length,
 
         updated_at: args.fetchedAt,
