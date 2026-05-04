@@ -729,7 +729,7 @@ function clamp(value: number, min: number, max: number): number {
 
 function oddFromProbability(probability: number, margin = 0.08): number {
   const MIN_ODD = 1.01;
-  const MAX_ODD = 1000;
+  const MAX_ODD = 50;
 
   const p = clamp(probability, 0.001, 0.999);
   const pricedProbability = clamp(p * (1 + margin), 0.001, 0.99);
