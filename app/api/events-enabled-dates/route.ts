@@ -79,26 +79,56 @@ export async function GET(req: Request) {
     }
   }
 
-  const rangeStart = isoStartOfUtcDay(from);
-  const rangeEnd = isoStartOfNextUtcDay(to);
+const rangeStart = isoStartOfUtcDay(from);
+const rangeEnd = isoStartOfNextUtcDay(to);
 
-  const { data, error } = await supabase
-    .from("matches")
-    .select("id, utc_date, competition_id")
-    .eq("source", "bsd")
-    .in("competition_id", LEAGUES)
-    .gte("utc_date", rangeStart)
-    .lt("utc_date", rangeEnd)
-    .order("utc_date", { ascending: true });
+const { data, error } = await supabase
+  .from("matches")
+  .select("id, utc_date, competition_id")
+  .eq("source", "bsd")
+  .in("competition_id", LEAGUES)
+  .gte("utc_date", rangeStart)
+  .lt("utc_date", rangeEnd)
+  .order("utc_date", { ascending: true });
 
-  if (error) {
-    return jsonError(`DB matches read error: ${error.message}`, 500);
-  }
-
-  const rows = (data ?? []) as DbMatchRow[];
+if (error) {
+  const origin = new URL(req.url).origin;
   const enabledSet = new Set<string>();
 
-  for (const row of rows) {
+  for (let i = 0; i < days; i += 1) {
+    const d = addDaysLocal(from, i);
+    const r = await fetch(`${origin}/api/events?date=${encodeURIComponent(d)}`, {
+      cache: "no-store",
+    });
+
+    if (!r.ok) {
+      return jsonError(`DB matches read error: ${error.message}`, 500);
+    }
+
+    const j = await r.json();
+    const hasMatches = Array.isArray(j?.results)
+      ? j.results.some((x: any) => Array.isArray(x?.fixtures?.matches) && x.fixtures.matches.length > 0)
+      : false;
+
+    if (hasMatches) {
+      enabledSet.add(d);
+    }
+  }
+
+  const enabledDates = Array.from(enabledSet).sort();
+
+  return NextResponse.json({
+    from,
+    days,
+    enabledDates,
+    source: "events-fallback",
+  });
+}
+
+const rows = (data ?? []) as DbMatchRow[];
+const enabledSet = new Set<string>();
+
+for (const row of rows) {
     if (!row.utc_date) continue;
     enabledSet.add(localDateKeyFromISO(row.utc_date));
   }
