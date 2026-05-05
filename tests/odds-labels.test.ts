@@ -13,6 +13,7 @@ test("formats home team over/under market in Polish", () => {
   assert.deepEqual(labels, {
     marketLabel: "Gole gospodarzy",
     selectionLabel: "Poniżej 1,5",
+    label: "Gole gospodarzy: Poniżej 1,5",
   });
 });
 
@@ -27,6 +28,7 @@ test("formats classic 1X2 picks with team names", () => {
   assert.deepEqual(labels, {
     marketLabel: "1X2",
     selectionLabel: "Juventus FC",
+    label: "1X2: Juventus FC",
   });
 });
 
@@ -41,5 +43,6 @@ test("formats double chance picks", () => {
   assert.deepEqual(labels, {
     marketLabel: "Podwójna szansa",
     selectionLabel: "Fiorentina lub remis",
+    label: "Podwójna szansa: Fiorentina lub remis",
   });
 });

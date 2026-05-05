@@ -119,15 +119,25 @@ type MatchAvailability = {
 
 const FREE_TIER_LEAGUES: League[] = [
   { code: "CL", name: "Champions League" },
+  { code: "UEL", name: "Europa League" },
   { code: "PL", name: "Premier League" },
+  { code: "CH", name: "Championship" },
   { code: "BL1", name: "Bundesliga" },
   { code: "FL1", name: "Ligue 1" },
   { code: "SA", name: "Serie A" },
+  { code: "CI", name: "Coppa Italia" },
   { code: "PD", name: "LaLiga" },
+  { code: "EK", name: "Ekstraklasa" },
+  { code: "POR1", name: "Liga Portugal" },
+  { code: "NED1", name: "Eredivisie" },
+  { code: "MLS", name: "Major League Soccer" },
+  { code: "SPL", name: "Saudi Pro League" },
+  { code: "TUR1", name: "Super Lig" },
   { code: "WC", name: "World Cup" },
 ];
 
 const MARKET_ID_1X2 = "1x2";
+const NO_ODDS_MESSAGE = "Jeszcze nie ma kursów dla tego meczu.";
 const BETTING_CLOSE_BUFFER_MS = 60_000;
 const ESTIMATED_LIVE_AFTER_KICKOFF_MS = 150 * 60 * 1000;
 
@@ -139,6 +149,18 @@ function safeNum(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function hasDisplayableOdd(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function hasDisplayable1x2Odds(odds: Match["odds"]) {
+  return (
+    hasDisplayableOdd(odds["1"]) ||
+    hasDisplayableOdd(odds.X) ||
+    hasDisplayableOdd(odds["2"])
+  );
 }
 
 function safeInt(v: unknown): number | null {
@@ -1164,12 +1186,14 @@ function LeagueButton({
   label,
   count,
   emblem,
+  fallback,
   onClick,
 }: {
   active: boolean;
   label: string;
   count: number;
   emblem?: string | null;
+  fallback?: ReactNode;
   onClick: () => void;
 }) {
   return (
@@ -1188,7 +1212,7 @@ function LeagueButton({
           src={emblem}
           alt={label}
           size={20}
-          fallback={label.slice(0, 1)}
+          fallback={fallback ?? label.slice(0, 1)}
           className={
             active ? "border-black/10 bg-black/5 text-black/60" : undefined
           }
@@ -2042,77 +2066,82 @@ export default function EventsPage() {
 
   const renderMarketButtons = (m: Match) => {
     const availability = getMatchAvailability(m, nowMs);
+    const hasAnyOdds = hasDisplayable1x2Odds(m.odds);
 
     return (
-      <div
-        className="grid grid-cols-3 gap-2"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {(["1", "X", "2"] as Pick[]).map((pick) => {
-          const active = isActivePick(m.id, MARKET_ID_1X2, pick);
+      <div onClick={(e) => e.stopPropagation()}>
+        <div className="grid grid-cols-3 gap-2">
+          {(["1", "X", "2"] as Pick[]).map((pick) => {
+            const active = isActivePick(m.id, MARKET_ID_1X2, pick);
 
-          const oddRaw = m.odds[pick];
-          const hasOdd =
-            typeof oddRaw === "number" &&
-            Number.isFinite(oddRaw) &&
-            oddRaw > 0;
-          const odd = hasOdd ? oddRaw : 0;
+            const oddRaw = m.odds[pick];
+            const hasOdd = hasDisplayableOdd(oddRaw);
+            const odd = hasOdd ? oddRaw : 0;
 
-          const disabled = !hasOdd || availability.closed;
-          const title = !hasOdd
-            ? "Brak kursu w bazie dla tego wyboru."
-            : availability.closed
-              ? availability.closedReason ?? "Zakłady są zamknięte."
-              : active
-                ? "Kliknij ponownie, aby usunąć typ z kuponu."
-                : `Dodaj do kuponu. Kurs: ${formatOdd(odd)}`;
+            const disabled = !hasOdd || availability.closed;
+            const title = !hasOdd
+              ? NO_ODDS_MESSAGE
+              : availability.closed
+                ? availability.closedReason ?? "Zakłady są zamknięte."
+                : active
+                  ? "Kliknij ponownie, aby usunąć typ z kuponu."
+                  : `Dodaj do kuponu. Kurs: ${formatOdd(odd)}`;
 
-          return (
-            <button
-              key={pick}
-              type="button"
-              disabled={disabled}
-              onClick={() => {
-                if (disabled) return;
+            return (
+              <button
+                key={pick}
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
 
-                if (active) {
-                  removeFromSlip(m.id, MARKET_ID_1X2);
-                  return;
-                }
+                  if (active) {
+                    removeFromSlip(m.id, MARKET_ID_1X2);
+                    return;
+                  }
 
-                addToSlip({
-                  matchId: m.id,
-                  competitionCode: m.competitionCode,
-                  league: m.competitionName,
-                  home: m.home,
-                  away: m.away,
-                  market: MARKET_ID_1X2,
-                  pick,
-                  odd,
-                  kickoffUtc: m.kickoffUtc,
-                });
-              }}
-              className={cn(
-                "group rounded-2xl border px-3 py-3 text-center transition",
-                disabled
-                  ? "cursor-not-allowed border-neutral-800 bg-neutral-950/70 text-neutral-600"
-                  : active
-                    ? "border-white bg-white text-black shadow-[0_10px_35px_rgba(255,255,255,0.12)]"
-                    : "border-neutral-800 bg-neutral-950 text-white hover:border-neutral-600 hover:bg-neutral-900"
-              )}
-              title={title}
-              aria-label={`${pickLabel(pick)} ${hasOdd ? formatOdd(odd) : "brak kursu"}`}
-            >
-              <div className="text-sm font-semibold leading-none">
-                {shortPickLabel(pick)}
-              </div>
-              <div className="mt-1 text-[11px] opacity-70">{pickLabel(pick)}</div>
-              <div className="mt-1 text-sm font-semibold">
-                {hasOdd ? formatOdd(odd) : "—"}
-              </div>
-            </button>
-          );
-        })}
+                  addToSlip({
+                    matchId: m.id,
+                    competitionCode: m.competitionCode,
+                    league: m.competitionName,
+                    home: m.home,
+                    away: m.away,
+                    market: MARKET_ID_1X2,
+                    pick,
+                    odd,
+                    kickoffUtc: m.kickoffUtc,
+                  });
+                }}
+                className={cn(
+                  "group rounded-2xl border px-3 py-3 text-center transition",
+                  disabled
+                    ? "cursor-not-allowed border-neutral-800 bg-neutral-950/70 text-neutral-600"
+                    : active
+                      ? "border-white bg-white text-black shadow-[0_10px_35px_rgba(255,255,255,0.12)]"
+                      : "border-neutral-800 bg-neutral-950 text-white hover:border-neutral-600 hover:bg-neutral-900"
+                )}
+                title={title}
+                aria-label={`${pickLabel(pick)} ${hasOdd ? formatOdd(odd) : "brak kursu"}`}
+              >
+                <div className="text-sm font-semibold leading-none">
+                  {shortPickLabel(pick)}
+                </div>
+                <div className="mt-1 text-[11px] opacity-70">
+                  {pickLabel(pick)}
+                </div>
+                <div className="mt-1 text-sm font-semibold">
+                  {hasOdd ? formatOdd(odd) : "—"}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {!hasAnyOdds ? (
+          <div className="mt-2 rounded-2xl border border-neutral-800 bg-neutral-950/70 px-3 py-2 text-center text-xs font-medium text-neutral-400">
+            {NO_ODDS_MESSAGE}
+          </div>
+        ) : null}
       </div>
     );
   };
@@ -2718,6 +2747,7 @@ export default function EventsPage() {
                   label={lg.name}
                   count={leagueCounts[lg.code] ?? 0}
                   emblem={competitionMetaByCode[lg.code]?.emblem ?? null}
+                  fallback={lg.code}
                   onClick={() => {
                     setSelectedLeague(lg.code);
                     setActiveRightTab("matches");
@@ -2790,7 +2820,7 @@ export default function EventsPage() {
                   src={competitionMetaByCode[lg.code]?.emblem ?? null}
                   alt={lg.name}
                   size={16}
-                  fallback={lg.name.slice(0, 1)}
+                  fallback={lg.code}
                   className={
                     selectedLeague === lg.code
                       ? "border-black/10 bg-black/5 text-black/60"

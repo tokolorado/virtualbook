@@ -9,19 +9,34 @@ const BSD_BASE = "https://sports.bzzoiro.com/api";
 const DEFAULT_TZ = "Europe/Warsaw";
 const HORIZON_DAYS = 14;
 const DEFAULT_MAX_PAGES = 10;
+const DEFAULT_REFRESH_STALE_HOURS = 24;
 const MARKET = "correct_score";
+const DISPLAYABLE_BSD_PRICING_METHOD = "bsd_market_normalized";
 
 const LEAGUES = [
   { code: "CL", name: "Champions League" },
+  { code: "UEL", name: "Europa League" },
   { code: "PL", name: "Premier League" },
+  { code: "CH", name: "Championship" },
   { code: "BL1", name: "Bundesliga" },
   { code: "FL1", name: "Ligue 1" },
   { code: "SA", name: "Serie A" },
+  { code: "CI", name: "Coppa Italia" },
   { code: "PD", name: "LaLiga" },
+  { code: "EK", name: "Ekstraklasa" },
+  { code: "POR1", name: "Liga Portugal" },
+  { code: "NED1", name: "Eredivisie" },
+  { code: "MLS", name: "Major League Soccer" },
+  { code: "SPL", name: "Saudi Pro League" },
+  { code: "TUR1", name: "Super Lig" },
   { code: "WC", name: "World Cup" },
 ];
 
 const LEAGUE_NAME_BY_CODE = new Map(LEAGUES.map((l) => [l.code, l.name]));
+
+type SupabaseServiceClient = {
+  from: (table: string) => any;
+};
 
 type DbMatchRow = {
   id: number;
@@ -37,6 +52,16 @@ type DbMatchRow = {
   competition_name: string | null;
   home_team_id: number | null;
   away_team_id: number | null;
+};
+
+type OddsAvailabilityRow = {
+  match_id: number | string;
+};
+
+type ExistingPredictionRow = {
+  match_id: number | string;
+  source_prediction_id: string | null;
+  updated_at: string | null;
 };
 
 type BsdPrediction = {
@@ -740,6 +765,85 @@ async function fetchBsdPredictions(args: {
   };
 }
 
+async function readMatchesWithRealBsdOdds(
+  supabase: SupabaseServiceClient,
+  matchIds: number[]
+) {
+  if (!matchIds.length) return new Set<number>();
+
+  const { data, error } = await supabase
+    .from("odds")
+    .select("match_id")
+    .in("match_id", matchIds)
+    .eq("source", "bsd")
+    .eq("pricing_method", DISPLAYABLE_BSD_PRICING_METHOD);
+
+  if (error) {
+    throw new Error(`DB odds availability read error: ${error.message}`);
+  }
+
+  return new Set(
+    ((data ?? []) as OddsAvailabilityRow[])
+      .map((row) => Number(row.match_id))
+      .filter((id) => Number.isFinite(id))
+  );
+}
+
+async function readExistingPredictionMap(
+  supabase: SupabaseServiceClient,
+  matchIds: number[]
+) {
+  const map = new Map<number, ExistingPredictionRow>();
+  if (!matchIds.length) return map;
+
+  const { data, error } = await supabase
+    .from("event_predictions")
+    .select("match_id, source_prediction_id, updated_at")
+    .in("match_id", matchIds)
+    .eq("source", "bsd")
+    .eq("market", MARKET)
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`DB existing predictions read error: ${error.message}`);
+  }
+
+  for (const row of (data ?? []) as ExistingPredictionRow[]) {
+    const matchId = Number(row.match_id);
+    if (!Number.isFinite(matchId) || map.has(matchId)) continue;
+    map.set(matchId, row);
+  }
+
+  return map;
+}
+
+function shouldRefreshPrediction(args: {
+  existing: ExistingPredictionRow | null;
+  nextSourcePredictionId: string | null;
+  staleBeforeMs: number;
+}) {
+  if (!args.existing) return true;
+
+  const existingSourcePredictionId = safeString(
+    args.existing.source_prediction_id
+  );
+  if (
+    args.nextSourcePredictionId &&
+    existingSourcePredictionId &&
+    args.nextSourcePredictionId !== existingSourcePredictionId
+  ) {
+    return true;
+  }
+
+  const updatedAtMs = args.existing.updated_at
+    ? Date.parse(args.existing.updated_at)
+    : NaN;
+
+  if (!Number.isFinite(updatedAtMs)) return true;
+
+  return updatedAtMs < args.staleBeforeMs;
+}
+
 function toPredictionRow(args: {
   candidate: MatchCandidate;
   prediction: BsdPrediction;
@@ -831,6 +935,11 @@ export async function GET(req: Request) {
   const date = searchParams.get("date");
   const leagueId = searchParams.get("leagueId");
   const dryRun = searchParams.get("dryRun") === "1";
+  const refreshStaleHoursParam = Number(searchParams.get("refreshStaleHours"));
+  const refreshStaleHours =
+    Number.isFinite(refreshStaleHoursParam) && refreshStaleHoursParam >= 0
+      ? Math.min(Math.trunc(refreshStaleHoursParam), 24 * 14)
+      : DEFAULT_REFRESH_STALE_HOURS;
 
   const requestedPageLimit = Number(searchParams.get("pageLimit"));
   const maxPages =
@@ -882,10 +991,6 @@ export async function GET(req: Request) {
       "id, utc_date, status, matchday, season, home_team, away_team, home_score, away_score, competition_id, competition_name, home_team_id, away_team_id"
     )
     .eq("source", "bsd")
-    .in(
-      "competition_id",
-      LEAGUES.map((l) => l.code)
-    )
     .gte("utc_date", rangeStart)
     .lt("utc_date", rangeEnd)
     .order("utc_date", { ascending: true });
@@ -896,9 +1001,22 @@ export async function GET(req: Request) {
     });
   }
 
-  const dbMatchesRaw = ((dbRows ?? []) as DbMatchRow[]).filter((match) => {
+  const dbMatchesForLocalDate = ((dbRows ?? []) as DbMatchRow[]).filter((match) => {
     return localDateYmd(match.utc_date) === safeDate;
   });
+
+  const localMatchIds = dbMatchesForLocalDate
+    .map((match) => Number(match.id))
+    .filter((id) => Number.isFinite(id));
+
+  const matchesWithRealOdds = await readMatchesWithRealBsdOdds(
+    supabase,
+    localMatchIds
+  );
+
+  const dbMatchesRaw = dbMatchesForLocalDate.filter((match) =>
+    matchesWithRealOdds.has(Number(match.id))
+  );
 
   const bsd = await fetchBsdPredictions({
     apiKey: bsdApiKey,
@@ -975,14 +1093,49 @@ export async function GET(req: Request) {
   }
 
   const fetchedAt = new Date().toISOString();
-
-  const rows = matched.map((item) =>
-    toPredictionRow({
-      prediction: item.prediction,
-      candidate: item.candidate,
-      fetchedAt,
-    })
+  const staleBeforeMs =
+    refreshStaleHours === 0
+      ? Number.POSITIVE_INFINITY
+      : Date.now() - refreshStaleHours * 60 * 60 * 1000;
+  const existingPredictionMap = await readExistingPredictionMap(
+    supabase,
+    matched.map((item) => item.candidate.match.id)
   );
+
+  const skippedFresh: any[] = [];
+
+  const rows = matched
+    .filter((item) => {
+      const existing =
+        existingPredictionMap.get(item.candidate.match.id) ?? null;
+      const nextSourcePredictionId =
+        item.prediction.sourcePredictionId === null
+          ? null
+          : String(item.prediction.sourcePredictionId);
+
+      const refresh = shouldRefreshPrediction({
+        existing,
+        nextSourcePredictionId,
+        staleBeforeMs,
+      });
+
+      if (!refresh) {
+        skippedFresh.push({
+          matchId: item.candidate.match.id,
+          sourcePredictionId: nextSourcePredictionId,
+          updatedAt: existing?.updated_at ?? null,
+        });
+      }
+
+      return refresh;
+    })
+    .map((item) =>
+      toPredictionRow({
+        prediction: item.prediction,
+        candidate: item.candidate,
+        fetchedAt,
+      })
+    );
 
   if (!dryRun && rows.length > 0) {
     const { error: upsertError } = await supabase
@@ -1008,7 +1161,8 @@ export async function GET(req: Request) {
       rangeStart,
       rangeEnd,
       rawMatchesInRangeCount: (dbRows ?? []).length,
-      matchesForLocalDateCount: dbMatchesRaw.length,
+      matchesForLocalDateCount: dbMatchesForLocalDate.length,
+      matchesWithRealBsdOddsCount: dbMatchesRaw.length,
       competitions: LEAGUES,
     },
     bsd: {
@@ -1020,16 +1174,21 @@ export async function GET(req: Request) {
       duplicateRejectedCount: duplicateRejected.length,
       upsertedCount: dryRun ? 0 : rows.length,
       dryRunRowsCount: dryRun ? rows.length : 0,
+      skippedFreshCount: skippedFresh.length,
       unmatchedBsdCount: bsdPredictions.length - matched.length,
       unmatchedMatchesCount: dbMatchesRaw.length - assignedMatchIds.size,
+      skippedMatchesWithoutRealOddsCount:
+        dbMatchesForLocalDate.length - dbMatchesRaw.length,
     },
     saved: rows.map(compactSaved),
+    skippedFresh,
     duplicateRejected,
     meta: {
       maxPages,
+      refreshStaleHours,
       note: dryRun
         ? "Dry run only. No rows were written."
-        : "Matched BSD predictions were upserted into event_predictions.",
+        : "Matched BSD predictions for matches with real BSD odds were upserted into event_predictions.",
     },
   });
 }

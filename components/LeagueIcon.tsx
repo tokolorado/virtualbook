@@ -26,6 +26,10 @@ export function LeagueIcon({
 
   const cleanSrc =
     typeof src === "string" && src.trim().length > 0 ? src.trim() : null;
+  const fallbackText =
+    typeof fallback === "string"
+      ? fallback.trim().slice(0, 4).toUpperCase()
+      : fallback;
 
   const imageClassName = cn(
     "inline-flex shrink-0 items-center justify-center overflow-hidden rounded-md border border-black/10 bg-white p-[2px]",
@@ -42,10 +46,14 @@ export function LeagueIcon({
       <span
         className={fallbackClassName}
         style={{ width: size, height: size }}
-        aria-hidden="true"
+        aria-label={alt}
+        title={alt}
       >
-        <span className="text-[9px] font-bold leading-none text-neutral-500">
-          {fallback ?? alt.slice(0, 1).toUpperCase()}
+        <span
+          className="max-w-full truncate px-[1px] text-center text-[8px] font-bold leading-none text-neutral-500"
+          style={{ fontSize: Math.max(7, Math.min(9, size / 3)) }}
+        >
+          {fallbackText ?? alt.slice(0, 1).toUpperCase()}
         </span>
       </span>
     );

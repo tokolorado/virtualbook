@@ -6,7 +6,6 @@ import { addDaysLocal, todayLocalYYYYMMDD } from "@/lib/date";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const LEAGUES = ["CL", "PL", "BL1", "FL1", "SA", "PD", "WC"];
 const ENABLED_DATES_TTL_MS = 5 * 60 * 1000;
 
 function jsonError(message: string, status = 500) {
@@ -86,7 +85,6 @@ const { data, error } = await supabase
   .from("matches")
   .select("id, utc_date, competition_id")
   .eq("source", "bsd")
-  .in("competition_id", LEAGUES)
   .gte("utc_date", rangeStart)
   .lt("utc_date", rangeEnd)
   .order("utc_date", { ascending: true });

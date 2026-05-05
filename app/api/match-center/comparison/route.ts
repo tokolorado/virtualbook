@@ -1,7 +1,6 @@
 // app/api/match-center/comparison/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { resolveSofaScoreEventId } from "@/lib/sofascore/resolveEventId";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,6 +32,9 @@ type ComparisonItem = {
 type ComparisonResponse = {
   matchId: number | null;
   items: ComparisonItem[];
+  home: ComparisonTeamSide | null;
+  away: ComparisonTeamSide | null;
+  summary: ComparisonSummary | null;
   updatedAt: string | null;
 };
 
@@ -50,6 +52,47 @@ type TeamRecentSummary = {
   bttsCount: number;
   over25Count: number;
   form: Array<"W" | "D" | "L">;
+};
+
+type RecentMatch = {
+  id: string;
+  date: string | null;
+  competition: string | null;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  result: "W" | "D" | "L" | null;
+  goalsFor: number | null;
+  goalsAgainst: number | null;
+  venue: "home" | "away" | null;
+};
+
+type TeamRating = {
+  attackRating: number | null;
+  defenseRating: number | null;
+  formRating: number | null;
+  overallRating: number | null;
+  matchesCount: number | null;
+  source: string | null;
+};
+
+type ComparisonTeamSide = {
+  teamId: number | null;
+  teamName: string;
+  recent: TeamRecentSummary & {
+    goalsForPerGame: number | null;
+    goalsAgainstPerGame: number | null;
+    bttsRate: number | null;
+    over25Rate: number | null;
+    cleanSheetRate: number | null;
+  };
+  rating: TeamRating | null;
+  recentMatches: RecentMatch[];
+};
+
+type ComparisonSummary = {
+  bullets: string[];
 };
 
 function getSupabaseAdmin() {
@@ -83,17 +126,6 @@ function safeNullableString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function emptyResponse(
-  matchId: number | null,
-  updatedAt: string | null = null
-): ComparisonResponse {
-  return {
-    matchId,
-    items: [],
-    updatedAt,
-  };
 }
 
 function normalizeMatchRow(input: unknown): MatchRow {
@@ -475,6 +507,139 @@ function buildComparisonItems(
   ];
 }
 
+function rate(count: number, played: number) {
+  return played > 0 ? Math.round((count / played) * 1000) / 10 : null;
+}
+
+function withPerGame(summary: TeamRecentSummary): ComparisonTeamSide["recent"] {
+  return {
+    ...summary,
+    goalsForPerGame:
+      summary.played > 0
+        ? Math.round((summary.goalsFor / summary.played) * 100) / 100
+        : null,
+    goalsAgainstPerGame:
+      summary.played > 0
+        ? Math.round((summary.goalsAgainst / summary.played) * 100) / 100
+        : null,
+    bttsRate: rate(summary.bttsCount, summary.played),
+    over25Rate: rate(summary.over25Count, summary.played),
+    cleanSheetRate: rate(summary.cleanSheets, summary.played),
+  };
+}
+
+function buildRecentMatchList(
+  matches: MatchRow[],
+  teamId: number | null,
+  teamName: string
+): RecentMatch[] {
+  return matches.map((match) => {
+    const perspective = getPerspectiveScores(match, teamId, teamName);
+    const venue =
+      teamId !== null
+        ? match.home_team_id === teamId
+          ? "home"
+          : match.away_team_id === teamId
+            ? "away"
+            : null
+        : match.home_team === teamName
+          ? "home"
+          : match.away_team === teamName
+            ? "away"
+            : null;
+
+    return {
+      id: String(match.id),
+      date: safeNullableString(match.utc_date),
+      competition: match.competition_name,
+      homeTeam: match.home_team,
+      awayTeam: match.away_team,
+      homeScore: match.home_score,
+      awayScore: match.away_score,
+      result: perspective?.result ?? null,
+      goalsFor: perspective?.goalsFor ?? null,
+      goalsAgainst: perspective?.goalsAgainst ?? null,
+      venue,
+    };
+  });
+}
+
+async function loadLatestTeamRating(
+  supabase: SupabaseAdminClient,
+  teamId: number | null
+): Promise<TeamRating | null> {
+  if (teamId === null) return null;
+
+  const query = supabase
+    .from("team_ratings")
+    .select(
+      "attack_rating, defense_rating, form_rating, overall_rating, matches_count, source"
+    )
+    .eq("team_id", teamId)
+    .order("rating_date", { ascending: false })
+    .limit(1);
+
+  const { data, error } = await query;
+
+  if (error) return null;
+
+  const row = Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) : null;
+  if (!row) return null;
+
+  return {
+    attackRating: safeNumber(row.attack_rating),
+    defenseRating: safeNumber(row.defense_rating),
+    formRating: safeNumber(row.form_rating),
+    overallRating: safeNumber(row.overall_rating),
+    matchesCount: safeNumber(row.matches_count),
+    source: safeNullableString(row.source),
+  };
+}
+
+function buildComparisonSummary(args: {
+  homeTeam: string;
+  awayTeam: string;
+  home: TeamRecentSummary;
+  away: TeamRecentSummary;
+}) {
+  const bullets: string[] = [];
+  const homePpg = args.home.played > 0 ? args.home.points / args.home.played : null;
+  const awayPpg = args.away.played > 0 ? args.away.points / args.away.played : null;
+
+  if (homePpg !== null && awayPpg !== null) {
+    if (Math.abs(homePpg - awayPpg) < 0.25) {
+      bullets.push("Forma punktowa obu drużyn jest zbliżona w ostatnich meczach.");
+    } else {
+      bullets.push(
+        `${homePpg > awayPpg ? args.homeTeam : args.awayTeam} ma lepszą formę punktową w ostatnich meczach.`
+      );
+    }
+  }
+
+  const homeGoals =
+    args.home.played > 0 ? args.home.goalsFor / args.home.played : null;
+  const awayGoals =
+    args.away.played > 0 ? args.away.goalsFor / args.away.played : null;
+
+  if (homeGoals !== null && awayGoals !== null) {
+    bullets.push(
+      `Średnie gole: ${args.homeTeam} ${homeGoals.toFixed(2)}, ${args.awayTeam} ${awayGoals.toFixed(2)}.`
+    );
+  }
+
+  if (args.home.bttsCount + args.away.bttsCount > 0) {
+    bullets.push(
+      `BTTS w ostatnich meczach: ${args.homeTeam} ${args.home.bttsCount}/${args.home.played}, ${args.awayTeam} ${args.away.bttsCount}/${args.away.played}.`
+    );
+  }
+
+  if (!bullets.length) {
+    bullets.push("Za mało zakończonych meczów w bazie, aby zbudować mocne porównanie.");
+  }
+
+  return { bullets };
+}
+
 function resolveUpdatedAt(
   currentMatch: MatchRow,
   homeMatches: MatchRow[],
@@ -558,12 +723,48 @@ export async function GET(request: NextRequest) {
       currentMatch.away_team
     );
 
+    const [homeRating, awayRating] = await Promise.all([
+      loadLatestTeamRating(supabase, currentMatch.home_team_id),
+      loadLatestTeamRating(supabase, currentMatch.away_team_id),
+    ]);
+
     const items = buildComparisonItems(homeSummary, awaySummary);
     const updatedAt = resolveUpdatedAt(
       currentMatch,
       homeRecentMatches,
       awayRecentMatches
     );
+
+    const homeSide: ComparisonTeamSide = {
+      teamId: currentMatch.home_team_id,
+      teamName: currentMatch.home_team,
+      recent: withPerGame(homeSummary),
+      rating: homeRating,
+      recentMatches: buildRecentMatchList(
+        homeRecentMatches,
+        currentMatch.home_team_id,
+        currentMatch.home_team
+      ),
+    };
+
+    const awaySide: ComparisonTeamSide = {
+      teamId: currentMatch.away_team_id,
+      teamName: currentMatch.away_team,
+      recent: withPerGame(awaySummary),
+      rating: awayRating,
+      recentMatches: buildRecentMatchList(
+        awayRecentMatches,
+        currentMatch.away_team_id,
+        currentMatch.away_team
+      ),
+    };
+
+    const summary = buildComparisonSummary({
+      homeTeam: currentMatch.home_team,
+      awayTeam: currentMatch.away_team,
+      home: homeSummary,
+      away: awaySummary,
+    });
 
     const hasAnyData =
       homeSummary.played > 0 ||
@@ -573,7 +774,14 @@ export async function GET(request: NextRequest) {
 
     if (!hasAnyData) {
       return NextResponse.json(
-        emptyResponse(matchId, updatedAt),
+        {
+          matchId,
+          items: [],
+          home: homeSide,
+          away: awaySide,
+          summary,
+          updatedAt,
+        } satisfies ComparisonResponse,
         { status: 200 }
       );
     }
@@ -582,6 +790,9 @@ export async function GET(request: NextRequest) {
       {
         matchId,
         items,
+        home: homeSide,
+        away: awaySide,
+        summary,
         updatedAt,
       } satisfies ComparisonResponse,
       { status: 200 }

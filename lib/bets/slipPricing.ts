@@ -30,10 +30,18 @@ export type SlipPricingResult =
       conflicts: SameMatchConflict[];
       code: "same_match_correlation";
       message: string;
+    }
+  | {
+      ok: false;
+      totalOdds: null;
+      conflicts: [];
+      code: "missing_odds";
+      message: string;
     };
 
 const SAME_MATCH_MESSAGE =
   "Nie można łączyć kilku typów z tego samego meczu na jednym standardowym kuponie. To są zdarzenia zależne i wymagają osobnego Bet Buildera.";
+const MISSING_ODDS_MESSAGE = "Jeszcze nie ma kursów dla tego meczu.";
 
 function normalizeText(value: unknown): string | null {
   const text = String(value ?? "").trim();
@@ -105,11 +113,25 @@ export function priceAccumulatorSlip(
     };
   }
 
+  const hasMissingOdds = items.some((item) => {
+    const odd = Number(item.odd);
+    return !Number.isFinite(odd) || odd <= 1;
+  });
+
+  if (hasMissingOdds) {
+    return {
+      ok: false,
+      totalOdds: null,
+      conflicts: [],
+      code: "missing_odds",
+      message: MISSING_ODDS_MESSAGE,
+    };
+  }
+
   let totalOdds = items.length ? 1 : 0;
 
   for (const item of items) {
     const odd = Number(item.odd);
-    if (!Number.isFinite(odd) || odd <= 1e-9) continue;
     totalOdds *= odd;
   }
 

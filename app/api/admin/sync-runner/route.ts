@@ -180,6 +180,15 @@ export async function POST(req: Request) {
     return await getInternal(`/api/admin/bsd/matches/sync?${qs.toString()}`);
   };
 
+  const callBsdPredictionsSync = async (date: string) => {
+    const qs = new URLSearchParams();
+    qs.set("date", date);
+    qs.set("pageLimit", "10");
+    qs.set("refreshStaleHours", "24");
+
+    return await getInternal(`/api/predictions/bsd/sync?${qs.toString()}`);
+  };
+
     const sb = supabaseAdmin();
     const nowIso = new Date().toISOString();
 
@@ -315,11 +324,15 @@ export async function POST(req: Request) {
     let mappingMapped = 0;
     let mappingFailed = 0;
     let mappingNeedsReview = 0;
+    let predictionsUpserted = 0;
+    let predictionsMatched = 0;
+    let predictionsRealOddsMatches = 0;
     let message: string | null = null;
     let extra: any = null;
 
     try {
       const bsdRes = await callBsdMatchesSync({ date: cursorDate });
+      const predictionsRes = await callBsdPredictionsSync(cursorDate);
       const enqueueRes = await callEnqueueMatchMapping(cursorDate);
       const processRes = await callProcessMatchMapping();
 
@@ -333,9 +346,16 @@ export async function POST(req: Request) {
       mappingMapped = Number(processRes?.mapped ?? 0) || 0;
       mappingFailed = Number(processRes?.failed ?? 0) || 0;
       mappingNeedsReview = Number(processRes?.needsReview ?? 0) || 0;
+      predictionsUpserted =
+        Number(predictionsRes?.summary?.upsertedCount ?? 0) || 0;
+      predictionsMatched =
+        Number(predictionsRes?.summary?.matchedCount ?? 0) || 0;
+      predictionsRealOddsMatches =
+        Number(predictionsRes?.db?.matchesWithRealBsdOddsCount ?? 0) || 0;
 
       extra = {
         bsd: bsdRes,
+        bsdPredictions: predictionsRes,
         matchMapping: {
           enqueue: enqueueRes,
           process: processRes,
@@ -406,6 +426,11 @@ export async function POST(req: Request) {
         mapped: mappingMapped,
         failed: mappingFailed,
         needsReview: mappingNeedsReview,
+      },
+      bsdPredictions: {
+        upserted: predictionsUpserted,
+        matched: predictionsMatched,
+        matchesWithRealOdds: predictionsRealOddsMatches,
       },
       bettingClosedUpdated: closeRes.closed,
       bettingCloseCutoffIso: closeRes.cutoffIso,

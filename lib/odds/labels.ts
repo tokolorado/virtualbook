@@ -37,15 +37,15 @@ function marketLabel(market: string): string {
     dc: "Podwójna szansa",
     dnb: "Draw No Bet",
     btts: "Obie strzelą",
-    ou_1_5: "Powyżej/Poniżej 1.5",
-    ou_2_5: "Powyżej/Poniżej 2.5",
-    ou_3_5: "Powyżej/Poniżej 3.5",
-    home_ou_0_5: "Gole gospodarzy 0.5",
-    home_ou_1_5: "Gole gospodarzy 1.5",
-    home_ou_2_5: "Gole gospodarzy 2.5",
-    away_ou_0_5: "Gole gości 0.5",
-    away_ou_1_5: "Gole gości 1.5",
-    away_ou_2_5: "Gole gości 2.5",
+    ou_1_5: "Powyżej/Poniżej",
+    ou_2_5: "Powyżej/Poniżej",
+    ou_3_5: "Powyżej/Poniżej",
+    home_ou_0_5: "Gole gospodarzy",
+    home_ou_1_5: "Gole gospodarzy",
+    home_ou_2_5: "Gole gospodarzy",
+    away_ou_0_5: "Gole gości",
+    away_ou_1_5: "Gole gości",
+    away_ou_2_5: "Gole gości",
     ht_1x2: "Wynik 1. połowy",
     ht_dc: "Podwójna szansa 1. połowa",
     ht_ou_0_5: "Gole w 1. połowie 0.5",
@@ -68,6 +68,12 @@ function marketLabel(market: string): string {
   };
 
   return map[market] ?? market;
+}
+
+function lineFromMarket(market: string): string | null {
+  const match = market.match(/(?:^|_)(\d+)_(\d+)$/);
+  if (!match) return null;
+  return `${match[1]},${match[2]}`;
 }
 
 function selectionLabel(args: {
@@ -118,8 +124,9 @@ function selectionLabel(args: {
     market === "st_ou_0_5" ||
     market === "st_ou_1_5"
   ) {
-    if (pick === "over") return "Powyżej";
-    if (pick === "under") return "Poniżej";
+    const line = lineFromMarket(market);
+    if (pick === "over") return line ? `Powyżej ${line}` : "Powyżej";
+    if (pick === "under") return line ? `Poniżej ${line}` : "Poniżej";
   }
 
   if (market === "odd_even") {

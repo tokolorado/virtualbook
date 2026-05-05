@@ -13,11 +13,20 @@ const DEFAULT_MAX_PAGES = 10;
 
 const LEAGUES = [
   { code: "CL", name: "Champions League" },
+  { code: "UEL", name: "Europa League" },
   { code: "PL", name: "Premier League" },
+  { code: "CH", name: "Championship" },
   { code: "BL1", name: "Bundesliga" },
   { code: "FL1", name: "Ligue 1" },
   { code: "SA", name: "Serie A" },
+  { code: "CI", name: "Coppa Italia" },
   { code: "PD", name: "LaLiga" },
+  { code: "EK", name: "Ekstraklasa" },
+  { code: "POR1", name: "Liga Portugal" },
+  { code: "NED1", name: "Eredivisie" },
+  { code: "MLS", name: "Major League Soccer" },
+  { code: "SPL", name: "Saudi Pro League" },
+  { code: "TUR1", name: "Super Lig" },
   { code: "WC", name: "World Cup" },
 ];
 
@@ -894,10 +903,6 @@ export async function GET(req: Request) {
       "id, utc_date, status, matchday, season, home_team, away_team, home_score, away_score, competition_id, competition_name, home_team_id, away_team_id"
     )
     .eq("source", "bsd")
-    .in(
-      "competition_id",
-      LEAGUES.map((l) => l.code)
-    )
     .gte("utc_date", rangeStart)
     .lt("utc_date", rangeEnd)
     .order("utc_date", { ascending: true });

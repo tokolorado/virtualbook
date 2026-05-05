@@ -32,6 +32,11 @@ const betBuilderMissionsMigration = fs.readFileSync(
   "utf8"
 );
 
+const bsdBettingOddsHardeningMigration = fs.readFileSync(
+  "supabase/migrations/20260505_harden_bsd_betting_odds.sql",
+  "utf8"
+);
+
 test("production function snapshot documents every inspected public function", () => {
   const functionHeaders = snapshot.match(/^-- Function:/gm) ?? [];
 
@@ -129,6 +134,32 @@ test("bet builder migration stores package odds and settles from stored odds", (
   assert.match(
     betBuilderMissionsMigration,
     /revoke\s+all\s+on\s+function\s+public\.place_bet_builder\(uuid,\s*numeric,\s*jsonb,\s*uuid,\s*numeric,\s*jsonb\)\s+from\s+public,\s+anon,\s+authenticated/i
+  );
+});
+
+test("bet placement SQL only prices real normalized BSD odds", () => {
+  const realBsdOddsFilters =
+    bsdBettingOddsHardeningMigration.match(
+      /o\.source\s*=\s*'bsd'\s+and\s+o\.pricing_method\s*=\s*'bsd_market_normalized'\s+and\s+coalesce\(o\.is_model,\s*false\)\s*=\s*false/gi
+    ) ?? [];
+  const bsdMatchFilters =
+    bsdBettingOddsHardeningMigration.match(
+      /on\s+m\.id\s*=\s*r\.match_id\s+and\s+m\.source\s*=\s*'bsd'/gi
+    ) ?? [];
+
+  assert.equal(realBsdOddsFilters.length, 2);
+  assert.equal(bsdMatchFilters.length, 2);
+  assert.match(
+    bsdBettingOddsHardeningMigration,
+    /create\s+or\s+replace\s+function\s+public\.place_bet\(/i
+  );
+  assert.match(
+    bsdBettingOddsHardeningMigration,
+    /create\s+or\s+replace\s+function\s+public\.place_bet_builder\(/i
+  );
+  assert.doesNotMatch(
+    bsdBettingOddsHardeningMigration,
+    /bsd_model_derived/i
   );
 });
 

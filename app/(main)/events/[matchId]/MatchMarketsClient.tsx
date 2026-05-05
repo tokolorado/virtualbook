@@ -94,6 +94,7 @@ type MarketDisplayBlock =
 
 const BETTING_CLOSE_BUFFER_MS = 60_000;
 const ESTIMATED_LIVE_AFTER_KICKOFF_MS = 150 * 60 * 1000;
+const NO_ODDS_MESSAGE = "Jeszcze nie ma kursów dla tego meczu.";
 
 const FALLBACK_MARKETS: Record<
   string,
@@ -907,6 +908,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [noOdds, setNoOdds] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [matchUI, setMatchUI] = useState<MatchUI>({
@@ -1001,6 +1003,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         setLoading(true);
       }
       setErr(null);
+      setNoOdds(false);
 
       const matchIdNum = safeNum(matchId);
       if (matchIdNum == null) {
@@ -1157,7 +1160,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
         if (!oRows || oRows.length === 0) {
           if (!cancelled) {
-            setErr("Brak kursów w bazie dla tego meczu.");
+            setNoOdds(true);
           }
         }
       } catch (e: unknown) {
@@ -1284,7 +1287,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         )}
         title={
           !hasOdd
-            ? "Brak kursu w bazie"
+            ? NO_ODDS_MESSAGE
             : closed
               ? "Zakłady zamknięte"
               : active
@@ -1319,7 +1322,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                         src={matchUI.leagueEmblem}
                         alt={matchUI.leagueName}
                         size={18}
-                        fallback={matchUI.leagueName.slice(0, 1)}
+                        fallback={(competitionCode || matchUI.leagueName).slice(0, 4)}
                       />
                     </div>
 
@@ -1378,6 +1381,12 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
       {err ? (
         <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
           {err}
+        </div>
+      ) : null}
+
+      {noOdds && !loading ? (
+        <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 text-sm text-neutral-300">
+          {NO_ODDS_MESSAGE}
         </div>
       ) : null}
 
@@ -1495,7 +1504,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         ))
       ) : (
         <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 text-sm text-neutral-300">
-          Brak aktywnych rynków w bazie dla tego meczu.
+          {NO_ODDS_MESSAGE}
         </div>
       )}
     </div>

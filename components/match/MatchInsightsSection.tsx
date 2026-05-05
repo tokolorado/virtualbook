@@ -24,6 +24,7 @@ type MatchInsightsSectionProps = {
 
 type TabKey =
   | "ai"
+  | "info"
   | "lineups"
   | "comparison"
   | "h2h"
@@ -85,7 +86,66 @@ type StatsResponse = {
 type ComparisonResponse = {
   matchId: number | null;
   items: StatLikeItem[];
+  home: ComparisonTeamSide | null;
+  away: ComparisonTeamSide | null;
+  summary: ComparisonSummary | null;
   updatedAt: string | null;
+};
+
+type TeamRecentSummary = {
+  played: number;
+  points: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDiff: number;
+  cleanSheets: number;
+  failedToScore: number;
+  bttsCount: number;
+  over25Count: number;
+  form: Array<"W" | "D" | "L">;
+  goalsForPerGame: number | null;
+  goalsAgainstPerGame: number | null;
+  bttsRate: number | null;
+  over25Rate: number | null;
+  cleanSheetRate: number | null;
+};
+
+type ComparisonRecentMatch = {
+  id: string;
+  date: string | null;
+  competition: string | null;
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number | null;
+  awayScore: number | null;
+  result: "W" | "D" | "L" | null;
+  goalsFor: number | null;
+  goalsAgainst: number | null;
+  venue: "home" | "away" | null;
+};
+
+type ComparisonTeamRating = {
+  attackRating: number | null;
+  defenseRating: number | null;
+  formRating: number | null;
+  overallRating: number | null;
+  matchesCount: number | null;
+  source: string | null;
+};
+
+type ComparisonTeamSide = {
+  teamId: number | null;
+  teamName: string;
+  recent: TeamRecentSummary;
+  rating: ComparisonTeamRating | null;
+  recentMatches: ComparisonRecentMatch[];
+};
+
+type ComparisonSummary = {
+  bullets: string[];
 };
 
 type H2HSummary = {
@@ -173,6 +233,55 @@ type TimelineResponse = {
   updatedAt: string | null;
   source: string | null;
   message: string | null;
+};
+
+type MatchInfoResponse = {
+  ok: boolean;
+  matchId: number;
+  available: boolean;
+  competition: {
+    id: string | null;
+    name: string | null;
+    season: string | null;
+    round: string | null;
+    matchday: number | null;
+    group: string | null;
+  };
+  venue: {
+    id: number | null;
+    name: string | null;
+    city: string | null;
+    country: string | null;
+    capacity: number | null;
+    latitude: number | null;
+    longitude: number | null;
+  };
+  officials: {
+    referee: string | null;
+  };
+  coaches: {
+    home: string | null;
+    away: string | null;
+  };
+  context: {
+    neutralGround: boolean | null;
+    localDerby: boolean | null;
+    travelDistanceKm: number | null;
+    attendance: number | null;
+  };
+  conditions: {
+    weatherCode: string | null;
+    temperatureC: number | null;
+    windSpeed: number | null;
+    pitchCondition: string | null;
+  };
+  source: {
+    provider: "bsd";
+    eventId: string | null;
+    leagueId: string | null;
+    seasonId: string | null;
+  };
+  updatedAt: string | null;
 };
 
 type BsdInsightPick = {
@@ -697,6 +806,109 @@ function normalizeStatsResponse(
   };
 }
 
+function normalizeTeamRecentSummary(input: unknown): TeamRecentSummary {
+  const row =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+
+  const rawForm = Array.isArray(row.form) ? row.form : [];
+  const form = rawForm
+    .map((value) => String(value))
+    .filter((value): value is "W" | "D" | "L" =>
+      value === "W" || value === "D" || value === "L"
+    );
+
+  return {
+    played: safeNumber(row.played) ?? 0,
+    points: safeNumber(row.points) ?? 0,
+    wins: safeNumber(row.wins) ?? 0,
+    draws: safeNumber(row.draws) ?? 0,
+    losses: safeNumber(row.losses) ?? 0,
+    goalsFor: safeNumber(row.goalsFor) ?? 0,
+    goalsAgainst: safeNumber(row.goalsAgainst) ?? 0,
+    goalDiff: safeNumber(row.goalDiff) ?? 0,
+    cleanSheets: safeNumber(row.cleanSheets) ?? 0,
+    failedToScore: safeNumber(row.failedToScore) ?? 0,
+    bttsCount: safeNumber(row.bttsCount) ?? 0,
+    over25Count: safeNumber(row.over25Count) ?? 0,
+    form,
+    goalsForPerGame: safeNumber(row.goalsForPerGame),
+    goalsAgainstPerGame: safeNumber(row.goalsAgainstPerGame),
+    bttsRate: safeNumber(row.bttsRate),
+    over25Rate: safeNumber(row.over25Rate),
+    cleanSheetRate: safeNumber(row.cleanSheetRate),
+  };
+}
+
+function normalizeComparisonRating(input: unknown): ComparisonTeamRating | null {
+  if (typeof input !== "object" || input === null) return null;
+  const row = input as Record<string, unknown>;
+
+  return {
+    attackRating: safeNumber(row.attackRating),
+    defenseRating: safeNumber(row.defenseRating),
+    formRating: safeNumber(row.formRating),
+    overallRating: safeNumber(row.overallRating),
+    matchesCount: safeNumber(row.matchesCount),
+    source: safeNullableString(row.source),
+  };
+}
+
+function normalizeComparisonRecentMatch(
+  input: unknown,
+  index: number
+): ComparisonRecentMatch {
+  const row =
+    typeof input === "object" && input !== null
+      ? (input as Record<string, unknown>)
+      : {};
+  const result = safeNullableString(row.result);
+  const venue = safeNullableString(row.venue);
+
+  return {
+    id: safeString(row.id, `comparison-${index}`),
+    date: safeNullableString(row.date),
+    competition: safeNullableString(row.competition),
+    homeTeam: safeString(row.homeTeam, "Gospodarze"),
+    awayTeam: safeString(row.awayTeam, "Goście"),
+    homeScore: safeNumber(row.homeScore),
+    awayScore: safeNumber(row.awayScore),
+    result: result === "W" || result === "D" || result === "L" ? result : null,
+    goalsFor: safeNumber(row.goalsFor),
+    goalsAgainst: safeNumber(row.goalsAgainst),
+    venue: venue === "home" || venue === "away" ? venue : null,
+  };
+}
+
+function normalizeComparisonSide(input: unknown): ComparisonTeamSide | null {
+  if (typeof input !== "object" || input === null) return null;
+  const row = input as Record<string, unknown>;
+
+  return {
+    teamId: safeNumber(row.teamId),
+    teamName: safeString(row.teamName, "Drużyna"),
+    recent: normalizeTeamRecentSummary(row.recent),
+    rating: normalizeComparisonRating(row.rating),
+    recentMatches: Array.isArray(row.recentMatches)
+      ? row.recentMatches.map(normalizeComparisonRecentMatch)
+      : [],
+  };
+}
+
+function normalizeComparisonSummary(input: unknown): ComparisonSummary | null {
+  if (typeof input !== "object" || input === null) return null;
+  const row = input as Record<string, unknown>;
+
+  return {
+    bullets: Array.isArray(row.bullets)
+      ? row.bullets
+          .map((item) => safeNullableString(item))
+          .filter((item): item is string => item !== null)
+      : [],
+  };
+}
+
 function normalizeComparisonResponse(input: unknown): ComparisonResponse {
   const row =
     typeof input === "object" && input !== null
@@ -706,6 +918,9 @@ function normalizeComparisonResponse(input: unknown): ComparisonResponse {
   return {
     matchId: safeNumber(row.matchId),
     items: Array.isArray(row.items) ? row.items.map(normalizeStatLikeItem) : [],
+    home: normalizeComparisonSide(row.home),
+    away: normalizeComparisonSide(row.away),
+    summary: normalizeComparisonSummary(row.summary),
     updatedAt: safeNullableString(row.updatedAt),
   };
 }
@@ -1482,6 +1697,7 @@ function TableLegendChip({ zone }: { zone: Exclude<TableZone, null> }) {
 function normalizeTabParam(value: string | null): TabKey | null {
   if (
     value === "ai" ||
+    value === "info" ||
     value === "lineups" ||
     value === "comparison" ||
     value === "h2h" ||
@@ -1522,6 +1738,10 @@ export default function MatchInsightsSection({
   const [aiInsightsError, setAiInsightsError] = useState<string | null>(null);
   const [aiInsights, setAiInsights] =
     useState<BsdMatchInsightsResponse | null>(null);
+
+  const [infoLoading, setInfoLoading] = useState(true);
+  const [infoError, setInfoError] = useState<string | null>(null);
+  const [matchInfo, setMatchInfo] = useState<MatchInfoResponse | null>(null);
 
   const [lineupsLoading, setLineupsLoading] = useState(true);
   const [lineupsError, setLineupsError] = useState<string | null>(null);
@@ -1586,6 +1806,7 @@ export default function MatchInsightsSection({
     if (isPreMatch) {
       return withChampionsLeagueTabs([
         { key: "ai" as const, label: "AI" },
+        { key: "info" as const, label: "Info" },
         { key: "lineups" as const, label: "Składy" },
         { key: "comparison" as const, label: "Porównanie" },
         { key: "h2h" as const, label: "H2H" },
@@ -1596,6 +1817,7 @@ export default function MatchInsightsSection({
     if (isLive) {
       return withChampionsLeagueTabs([
         { key: "ai" as const, label: "AI" },
+        { key: "info" as const, label: "Info" },
         { key: "lineups" as const, label: "Składy" },
         { key: "liveStats" as const, label: "Statystyki" },
         { key: "table" as const, label: "Tabela" },
@@ -1606,6 +1828,7 @@ export default function MatchInsightsSection({
 
     return withChampionsLeagueTabs([
       { key: "ai" as const, label: "AI" },
+      { key: "info" as const, label: "Info" },
       { key: "lineups" as const, label: "Składy" },
       { key: "liveStats" as const, label: "Statystyki" },
       { key: "table" as const, label: "Tabela" },
@@ -1688,6 +1911,56 @@ export default function MatchInsightsSection({
       } finally {
         if (!controller.signal.aborted) {
           setAiInsightsLoading(false);
+        }
+      }
+    };
+
+    const loadMatchInfo = async () => {
+      if (!isBackgroundRefresh || !matchInfo) {
+        setInfoLoading(true);
+      }
+
+      setInfoError(null);
+
+      if (!isBackgroundRefresh) {
+        setMatchInfo(null);
+      }
+
+      try {
+        const response = await fetch(
+          `/api/match-center/info?matchId=${encodeURIComponent(String(matchId))}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Match info fetch failed: ${response.status}`);
+        }
+
+        const json = (await response.json()) as MatchInfoResponse;
+
+        if (!json.ok) {
+          throw new Error("Match info response is not ok.");
+        }
+
+        if (!controller.signal.aborted) {
+          setMatchInfo(json);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Błąd ładowania informacji meczowych.";
+
+        setInfoError(message);
+      } finally {
+        if (!controller.signal.aborted) {
+          setInfoLoading(false);
         }
       }
     };
@@ -1999,6 +2272,7 @@ export default function MatchInsightsSection({
 
     void Promise.all([
       loadAiInsights(),
+      loadMatchInfo(),
       loadLineups(),
       loadLiveStats(),
       loadComparison(),
@@ -2059,6 +2333,136 @@ export default function MatchInsightsSection({
       return hasNumeric || hasDisplayValue;
     });
   }, [comparison]);
+
+  const renderInfoValue = (label: string, value: ReactNode) => (
+    <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3">
+      <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+        {label}
+      </div>
+      <div className="mt-2 text-sm font-semibold text-white">{value}</div>
+    </div>
+  );
+
+  const textOrDash = (value: string | number | null | undefined) => {
+    if (value === null || value === undefined || value === "") return "—";
+    return String(value);
+  };
+
+  const boolOrDash = (value: boolean | null | undefined) => {
+    if (value === null || value === undefined) return "—";
+    return value ? "Tak" : "Nie";
+  };
+
+  const renderMatchInfo = () => {
+    if (infoLoading && !matchInfo) {
+      return (
+        <StateBox
+          title="Ładowanie informacji meczowych..."
+          description="Pobieramy zapisane dane BSD: stadion, sędziego, trenerów, warunki i identyfikatory źródłowe."
+        />
+      );
+    }
+
+    if (!matchInfo && infoError) {
+      return (
+        <StateBox
+          title="Nie udało się załadować informacji meczowych"
+          description={infoError}
+          tone="error"
+        />
+      );
+    }
+
+    if (!matchInfo || !matchInfo.available) {
+      return (
+        <StateBox
+          title="Brak informacji meczowych"
+          description="BSD nie udostępniło jeszcze dodatkowych danych dla tego spotkania."
+        />
+      );
+    }
+
+    const location = [matchInfo.venue.city, matchInfo.venue.country]
+      .filter(Boolean)
+      .join(", ");
+    const coordinates =
+      matchInfo.venue.latitude !== null && matchInfo.venue.longitude !== null
+        ? `${formatInsightNumber(matchInfo.venue.latitude, 4)}, ${formatInsightNumber(
+            matchInfo.venue.longitude,
+            4
+          )}`
+        : "—";
+
+    return (
+      <div className="space-y-4">
+        {infoError ? (
+          <InlineWarning message="Nie udało się odświeżyć informacji meczowych. Pokazujemy ostatnio pobrane dane." />
+        ) : null}
+
+        <Surface className="p-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-lg font-semibold text-white">
+                Informacje meczowe BSD
+              </div>
+              <div className="mt-1 text-sm text-neutral-400">
+                Stadion, obsada, warunki i kontekst zapisane przy synchronizacji meczu.
+              </div>
+            </div>
+            <StatusChip>Aktualizacja: {formatDateTime(matchInfo.updatedAt)}</StatusChip>
+          </div>
+        </Surface>
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {renderInfoValue("Stadion", textOrDash(matchInfo.venue.name))}
+          {renderInfoValue("Lokalizacja", location || "—")}
+          {renderInfoValue(
+            "Pojemność",
+            matchInfo.venue.capacity !== null
+              ? Math.trunc(matchInfo.venue.capacity).toLocaleString("pl-PL")
+              : "—"
+          )}
+          {renderInfoValue("Współrzędne", coordinates)}
+          {renderInfoValue("Sędzia", textOrDash(matchInfo.officials.referee))}
+          {renderInfoValue(`${homeTeam} trener`, textOrDash(matchInfo.coaches.home))}
+          {renderInfoValue(`${awayTeam} trener`, textOrDash(matchInfo.coaches.away))}
+          {renderInfoValue(
+            "Frekwencja",
+            matchInfo.context.attendance !== null
+              ? Math.trunc(matchInfo.context.attendance).toLocaleString("pl-PL")
+              : "—"
+          )}
+          {renderInfoValue("Neutralny teren", boolOrDash(matchInfo.context.neutralGround))}
+          {renderInfoValue("Derby lokalne", boolOrDash(matchInfo.context.localDerby))}
+          {renderInfoValue(
+            "Dystans podróży",
+            matchInfo.context.travelDistanceKm !== null
+              ? `${formatInsightNumber(matchInfo.context.travelDistanceKm, 0)} km`
+              : "—"
+          )}
+          {renderInfoValue("Runda", textOrDash(matchInfo.competition.round))}
+          {renderInfoValue("Kolejka", textOrDash(matchInfo.competition.matchday))}
+          {renderInfoValue("Sezon", textOrDash(matchInfo.competition.season))}
+          {renderInfoValue("Pogoda", textOrDash(matchInfo.conditions.weatherCode))}
+          {renderInfoValue(
+            "Temperatura",
+            matchInfo.conditions.temperatureC !== null
+              ? `${formatInsightNumber(matchInfo.conditions.temperatureC, 1)}°C`
+              : "—"
+          )}
+          {renderInfoValue(
+            "Wiatr",
+            matchInfo.conditions.windSpeed !== null
+              ? `${formatInsightNumber(matchInfo.conditions.windSpeed, 1)} km/h`
+              : "—"
+          )}
+          {renderInfoValue("Murawa", textOrDash(matchInfo.conditions.pitchCondition))}
+          {renderInfoValue("BSD event id", textOrDash(matchInfo.source.eventId))}
+          {renderInfoValue("BSD league id", textOrDash(matchInfo.source.leagueId))}
+        </div>
+      </div>
+    );
+  };
 
   const renderAiInsights = () => {
     const hasData = aiInsights?.available === true;
@@ -2459,7 +2863,8 @@ export default function MatchInsightsSection({
   };
 
   const renderComparison = () => {
-    const hasData = meaningfulComparisonItems.length > 0;
+    const hasData =
+      meaningfulComparisonItems.length > 0 || !!comparison?.home || !!comparison?.away;
 
     if (comparisonLoading && !hasData) {
       return (
@@ -2489,6 +2894,107 @@ export default function MatchInsightsSection({
       );
     }
 
+    const renderSideSummary = (side: ComparisonTeamSide | null) => {
+      if (!side) return null;
+      const recent = side.recent;
+      const rating = side.rating;
+
+      return (
+        <Surface className="p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-lg font-semibold text-white">
+                {side.teamName}
+              </div>
+              <div className="mt-1 text-sm text-neutral-400">
+                Forma: {recent.form.length ? recent.form.join(" ") : "—"}
+              </div>
+            </div>
+            <StatusChip>
+              {recent.played} mecz{recent.played === 1 ? "" : "ów"}
+            </StatusChip>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+            {renderInfoValue("Punkty", recent.points)}
+            {renderInfoValue(
+              "Gole/mecz",
+              formatInsightNumber(recent.goalsForPerGame, 2)
+            )}
+            {renderInfoValue(
+              "Stracone/mecz",
+              formatInsightNumber(recent.goalsAgainstPerGame, 2)
+            )}
+            {renderInfoValue(
+              "BTTS",
+              recent.bttsRate !== null
+                ? `${formatInsightNumber(recent.bttsRate, 1)}%`
+                : "—"
+            )}
+            {renderInfoValue(
+              "Over 2.5",
+              recent.over25Rate !== null
+                ? `${formatInsightNumber(recent.over25Rate, 1)}%`
+                : "—"
+            )}
+            {renderInfoValue(
+              "Rating",
+              rating?.overallRating !== null && rating?.overallRating !== undefined
+                ? formatInsightNumber(rating.overallRating, 2)
+                : "—"
+            )}
+          </div>
+        </Surface>
+      );
+    };
+
+    const renderRecentList = (side: ComparisonTeamSide | null) => {
+      if (!side || side.recentMatches.length === 0) return null;
+
+      return (
+        <Surface className="p-4">
+          <div className="text-lg font-semibold text-white">
+            Ostatnie mecze: {side.teamName}
+          </div>
+          <div className="mt-4 space-y-2">
+            {side.recentMatches.map((match) => (
+              <div
+                key={match.id}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-white">
+                    {match.homeTeam} vs {match.awayTeam}
+                  </div>
+                  <div className="mt-1 text-xs text-neutral-500">
+                    {formatDateTime(match.date)} · {match.competition ?? "Liga"}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {match.result ? (
+                    <StatusChip
+                      tone={
+                        match.result === "W"
+                          ? "green"
+                          : match.result === "D"
+                            ? "yellow"
+                            : "red"
+                      }
+                    >
+                      {match.result}
+                    </StatusChip>
+                  ) : null}
+                  <div className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-2 font-semibold text-white">
+                    {match.homeScore ?? "—"}:{match.awayScore ?? "—"}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Surface>
+      );
+    };
+
     return (
       <div className="space-y-4">
         {comparisonError ? (
@@ -2509,10 +3015,40 @@ export default function MatchInsightsSection({
           </div>
         </Surface>
 
-        <div className="space-y-3">
-          {meaningfulComparisonItems.map((item) => (
-            <StatBarRow key={item.key} item={item} />
-          ))}
+        {(comparison?.summary?.bullets?.length ?? 0) > 0 ? (
+          <Surface className="p-5">
+            <div className="text-lg font-semibold text-white">
+              Krótkie podsumowanie
+            </div>
+            <div className="mt-4 grid gap-3">
+              {comparison?.summary?.bullets.map((bullet, index) => (
+                <div
+                  key={`${index}-${bullet}`}
+                  className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-300"
+                >
+                  {bullet}
+                </div>
+              ))}
+            </div>
+          </Surface>
+        ) : null}
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          {renderSideSummary(comparison?.home ?? null)}
+          {renderSideSummary(comparison?.away ?? null)}
+        </div>
+
+        {meaningfulComparisonItems.length > 0 ? (
+          <div className="space-y-3">
+            {meaningfulComparisonItems.map((item) => (
+              <StatBarRow key={item.key} item={item} />
+            ))}
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          {renderRecentList(comparison?.home ?? null)}
+          {renderRecentList(comparison?.away ?? null)}
         </div>
       </div>
     );
@@ -3066,6 +3602,8 @@ export default function MatchInsightsSection({
       <div className="mt-4">
         {activeTab === "ai"
           ? renderAiInsights()
+          : activeTab === "info"
+            ? renderMatchInfo()
           : activeTab === "lineups"
             ? renderLineups()
             : activeTab === "comparison"

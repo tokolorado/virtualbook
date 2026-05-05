@@ -7,15 +7,10 @@ const resultsSyncRoute = fs.readFileSync(
   "utf8"
 );
 
-test("results sync persists match_results before idempotent settlement", () => {
+test("legacy results sync endpoint is disabled after BSD migration", () => {
   assert.match(
     resultsSyncRoute,
-    /from\("match_results"\)\s*\.upsert\(\s*matchResultRow,\s*\{\s*onConflict:\s*"match_id"\s*\}\s*\)/i
+    /VirtualBook now uses BSD as the only match, odds and results provider/i
   );
-  assert.match(resultsSyncRoute, /settle_match_once/i);
-  assert.doesNotMatch(
-    resultsSyncRoute,
-    /rpc\("settle_match",\s*\{\s*p_match_id:\s*localMatch\.id/i
-  );
+  assert.match(resultsSyncRoute, /status:\s*410/i);
 });
-

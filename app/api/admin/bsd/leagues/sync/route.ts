@@ -420,6 +420,27 @@ export async function GET(req: Request): Promise<NextResponse> {
           details: error.message,
         });
       }
+
+      const competitionRows = matchedRows.map((row) => ({
+        id: row.app_code,
+        name: row.name,
+        type: "LEAGUE",
+        area_name: row.country,
+        emblem: row.logo_url,
+        last_sync_at: fetchedAt,
+      }));
+
+      const { error: competitionsError } = await supabase
+        .from("competitions")
+        .upsert(competitionRows, {
+          onConflict: "id",
+        });
+
+      if (competitionsError) {
+        return jsonError("competitions upsert failed", 500, {
+          details: competitionsError.message,
+        });
+      }
     }
 
     return NextResponse.json({

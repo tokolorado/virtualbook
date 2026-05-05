@@ -43,6 +43,14 @@ function normalizeMarket(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function payloadItemKey(item: {
+  match_id_bigint: number;
+  market: string;
+  pick: string | null;
+}) {
+  return `${item.match_id_bigint}|${item.market}|${item.pick ?? ""}`;
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value
@@ -154,6 +162,53 @@ export async function POST(req: Request) {
     });
 
     if (mode === "standard") {
+      const matchIds = Array.from(
+        new Set(payloadItems.map((item) => item.match_id_bigint))
+      );
+
+      const admin = supabaseAdmin();
+      const { data: oddsRows, error: oddsError } = await admin
+        .from("odds")
+        .select("match_id,market_id,selection,book_odds")
+        .in("match_id", matchIds)
+        .eq("source", "bsd")
+        .eq("pricing_method", "bsd_market_normalized");
+
+      if (oddsError) {
+        return jsonError("Nie udalo sie pobrac kursow do kuponu.", 500, {
+          detail: oddsError.message,
+        });
+      }
+
+      const activeOdds = new Set(
+        ((oddsRows ?? []) as Array<{
+          match_id: number | string;
+          market_id: string;
+          selection: string;
+          book_odds: number | string | null;
+        }>)
+          .filter((row) => {
+            const odd = toNumber(row.book_odds);
+            return Number.isFinite(odd) && odd > 1;
+          })
+          .map(
+            (row) =>
+              `${Math.trunc(toNumber(row.match_id))}|${normalizeMarket(
+                row.market_id
+              )}|${nonEmpty(row.selection) ?? ""}`
+          )
+      );
+
+      const allItemsHaveRealBsdOdds = payloadItems.every((item) =>
+        activeOdds.has(payloadItemKey(item))
+      );
+
+      if (!allItemsHaveRealBsdOdds) {
+        return jsonError("Jeszcze nie ma kursów dla tego meczu.", 400, {
+          code: "missing_odds",
+        });
+      }
+
       const { data, error } = await user.supabase.rpc("place_bet", {
         p_stake: stake,
         p_items: payloadItems,
