@@ -210,11 +210,24 @@ function buildPredictionFromPayload(raw: any): MatchPrediction | null {
   return hasUsefulData ? prediction : null;
 }
 
-function formatPredictionPercent(value: unknown) {
+type PredictionDirection = "home" | "draw" | "away";
+
+function normalizePredictionPercent(value: unknown): number | null {
   const n = safeNum(value);
+  if (n === null) return null;
+
+  if (Math.abs(n) <= 1) {
+    return n * 100;
+  }
+
+  return n;
+}
+
+function formatPredictionPercent(value: unknown) {
+  const n = normalizePredictionPercent(value);
   if (n === null) return "—";
 
-  return `${n.toFixed(n >= 10 ? 0 : 1)}%`;
+  return `${n.toFixed(Math.abs(n) >= 10 ? 0 : 1)}%`;
 }
 
 function formatPredictionNumber(value: unknown) {
@@ -224,13 +237,58 @@ function formatPredictionNumber(value: unknown) {
   return n.toFixed(2);
 }
 
-function predictionPickLabel(prediction: MatchPrediction) {
-  const result = String(prediction.predictedResult ?? "").toUpperCase();
-  const label = String(prediction.predictedLabel ?? "").toLowerCase();
+function predictionDirection(prediction: MatchPrediction): PredictionDirection | null {
+  const result = String(prediction.predictedResult ?? "").trim().toUpperCase();
+  const label = String(prediction.predictedLabel ?? "").trim().toLowerCase();
 
-  if (result === "H" || label === "home") return "1";
-  if (result === "D" || label === "draw") return "X";
-  if (result === "A" || label === "away") return "2";
+  if (result === "H" || result === "1" || label === "home") return "home";
+  if (result === "D" || result === "X" || label === "draw") return "draw";
+  if (result === "A" || result === "2" || label === "away") return "away";
+
+  return null;
+}
+
+function predictionScoreDirection(
+  prediction: MatchPrediction
+): PredictionDirection | null {
+  let home = prediction.predictedHomeScore;
+  let away = prediction.predictedAwayScore;
+
+  if ((home === null || away === null) && prediction.predictedScore) {
+    const match = prediction.predictedScore.match(
+      /^\s*(\d{1,2})\s*[-:]\s*(\d{1,2})\s*$/
+    );
+
+    if (match) {
+      home = Number(match[1]);
+      away = Number(match[2]);
+    }
+  }
+
+  if (home === null || away === null) return null;
+  if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
+
+  if (home > away) return "home";
+  if (home < away) return "away";
+  return "draw";
+}
+
+function predictionDirectionLabel(
+  direction: PredictionDirection | null,
+  homeTeam: string,
+  awayTeam: string
+) {
+  if (direction === "home") return homeTeam;
+  if (direction === "away") return awayTeam;
+  if (direction === "draw") return "Remis";
+
+  return "—";
+}
+
+function predictionPickCode(direction: PredictionDirection | null) {
+  if (direction === "home") return "1";
+  if (direction === "draw") return "X";
+  if (direction === "away") return "2";
 
   return "—";
 }
@@ -1008,14 +1066,32 @@ function MatchStatusPill({
 
 function PredictionPanel({
   prediction,
+  homeTeam,
+  awayTeam,
   compact = false,
 }: {
   prediction: MatchPrediction | null;
+  homeTeam: string;
+  awayTeam: string;
   compact?: boolean;
 }) {
   if (!prediction) return null;
 
-  const pick = predictionPickLabel(prediction);
+  const direction = predictionDirection(prediction);
+  const scoreDirection = predictionScoreDirection(prediction);
+  const pick = predictionDirectionLabel(direction, homeTeam, awayTeam);
+  const pickCode = predictionPickCode(direction);
+  const scoreDirectionLabel = predictionDirectionLabel(
+    scoreDirection,
+    homeTeam,
+    awayTeam
+  );
+
+  const hasScoreDirectionConflict =
+    direction !== null &&
+    scoreDirection !== null &&
+    direction !== scoreDirection;
+
   const source = prediction.source?.toUpperCase() ?? "AI";
   const model = prediction.modelVersion ?? null;
 
@@ -1046,28 +1122,36 @@ function PredictionPanel({
             {prediction.predictedScore ?? "—"}
           </div>
           <div className="mt-0.5 text-[11px] text-neutral-400">
-            faworyt {pick} • pewność {formatPredictionPercent(prediction.confidence)}
+            kierunek {pickCode} / {pick} • pewność{" "}
+            {formatPredictionPercent(prediction.confidence)}
           </div>
         </div>
       </div>
 
+      {hasScoreDirectionConflict ? (
+        <div className="mt-3 rounded-xl border border-yellow-500/20 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-200">
+          Dokładny wynik wskazuje: {scoreDirectionLabel}, ale kierunek 1X2 modelu
+          wskazuje: {pick}.
+        </div>
+      ) : null}
+
       <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
         <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
-          <div className="text-neutral-500">1</div>
+          <div className="truncate text-neutral-500">1 · {homeTeam}</div>
           <div className="mt-1 font-semibold text-white">
             {formatPredictionPercent(prediction.probabilities.homeWin)}
           </div>
         </div>
 
         <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
-          <div className="text-neutral-500">X</div>
+          <div className="text-neutral-500">X · Remis</div>
           <div className="mt-1 font-semibold text-white">
             {formatPredictionPercent(prediction.probabilities.draw)}
           </div>
         </div>
 
         <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
-          <div className="text-neutral-500">2</div>
+          <div className="truncate text-neutral-500">2 · {awayTeam}</div>
           <div className="mt-1 font-semibold text-white">
             {formatPredictionPercent(prediction.probabilities.awayWin)}
           </div>
@@ -1994,7 +2078,12 @@ export default function EventsPage() {
           />
         </div>
         
-        <PredictionPanel prediction={m.prediction} compact />
+        <PredictionPanel
+          prediction={m.prediction}
+          homeTeam={m.home}
+          awayTeam={m.away}
+          compact
+        />
 
         <div className="mt-4">{renderMarketButtons(m)}</div>
 
@@ -2045,7 +2134,11 @@ export default function EventsPage() {
               <TeamNameLine name={m.away} score={m.awayScore} />
             </div>
 
-            <PredictionPanel prediction={m.prediction} />
+            <PredictionPanel
+              prediction={m.prediction}
+              homeTeam={m.home}
+              awayTeam={m.away}
+            />
 
             <div className="mt-3 text-xs text-neutral-500 transition group-hover:text-neutral-300">
               Kliknij kartę, aby zobaczyć wszystkie rynki
