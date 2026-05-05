@@ -5,7 +5,6 @@ import { supabaseAdmin } from "@/lib/supabaseServer";
 import { bsdFetchPaginated, normalizeBsdText } from "@/lib/bsd/client";
 import {
   buildBsdEventFeaturesSnapshot,
-  buildModelOddsInputs,
   buildPricingFeatureSnapshot,
   BSD_PRICING_MODEL_VERSION,
 } from "@/lib/bsd/pricingModel";
@@ -765,16 +764,6 @@ function collectOddsInputs(event: UnknownRecord): OddsInput[] {
     });
   }
 
-  const directKeys = new Set(
-    inputs.map((input) => `${input.marketId}__${input.selection}`)
-  );
-
-  for (const modelInput of buildModelOddsInputs(event)) {
-    const key = `${modelInput.marketId}__${modelInput.selection}`;
-    if (directKeys.has(key)) continue;
-    inputs.push(modelInput);
-  }
-
   return inputs;
 }
 
@@ -873,9 +862,7 @@ function buildOddsRows(args: {
 
         source: "bsd",
         source_event_id: sourceEventId,
-        pricing_method: isModel
-          ? "bsd_model_derived"
-          : "bsd_market_normalized",
+        pricing_method: "bsd_market_normalized",
         raw_count: marketInputs.length,
 
         updated_at: args.fetchedAt,
@@ -901,9 +888,7 @@ function buildOddsRows(args: {
           fair_odds: fairOdds,
           margin,
           is_model: isModel,
-          pricing_method: isModel
-            ? "bsd_model_derived"
-            : "bsd_market_normalized",
+          pricing_method: "bsd_market_normalized",
         },
       });
     }
@@ -1072,99 +1057,6 @@ async function syncFinishedMatchResults(
     unchanged,
   };
 }
-
-
-function roundOdds(value: number) {
-  if (!Number.isFinite(value)) return null;
-  return Math.round(Math.min(50, Math.max(1.01, value)) * 1000) / 1000;
-}
-
-function appendMissingFullTime1x2FromDc(oddsRows: OddsUpsertRow[]) {
-  const has1x2 = new Set<number>();
-
-  for (const row of oddsRows) {
-    if (row.market_id === "1x2") {
-      has1x2.add(Number(row.match_id));
-    }
-  }
-
-  const byMatch = new Map<number, Record<string, number>>();
-
-  for (const row of oddsRows) {
-    if (row.market_id !== "dc") continue;
-
-    const matchId = Number(row.match_id);
-    const selection = String(row.selection);
-    const odd = Number(row.book_odds);
-
-    if (!Number.isFinite(matchId) || !Number.isFinite(odd) || odd <= 1) {
-      continue;
-    }
-
-    const map = byMatch.get(matchId) ?? {};
-    map[selection] = odd;
-    byMatch.set(matchId, map);
-  }
-
-  const updatedAt = new Date().toISOString();
-
-  for (const [matchId, dc] of byMatch.entries()) {
-    if (has1x2.has(matchId)) continue;
-
-    const odd1x = dc["1X"];
-    const odd12 = dc["12"];
-    const oddx2 = dc["X2"];
-
-    if (!odd1x || !odd12 || !oddx2) continue;
-
-    const p1x = 1 / odd1x;
-    const p12 = 1 / odd12;
-    const px2 = 1 / oddx2;
-
-    const p1 = (p1x + p12 - px2) / 2;
-    const px = (p1x + px2 - p12) / 2;
-    const p2 = (p12 + px2 - p1x) / 2;
-
-    const odd1 = roundOdds(1 / p1);
-    const oddX = roundOdds(1 / px);
-    const odd2 = roundOdds(1 / p2);
-
-    if (!odd1 || !oddX || !odd2) continue;
-
-    oddsRows.push(
-      {
-        match_id: matchId,
-        market_id: "1x2",
-        selection: "1",
-        book_odds: odd1,
-        source: "bsd",
-        pricing_method: "bsd_model_derived",
-        updated_at: updatedAt,
-      } as OddsUpsertRow,
-      {
-        match_id: matchId,
-        market_id: "1x2",
-        selection: "X",
-        book_odds: oddX,
-        source: "bsd",
-        pricing_method: "bsd_model_derived",
-        updated_at: updatedAt,
-      } as OddsUpsertRow,
-      {
-        match_id: matchId,
-        market_id: "1x2",
-        selection: "2",
-        book_odds: odd2,
-        source: "bsd",
-        pricing_method: "bsd_model_derived",
-        updated_at: updatedAt,
-      } as OddsUpsertRow
-    );
-
-    has1x2.add(matchId);
-  }
-}
-
 
 
 export async function GET(req: Request): Promise<Response> {
@@ -1347,7 +1239,7 @@ export async function GET(req: Request): Promise<Response> {
       });
 
       matchRows.push(matchRow);
-      //oddsRows.push(...eventOddsRows);
+      oddsRows.push(...eventOddsRows);
 
       previewRows.push({
         id: matchRow.id,
@@ -1371,7 +1263,6 @@ export async function GET(req: Request): Promise<Response> {
 
     const uniqueMatchRows = uniqueBy(matchRows, (row) => String(row.id));
 
-    appendMissingFullTime1x2FromDc(oddsRows);
 
     const uniqueOddsRows = uniqueBy(
       oddsRows,
