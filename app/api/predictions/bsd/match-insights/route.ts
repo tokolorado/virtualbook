@@ -1,6 +1,7 @@
 // app/api/predictions/bsd/match-insights/route.ts
 
 import { NextResponse } from "next/server";
+import { scoreMatrix } from "@/lib/odds/poisson";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -107,6 +108,7 @@ type OddsRow = {
 };
 
 type OutcomeKey = "home" | "draw" | "away";
+type ScoreSource = "bsd_prediction" | "model_snapshot" | null;
 
 type ValuePick = {
   marketId: string;
@@ -229,6 +231,70 @@ function parsePredictedScore(value: string | null): {
   };
 }
 
+function emptyScorePrediction() {
+  return {
+    home: null,
+    away: null,
+    label: null,
+    outcome: null,
+    source: null as ScoreSource,
+    probability: null,
+  };
+}
+
+function buildModelScoreFromXg(
+  homeXg: number | null | undefined,
+  awayXg: number | null | undefined
+) {
+  const homeLambda = typeof homeXg === "number" ? homeXg : Number(homeXg);
+  const awayLambda = typeof awayXg === "number" ? awayXg : Number(awayXg);
+
+  if (
+    !Number.isFinite(homeLambda) ||
+    !Number.isFinite(awayLambda) ||
+    homeLambda <= 0 ||
+    awayLambda <= 0
+  ) {
+    return emptyScorePrediction();
+  }
+
+  const matrix = scoreMatrix(
+    Math.min(Math.max(homeLambda, 0.05), 5),
+    Math.min(Math.max(awayLambda, 0.05), 5),
+    8
+  );
+
+  let bestHome = 0;
+  let bestAway = 0;
+  let bestProbability = -1;
+
+  for (let home = 0; home < matrix.length; home += 1) {
+    for (let away = 0; away < matrix[home].length; away += 1) {
+      const probability = matrix[home][away] ?? 0;
+
+      if (probability > bestProbability) {
+        bestHome = home;
+        bestAway = away;
+        bestProbability = probability;
+      }
+    }
+  }
+
+  return {
+    home: bestHome,
+    away: bestAway,
+    label: `${bestHome}-${bestAway}`,
+    outcome:
+      bestHome > bestAway
+        ? ("home" as const)
+        : bestHome < bestAway
+          ? ("away" as const)
+          : ("draw" as const),
+    source: "model_snapshot" as ScoreSource,
+    probability: bestProbability,
+  };
+}
+
 function normalizeOutcomeKey(value: string | null): OutcomeKey | null {
   const normalized = String(value ?? "").trim().toLowerCase();
 
@@ -291,11 +357,25 @@ function sourceLabel(
   return "bsd";
 }
 
-function buildPredictionScoreLabel(prediction: EventPredictionRow | null) {
+function withScoreSource(
+  score: ReturnType<typeof parsePredictedScore>,
+  source: ScoreSource
+) {
+  return {
+    ...score,
+    source: score.label ? source : null,
+    probability: null,
+  };
+}
+
+function buildPredictionScoreLabel(
+  prediction: EventPredictionRow | null,
+  features: BsdEventFeaturesRow | null
+) {
   const explicit = parsePredictedScore(prediction?.predicted_score ?? null);
 
   if (explicit.label) {
-    return explicit;
+    return withScoreSource(explicit, "bsd_prediction");
   }
 
   if (
@@ -304,12 +384,22 @@ function buildPredictionScoreLabel(prediction: EventPredictionRow | null) {
     prediction?.predicted_away_score !== null &&
     prediction?.predicted_away_score !== undefined
   ) {
-    return parsePredictedScore(
-      `${prediction.predicted_home_score}-${prediction.predicted_away_score}`
+    return withScoreSource(
+      parsePredictedScore(
+        `${prediction.predicted_home_score}-${prediction.predicted_away_score}`
+      ),
+      "bsd_prediction"
     );
   }
 
-  return explicit;
+  const modelScore = buildModelScoreFromXg(
+    prediction?.expected_home_goals ?? features?.home_xg ?? null,
+    prediction?.expected_away_goals ?? features?.away_xg ?? null
+  );
+
+  if (modelScore.label) return modelScore;
+
+  return withScoreSource(explicit, null);
 }
 
 function buildNarrative(args: {
@@ -347,7 +437,7 @@ function buildNarrative(args: {
     features?.btts_prob
   );
 
-  const scorePrediction = buildPredictionScoreLabel(prediction);
+  const scorePrediction = buildPredictionScoreLabel(prediction, features);
 
   const explicitDirection =
     normalizeOutcomeKey(prediction?.predicted_label ?? null) ??
@@ -383,16 +473,22 @@ function buildNarrative(args: {
   if (scorePrediction.label && directionLabel) {
     if (hasScoreDirectionConflict) {
       bullets.push(
-        `Najbardziej prawdopodobny dokładny wynik to ${scorePrediction.label}, ale kierunek 1X2 modelu wskazuje: ${directionLabel}.`
+        scorePrediction.source === "model_snapshot"
+          ? `Modelowy wynik z xG to ${scorePrediction.label}, ale kierunek 1X2 wskazuje: ${directionLabel}.`
+          : `Najbardziej prawdopodobny dokładny wynik to ${scorePrediction.label}, ale kierunek 1X2 modelu wskazuje: ${directionLabel}.`
       );
     } else {
       bullets.push(
-        `Najbardziej prawdopodobny dokładny wynik to ${scorePrediction.label}, zgodny z kierunkiem: ${directionLabel}.`
+        scorePrediction.source === "model_snapshot"
+          ? `Modelowy wynik z xG to ${scorePrediction.label}, zgodny z kierunkiem: ${directionLabel}.`
+          : `Najbardziej prawdopodobny dokładny wynik to ${scorePrediction.label}, zgodny z kierunkiem: ${directionLabel}.`
       );
     }
   } else if (scorePrediction.label) {
     bullets.push(
-      `Najbardziej prawdopodobny dokładny wynik modelu to ${scorePrediction.label}.`
+      scorePrediction.source === "model_snapshot"
+        ? `Modelowy wynik z xG to ${scorePrediction.label}.`
+        : `Najbardziej prawdopodobny dokładny wynik modelu to ${scorePrediction.label}.`
     );
   } else if (directionLabel) {
     bullets.push(`Kierunek 1X2 modelu wskazuje: ${directionLabel}.`);
@@ -453,7 +549,9 @@ function buildNarrative(args: {
 
   const title =
     scorePrediction.label && directionLabel && hasScoreDirectionConflict
-      ? `Analiza BSD: wynik ${scorePrediction.label}, kierunek ${directionLabel}`
+      ? scorePrediction.source === "model_snapshot"
+        ? `Model xG: wynik ${scorePrediction.label}, kierunek ${directionLabel}`
+        : `Analiza BSD: wynik ${scorePrediction.label}, kierunek ${directionLabel}`
       : directionLabel
         ? `Model wskazuje: ${directionLabel}`
         : "Analiza modelowa BSD";
@@ -718,6 +816,11 @@ export async function GET(req: Request) {
       direction: narrative.direction,
       winnerLabel: narrative.directionLabel,
       scoreDirection: narrative.scorePrediction.outcome,
+      scoreSource: narrative.scorePrediction.source,
+      scoreProbability:
+        narrative.scorePrediction.probability === null
+          ? null
+          : probabilityPercent(narrative.scorePrediction.probability),
       hasScoreDirectionConflict: narrative.hasScoreDirectionConflict,
       expectedHomeGoals: round(expectedHomeGoals, 3),
       expectedAwayGoals: round(expectedAwayGoals, 3),

@@ -7,11 +7,14 @@ import {
   round2,
   scoreMatrix,
   totalGoalsDist,
+  normalize3way,
 } from "./poisson";
 
 export const INTERNAL_FALLBACK_PRICING_METHOD = "internal_model_fallback";
 export const INTERNAL_FALLBACK_SOURCE = "internal_model";
 export const INTERNAL_FALLBACK_MODEL_VERSION = "internal-fallback-v1";
+export const INTERNAL_FALLBACK_FEATURES_MODEL_VERSION =
+  "internal-fallback-features-v1";
 
 export type TeamModelSnapshot = {
   teamId: number | null;
@@ -32,6 +35,20 @@ export type InternalFallbackInput = {
   leagueAverageHomeGoals?: number | null;
   leagueAverageAwayGoals?: number | null;
   homeAdvantageMultiplier?: number | null;
+  neutralGround?: boolean | null;
+  localDerby?: boolean | null;
+};
+
+export type MatchFeatureFallbackInput = {
+  homeTeamName: string;
+  awayTeamName: string;
+  homeXg: number | null;
+  awayXg: number | null;
+  homeWinProb?: number | null;
+  drawProb?: number | null;
+  awayWinProb?: number | null;
+  over25Prob?: number | null;
+  bttsProb?: number | null;
   neutralGround?: boolean | null;
   localDerby?: boolean | null;
 };
@@ -92,6 +109,15 @@ function strengthRatio(value: number | null | undefined, fallback = 1) {
   return clamp(value, 0.55, 1.65);
 }
 
+function validProbability(value: number | null | undefined): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value > 0 &&
+    value < 1
+  );
+}
+
 function fatigueMultiplier(restDays: number | null | undefined) {
   if (restDays === null || restDays === undefined || !Number.isFinite(restDays)) {
     return 1;
@@ -118,6 +144,45 @@ function qualityForTeam(team: TeamModelSnapshot) {
   }
 
   return clamp(quality, 0, 1);
+}
+
+function build1x2Rows(args: {
+  p1: number;
+  px: number;
+  p2: number;
+  margin?: number;
+}): InternalFallbackOddsRow[] {
+  const margin = args.margin ?? MARGIN_3WAY;
+
+  return [
+    {
+      marketId: "1x2",
+      selection: "1",
+      fairProbability: args.p1,
+      fairOdds: 1 / args.p1,
+      bookProbability: args.p1 * margin,
+      bookOdds: round2(oddsFromProb(args.p1, margin)),
+      margin,
+    },
+    {
+      marketId: "1x2",
+      selection: "X",
+      fairProbability: args.px,
+      fairOdds: 1 / args.px,
+      bookProbability: args.px * margin,
+      bookOdds: round2(oddsFromProb(args.px, margin)),
+      margin,
+    },
+    {
+      marketId: "1x2",
+      selection: "2",
+      fairProbability: args.p2,
+      fairOdds: 1 / args.p2,
+      bookProbability: args.p2 * margin,
+      bookOdds: round2(oddsFromProb(args.p2, margin)),
+      margin,
+    },
+  ];
 }
 
 function build2WayRows(
@@ -251,35 +316,7 @@ export function buildInternalFallbackOdds(
   const totalDist = totalGoalsDist(matrix);
   const rows: InternalFallbackOddsRow[] = [];
 
-  rows.push(
-    {
-      marketId: "1x2",
-      selection: "1",
-      fairProbability: oneXTwo.p1,
-      fairOdds: 1 / oneXTwo.p1,
-      bookProbability: oneXTwo.p1 * MARGIN_3WAY,
-      bookOdds: round2(oddsFromProb(oneXTwo.p1, MARGIN_3WAY)),
-      margin: MARGIN_3WAY,
-    },
-    {
-      marketId: "1x2",
-      selection: "X",
-      fairProbability: oneXTwo.px,
-      fairOdds: 1 / oneXTwo.px,
-      bookProbability: oneXTwo.px * MARGIN_3WAY,
-      bookOdds: round2(oddsFromProb(oneXTwo.px, MARGIN_3WAY)),
-      margin: MARGIN_3WAY,
-    },
-    {
-      marketId: "1x2",
-      selection: "2",
-      fairProbability: oneXTwo.p2,
-      fairOdds: 1 / oneXTwo.p2,
-      bookProbability: oneXTwo.p2 * MARGIN_3WAY,
-      bookOdds: round2(oddsFromProb(oneXTwo.p2, MARGIN_3WAY)),
-      margin: MARGIN_3WAY,
-    }
-  );
+  rows.push(...build1x2Rows(oneXTwo));
 
   for (const [marketId, line] of [
     ["ou_1_5", 1.5],
@@ -320,6 +357,116 @@ export function buildInternalFallbackOdds(
       awayDefenseAllowed,
       neutralGround: input.neutralGround ?? null,
       localDerby: input.localDerby ?? null,
+    },
+  };
+}
+
+export function buildInternalFallbackOddsFromFeatures(
+  input: MatchFeatureFallbackInput
+): InternalFallbackResult {
+  const lambdaHome = validRate(input.homeXg)
+    ? clamp(input.homeXg, 0.25, 4.2)
+    : null;
+  const lambdaAway = validRate(input.awayXg)
+    ? clamp(input.awayXg, 0.2, 4)
+    : null;
+
+  let quality = 0;
+  if (lambdaHome !== null && lambdaAway !== null) quality += 0.45;
+  if (
+    validProbability(input.homeWinProb) &&
+    validProbability(input.drawProb) &&
+    validProbability(input.awayWinProb)
+  ) {
+    quality += 0.35;
+  }
+  if (validProbability(input.over25Prob)) quality += 0.1;
+  if (validProbability(input.bttsProb)) quality += 0.1;
+
+  if (lambdaHome === null || lambdaAway === null || quality < 0.55) {
+    return {
+      ok: false,
+      reason: "insufficient_team_stats",
+      diagnostics: {
+        mode: "bsd_event_features",
+        homeXg: input.homeXg,
+        awayXg: input.awayXg,
+        quality,
+      },
+    };
+  }
+
+  const matrix = scoreMatrix(lambdaHome, lambdaAway, 8);
+  const poisson1x2 = probs1X2FromMatrix(matrix);
+  const totalDist = totalGoalsDist(matrix);
+  const rows: InternalFallbackOddsRow[] = [];
+
+  const oneXTwo =
+    validProbability(input.homeWinProb) &&
+    validProbability(input.drawProb) &&
+    validProbability(input.awayWinProb)
+      ? normalize3way(input.homeWinProb, input.drawProb, input.awayWinProb)
+      : poisson1x2;
+
+  rows.push(...build1x2Rows(oneXTwo));
+
+  for (const [marketId, line] of [
+    ["ou_1_5", 1.5],
+    ["ou_2_5", 2.5],
+    ["ou_3_5", 3.5],
+  ] as const) {
+    const probabilities = probOverAsian(totalDist, line);
+    const overProbability =
+      marketId === "ou_2_5" && validProbability(input.over25Prob)
+        ? input.over25Prob * 0.65 + probabilities.pOver * 0.35
+        : probabilities.pOver;
+
+    rows.push(
+      ...build2WayRows(
+        marketId,
+        overProbability,
+        1 - overProbability,
+        MARGIN_2WAY
+      )
+    );
+  }
+
+  const poissonBtts =
+    (1 - Math.exp(-lambdaHome)) * (1 - Math.exp(-lambdaAway));
+  const bttsYes = validProbability(input.bttsProb)
+    ? input.bttsProb * 0.7 + poissonBtts * 0.3
+    : poissonBtts;
+
+  rows.push(
+    ...build2WayRows(
+      "btts",
+      clamp(bttsYes, 0.001, 0.999),
+      1 - clamp(bttsYes, 0.001, 0.999),
+      MARGIN_2WAY
+    )
+  );
+
+  return {
+    ok: true,
+    modelVersion: INTERNAL_FALLBACK_FEATURES_MODEL_VERSION,
+    lambdaHome: Number(lambdaHome.toFixed(4)),
+    lambdaAway: Number(lambdaAway.toFixed(4)),
+    confidence: Number(clamp(quality, 0, 1).toFixed(4)),
+    rows,
+    diagnostics: {
+      mode: "bsd_event_features",
+      homeTeamName: input.homeTeamName,
+      awayTeamName: input.awayTeamName,
+      homeXg: input.homeXg,
+      awayXg: input.awayXg,
+      homeWinProb: input.homeWinProb ?? null,
+      drawProb: input.drawProb ?? null,
+      awayWinProb: input.awayWinProb ?? null,
+      over25Prob: input.over25Prob ?? null,
+      bttsProb: input.bttsProb ?? null,
+      neutralGround: input.neutralGround ?? null,
+      localDerby: input.localDerby ?? null,
+      quality,
     },
   };
 }

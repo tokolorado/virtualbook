@@ -314,6 +314,8 @@ type BsdMatchInsightsResponse = {
     direction: "home" | "draw" | "away" | null;
     winnerLabel: string | null;
     scoreDirection: "home" | "draw" | "away" | null;
+    scoreSource: "bsd_prediction" | "model_snapshot" | null;
+    scoreProbability: number | null;
     hasScoreDirectionConflict: boolean;
     expectedHomeGoals: number | null;
     expectedAwayGoals: number | null;
@@ -2548,6 +2550,33 @@ export default function MatchInsightsSection({
                 <StatusChip>
                   Aktualizacja: {formatDateTime(prediction.updatedAt)}
                 </StatusChip>
+
+                <StatusChip
+                  tone={
+                    aiInsights?.meta?.hasEventPrediction
+                      ? "green"
+                      : prediction.scoreSource === "model_snapshot"
+                        ? "yellow"
+                        : "neutral"
+                  }
+                >
+                  {aiInsights?.meta?.hasEventPrediction
+                    ? "Pełna predykcja BSD"
+                    : prediction.scoreSource === "model_snapshot"
+                      ? "Wynik z modelu xG"
+                      : "Brak pełnej predykcji BSD"}
+                </StatusChip>
+
+                <StatusChip
+                  tone={aiInsights?.meta?.hasBsdEventFeatures ? "green" : "neutral"}
+                >
+                  Features BSD:{" "}
+                  {aiInsights?.meta?.hasBsdEventFeatures ? "OK" : "brak"}
+                </StatusChip>
+
+                <StatusChip tone={(aiInsights?.meta?.oddsCount ?? 0) > 0 ? "blue" : "neutral"}>
+                  Kursy w audycie: {aiInsights?.meta?.oddsCount ?? 0}
+                </StatusChip>
               </div>
             </div>
           </div>
@@ -2560,6 +2589,16 @@ export default function MatchInsightsSection({
               <div className="mt-2 text-2xl font-bold text-white">
                 {prediction.predictedScore ?? "—"}
               </div>
+              {prediction.predictedScore ? (
+                <div className="mt-1 text-xs text-neutral-500">
+                  {prediction.scoreSource === "model_snapshot"
+                    ? "Model xG"
+                    : "Predykcja BSD"}
+                  {prediction.scoreProbability !== null
+                    ? ` · ${formatInsightPercent(prediction.scoreProbability)}`
+                    : ""}
+                </div>
+              ) : null}
               <div className="mt-2 text-sm text-neutral-400">
                 Kierunek:{" "}
                 <span className="font-semibold text-white">
@@ -2652,6 +2691,66 @@ export default function MatchInsightsSection({
                       ? `${features.unavailableHomeCount}:${features.unavailableAwayCount}`
                       : "—"}
                   </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-neutral-800 px-5 py-5">
+            <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between">
+              <div>
+                <div className="text-sm font-semibold text-white">
+                  Audyt zrodel danych
+                </div>
+                <div className="mt-1 text-xs text-neutral-500">
+                  Pokazujemy, czy sekcja powstala z pelnej predykcji BSD, czy z
+                  lokalnego snapshotu features/xG.
+                </div>
+              </div>
+
+              <StatusChip tone={topPicks.length > 0 ? "green" : "neutral"}>
+                Value picks: {aiInsights?.meta?.topPicksCount ?? topPicks.length}
+              </StatusChip>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                  Prediction
+                </div>
+                <div className="mt-2 text-sm font-semibold text-white">
+                  {aiInsights?.meta?.hasEventPrediction
+                    ? "BSD full"
+                    : prediction.scoreSource === "model_snapshot"
+                      ? "Model xG"
+                      : "Brak"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                  Features
+                </div>
+                <div className="mt-2 text-sm font-semibold text-white">
+                  {aiInsights?.meta?.hasBsdEventFeatures ? "BSD OK" : "Brak"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                  Odds
+                </div>
+                <div className="mt-2 text-sm font-semibold text-white">
+                  {aiInsights?.meta?.oddsCount ?? 0} rynkow
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                  Snapshot
+                </div>
+                <div className="mt-2 text-sm font-semibold text-white">
+                  {formatDateTime(features?.updatedAt ?? prediction.updatedAt)}
                 </div>
               </div>
             </div>

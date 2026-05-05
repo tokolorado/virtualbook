@@ -22,6 +22,8 @@ type MatchPrediction = {
   predictedAwayScore: number | null;
   predictedResult: string | null;
   predictedLabel: string | null;
+  scoreSource: "bsd_prediction" | "model_snapshot" | null;
+  scoreProbability: number | null;
   expectedHomeGoals: number | null;
   expectedAwayGoals: number | null;
   probabilities: {
@@ -40,6 +42,27 @@ type MatchPrediction = {
   sourcePredictionId: string | null;
   sourceEventId: string | null;
   updatedAt: string | null;
+};
+
+type MatchDataQuality = {
+  score: number;
+  label: string;
+  hasRealBsdOdds: boolean;
+  hasBsdPrediction: boolean;
+  hasBsdFeatures: boolean;
+  hasModelScore: boolean;
+  sourceBadges: string[];
+  missing: string[];
+  updatedAt: string | null;
+};
+
+type MatchValueAlert = {
+  pick: Pick;
+  label: string;
+  modelProbability: number;
+  impliedProbability: number;
+  edgePercentPoints: number;
+  odds: number;
 };
 
 type Match = {
@@ -62,6 +85,8 @@ type Match = {
   injuryTime: number | null;
   odds: { "1": number | null; X: number | null; "2": number | null };
   prediction: MatchPrediction | null;
+  dataQuality: MatchDataQuality | null;
+  valueAlert: MatchValueAlert | null;
 };
 
 type Odds1x2DbRow = {
@@ -177,49 +202,125 @@ function safeString(v: unknown): string | null {
   return s.length > 0 ? s : null;
 }
 
-function buildPredictionFromPayload(raw: any): MatchPrediction | null {
-  if (!raw || typeof raw !== "object") return null;
+function safeStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
 
-  const predictedHomeScore = safeInt(raw?.predictedHomeScore);
-  const predictedAwayScore = safeInt(raw?.predictedAwayScore);
+  return v
+    .map((item) => safeString(item))
+    .filter((item): item is string => item !== null);
+}
+
+type PayloadRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): PayloadRecord | null {
+  if (!value || typeof value !== "object") return null;
+  return value as PayloadRecord;
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function buildDataQualityFromPayload(raw: unknown): MatchDataQuality | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+
+  const score = safeNum(record.score);
+  const label = safeString(record.label);
+
+  if (score === null && !label) return null;
+
+  return {
+    score: score ?? 0,
+    label: label ?? "Braki",
+    hasRealBsdOdds: record.hasRealBsdOdds === true,
+    hasBsdPrediction: record.hasBsdPrediction === true,
+    hasBsdFeatures: record.hasBsdFeatures === true,
+    hasModelScore: record.hasModelScore === true,
+    sourceBadges: safeStringArray(record.sourceBadges),
+    missing: safeStringArray(record.missing),
+    updatedAt: safeString(record.updatedAt),
+  };
+}
+
+function buildValueAlertFromPayload(raw: unknown): MatchValueAlert | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+
+  const pick = String(record.pick ?? "") as Pick;
+  if (pick !== "1" && pick !== "X" && pick !== "2") return null;
+
+  const modelProbability = safeNum(record.modelProbability);
+  const impliedProbability = safeNum(record.impliedProbability);
+  const edgePercentPoints = safeNum(record.edgePercentPoints);
+  const odds = safeNum(record.odds);
+
+  if (
+    modelProbability === null ||
+    impliedProbability === null ||
+    edgePercentPoints === null ||
+    odds === null
+  ) {
+    return null;
+  }
+
+  return {
+    pick,
+    label: safeString(record.label) ?? pick,
+    modelProbability,
+    impliedProbability,
+    edgePercentPoints,
+    odds,
+  };
+}
+
+function buildPredictionFromPayload(raw: unknown): MatchPrediction | null {
+  const record = asRecord(raw);
+  if (!record) return null;
+
+  const predictedHomeScore = safeInt(record.predictedHomeScore);
+  const predictedAwayScore = safeInt(record.predictedAwayScore);
 
   const predictedScore =
-    safeString(raw?.predictedScore) ??
+    safeString(record.predictedScore) ??
     (predictedHomeScore !== null && predictedAwayScore !== null
       ? `${predictedHomeScore}-${predictedAwayScore}`
       : null);
 
-  const probabilitiesRaw =
-    raw?.probabilities && typeof raw.probabilities === "object"
-      ? raw.probabilities
-      : {};
+  const probabilitiesRaw = asRecord(record.probabilities) ?? {};
 
   const prediction: MatchPrediction = {
-    source: safeString(raw?.source),
-    market: safeString(raw?.market),
+    source: safeString(record.source),
+    market: safeString(record.market),
     predictedScore,
     predictedHomeScore,
     predictedAwayScore,
-    predictedResult: safeString(raw?.predictedResult),
-    predictedLabel: safeString(raw?.predictedLabel),
-    expectedHomeGoals: safeNum(raw?.expectedHomeGoals),
-    expectedAwayGoals: safeNum(raw?.expectedAwayGoals),
+    predictedResult: safeString(record.predictedResult),
+    predictedLabel: safeString(record.predictedLabel),
+    scoreSource:
+      record.scoreSource === "bsd_prediction" ||
+      record.scoreSource === "model_snapshot"
+        ? record.scoreSource
+        : null,
+    scoreProbability: safeNum(record.scoreProbability),
+    expectedHomeGoals: safeNum(record.expectedHomeGoals),
+    expectedAwayGoals: safeNum(record.expectedAwayGoals),
     probabilities: {
-      homeWin: safeNum(probabilitiesRaw?.homeWin),
-      draw: safeNum(probabilitiesRaw?.draw),
-      awayWin: safeNum(probabilitiesRaw?.awayWin),
-      over15: safeNum(probabilitiesRaw?.over15),
-      over25: safeNum(probabilitiesRaw?.over25),
-      over35: safeNum(probabilitiesRaw?.over35),
-      bttsYes: safeNum(probabilitiesRaw?.bttsYes),
+      homeWin: safeNum(probabilitiesRaw.homeWin),
+      draw: safeNum(probabilitiesRaw.draw),
+      awayWin: safeNum(probabilitiesRaw.awayWin),
+      over15: safeNum(probabilitiesRaw.over15),
+      over25: safeNum(probabilitiesRaw.over25),
+      over35: safeNum(probabilitiesRaw.over35),
+      bttsYes: safeNum(probabilitiesRaw.bttsYes),
     },
-    confidence: safeNum(raw?.confidence),
-    modelVersion: safeString(raw?.modelVersion),
-    matchConfidence: safeString(raw?.matchConfidence),
-    matchScore: safeNum(raw?.matchScore),
-    sourcePredictionId: safeString(raw?.sourcePredictionId),
-    sourceEventId: safeString(raw?.sourceEventId),
-    updatedAt: safeString(raw?.updatedAt),
+    confidence: safeNum(record.confidence),
+    modelVersion: safeString(record.modelVersion),
+    matchConfidence: safeString(record.matchConfidence),
+    matchScore: safeNum(record.matchScore),
+    sourcePredictionId: safeString(record.sourcePredictionId),
+    sourceEventId: safeString(record.sourceEventId),
+    updatedAt: safeString(record.updatedAt),
   };
 
   const hasUsefulData =
@@ -625,41 +726,6 @@ function shortPickLabel(pick: Pick) {
   return "2";
 }
 
-
-function readTeamName(team: any, fallback: string) {
-  if (!team) return fallback;
-
-  if (typeof team === "string" && team.trim()) return team.trim();
-
-  const candidates = [
-    team.name,
-    team.shortName,
-    team.short_name,
-    team.fullName,
-    team.full_name,
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-  }
-
-  return fallback;
-}
-
-function readTeamId(team: any): number | null {
-  if (!team) return null;
-
-  const raw =
-    typeof team === "number" || typeof team === "string"
-      ? team
-      : team.id ?? team.team_id ?? team.teamId;
-
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
-
 function firstText(...values: unknown[]) {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
@@ -670,52 +736,68 @@ function firstText(...values: unknown[]) {
   return null;
 }
 
-function readTeamNameFromMatch(m: any, side: "home" | "away") {
+function readTeamNameFromMatch(rawMatch: unknown, side: "home" | "away") {
+  const m = asRecord(rawMatch);
+  if (!m) return side === "home" ? "Home" : "Away";
+
+  const homeTeam = asRecord(m.homeTeam);
+  const homeTeamObj = asRecord(m.home_team_obj);
+  const awayTeam = asRecord(m.awayTeam);
+  const awayTeamObj = asRecord(m.away_team_obj);
+
   if (side === "home") {
     return (
       firstText(
-        m?.homeTeam?.name,
-        m?.homeTeam?.shortName,
-        m?.homeTeam?.short_name,
-        m?.home_team_obj?.name,
-        m?.home_team_obj?.short_name,
-        m?.home_team_name,
-        m?.homeTeamName,
-        m?.home_name,
-        m?.home_team,
-        m?.home
+        homeTeam?.name,
+        homeTeam?.shortName,
+        homeTeam?.short_name,
+        homeTeamObj?.name,
+        homeTeamObj?.short_name,
+        m.home_team_name,
+        m.homeTeamName,
+        m.home_name,
+        m.home_team,
+        m.home
       ) ?? "Home"
     );
   }
 
   return (
     firstText(
-      m?.awayTeam?.name,
-      m?.awayTeam?.shortName,
-      m?.awayTeam?.short_name,
-      m?.away_team_obj?.name,
-      m?.away_team_obj?.short_name,
-      m?.away_team_name,
-      m?.awayTeamName,
-      m?.away_name,
-      m?.away_team,
-      m?.away
+      awayTeam?.name,
+      awayTeam?.shortName,
+      awayTeam?.short_name,
+      awayTeamObj?.name,
+      awayTeamObj?.short_name,
+      m.away_team_name,
+      m.awayTeamName,
+      m.away_name,
+      m.away_team,
+      m.away
     ) ?? "Away"
   );
 }
 
-function readTeamIdFromMatch(m: any, side: "home" | "away") {
+function readTeamIdFromMatch(rawMatch: unknown, side: "home" | "away") {
+  const m = asRecord(rawMatch);
+  if (!m) return null;
+
+  const homeTeam = asRecord(m.homeTeam);
+  const homeTeamObj = asRecord(m.home_team_obj);
+  const awayTeam = asRecord(m.awayTeam);
+  const awayTeamObj = asRecord(m.away_team_obj);
+
   const raw =
     side === "home"
-      ? m?.homeTeam?.id ??
-        m?.home_team_obj?.id ??
-        m?.home_team_id ??
-        m?.homeTeamId ??
+      ? homeTeam?.id ??
+        homeTeamObj?.id ??
+        m.home_team_id ??
+        m.homeTeamId ??
         null
-      : m?.awayTeam?.id ??
-        m?.away_team_obj?.id ??
-        m?.away_team_id ??
-        m?.awayTeamId ??
+      : awayTeam?.id ??
+        awayTeamObj?.id ??
+        m.away_team_id ??
+        m.awayTeamId ??
         null;
 
   const n = Number(raw);
@@ -723,21 +805,29 @@ function readTeamIdFromMatch(m: any, side: "home" | "away") {
 }
 
 
-function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
+function buildMatchesFromPayload(payload: unknown, selectedDate: string): Match[] {
   const all: Match[] = [];
+  const payloadRecord = asRecord(payload);
+  const results = Array.isArray(payloadRecord?.results)
+    ? payloadRecord.results
+    : [];
 
-  for (const item of payload?.results ?? []) {
-    const league = item?.league;
-    const code = league?.code;
+  for (const itemRaw of results) {
+    const item = asRecord(itemRaw);
+    const league = asRecord(item?.league);
+    const code = safeString(league?.code);
 
     if (!code) continue;
 
-    const fixtures = item?.fixtures;
-    const competitionName = fixtures?.competition?.name ?? league?.name ?? code;
+    const fixtures = asRecord(item?.fixtures);
+    const competition = asRecord(fixtures?.competition);
+    const competitionName =
+      safeString(competition?.name) ?? safeString(league?.name) ?? code;
     const list = Array.isArray(fixtures?.matches) ? fixtures.matches : [];
 
-    for (const m of list) {
-      const utc = m?.utcDate;
+    for (const matchRaw of list) {
+      const m = asRecord(matchRaw);
+      const utc = safeString(m?.utcDate);
       if (!utc) continue;
 
       const time = formatLocalTime(utc);
@@ -747,13 +837,18 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
 
       const homeName = readTeamNameFromMatch(m, "home");
       const awayName = readTeamNameFromMatch(m, "away");
-      const displayHomeScore = safeNum(m?.displayScore?.home);
-      const displayAwayScore = safeNum(m?.displayScore?.away);
-      const canonicalHomeScore = safeNum(m?.score?.fullTime?.home);
-      const canonicalAwayScore = safeNum(m?.score?.fullTime?.away);
+      const displayScore = asRecord(m?.displayScore);
+      const score = asRecord(m?.score);
+      const fullTimeScore = asRecord(score?.fullTime);
+      const live = asRecord(m?.live);
+      const odds = asRecord(m?.odds);
+      const displayHomeScore = safeNum(displayScore?.home);
+      const displayAwayScore = safeNum(displayScore?.away);
+      const canonicalHomeScore = safeNum(fullTimeScore?.home);
+      const canonicalAwayScore = safeNum(fullTimeScore?.away);
 
       all.push({
-        id: String(m.id),
+        id: String(m?.id),
         competitionCode: code,
         competitionName,
         leagueLine: `${competitionName} • ${time}`,
@@ -764,18 +859,20 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
         time,
         kickoffUtc: utc,
         status: String(m?.status ?? "SCHEDULED"),
-        isLive: Boolean(m?.live?.isLive),
-        isFinished: Boolean(m?.live?.isFinished),
+        isLive: live?.isLive === true,
+        isFinished: live?.isFinished === true,
         homeScore: displayHomeScore ?? canonicalHomeScore,
         awayScore: displayAwayScore ?? canonicalAwayScore,
         minute: safeInt(m?.minute),
         injuryTime: safeInt(m?.injuryTime ?? m?.injury_time),
         odds: {
-          "1": m?.odds?.["1"] ?? null,
-          X: m?.odds?.X ?? null,
-          "2": m?.odds?.["2"] ?? null,
+          "1": safeNum(odds?.["1"]),
+          X: safeNum(odds?.X),
+          "2": safeNum(odds?.["2"]),
         },
         prediction: buildPredictionFromPayload(m?.prediction),
+        dataQuality: buildDataQualityFromPayload(m?.dataQuality),
+        valueAlert: buildValueAlertFromPayload(m?.valueAlert),
       });
     }
   }
@@ -1067,6 +1164,67 @@ function MatchStatusPill({
   return <SmallPill tone="green">Pre-match</SmallPill>;
 }
 
+function dataQualityTone(label?: string | null): "neutral" | "green" | "yellow" | "blue" {
+  const normalized = String(label ?? "").toLowerCase();
+  if (normalized === "premium") return "green";
+  if (normalized === "solidne") return "blue";
+  if (normalized === "czesciowe" || normalized === "częściowe") return "yellow";
+  return "neutral";
+}
+
+function dataQualityLabel(label?: string | null) {
+  const normalized = String(label ?? "").toLowerCase();
+  if (normalized === "czesciowe") return "Częściowe";
+  return label || "Braki";
+}
+
+function MatchDataQualityStrip({
+  match,
+  compact = false,
+}: {
+  match: Match;
+  compact?: boolean;
+}) {
+  const quality = match.dataQuality;
+  const valueAlert = match.valueAlert;
+
+  if (!quality && !valueAlert) return null;
+
+  const badges = quality?.sourceBadges.slice(0, compact ? 2 : 4) ?? [];
+  const missing = quality?.missing.slice(0, compact ? 1 : 2) ?? [];
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
+      {quality ? (
+        <SmallPill tone={dataQualityTone(quality.label)}>
+          Data BSD {dataQualityLabel(quality.label)} · {quality.score}/100
+        </SmallPill>
+      ) : null}
+
+      {badges.map((badge) => (
+        <span
+          key={badge}
+          className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1 font-semibold text-neutral-300"
+        >
+          {badge}
+        </span>
+      ))}
+
+      {valueAlert ? (
+        <span className="rounded-full border border-green-500/25 bg-green-500/10 px-2.5 py-1 font-semibold text-green-300">
+          Value {valueAlert.pick} · +{valueAlert.edgePercentPoints.toFixed(1)} pp
+        </span>
+      ) : null}
+
+      {!quality?.hasRealBsdOdds && missing.length > 0 ? (
+        <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2.5 py-1 font-semibold text-yellow-300">
+          Brakuje: {missing.join(", ")}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function PredictionPanel({
   prediction,
   homeTeam,
@@ -1096,6 +1254,12 @@ function PredictionPanel({
     direction !== scoreDirection;
 
   const source = prediction.source?.toUpperCase() ?? "AI";
+  const scoreSourceLabel =
+    prediction.scoreSource === "model_snapshot"
+      ? "Model xG"
+      : prediction.scoreSource === "bsd_prediction"
+        ? "Predykcja BSD"
+        : source;
   const model = prediction.modelVersion ?? null;
 
   return (
@@ -1111,7 +1275,7 @@ function PredictionPanel({
             AI prediction
           </div>
           <div className="mt-1 text-xs text-neutral-400">
-            {source}
+            {scoreSourceLabel}
             {model ? ` • ${model}` : ""}
             {prediction.matchConfidence ? ` • ${prediction.matchConfidence}` : ""}
           </div>
@@ -1127,6 +1291,10 @@ function PredictionPanel({
           <div className="mt-0.5 text-[11px] text-neutral-400">
             kierunek {pickCode} / {pick} • pewność{" "}
             {formatPredictionPercent(prediction.confidence)}
+            {prediction.scoreSource === "model_snapshot" &&
+            prediction.scoreProbability !== null
+              ? ` - score ${formatPredictionPercent(prediction.scoreProbability)}`
+              : ""}
           </div>
         </div>
       </div>
@@ -1617,19 +1785,19 @@ export default function EventsPage() {
       });
 
       const text = await r.text().catch(() => "");
-      let j: any = {};
+      let j: PayloadRecord = {};
 
       try {
-        j = text ? JSON.parse(text) : {};
+        j = asRecord(text ? JSON.parse(text) : {}) ?? {};
       } catch {
         j = { raw: text?.slice(0, 300) || "" };
       }
 
       if (!r.ok) {
         const msg =
-          j?.error ||
-          j?.message ||
-          (typeof j?.raw === "string" && j.raw ? j.raw : "") ||
+          safeString(j.error) ||
+          safeString(j.message) ||
+          safeString(j.raw) ||
           `odds sync failed (HTTP ${r.status})`;
 
         setMatchesError(`Nie udało się zsynchronizować kursów: ${msg}`);
@@ -1642,26 +1810,27 @@ export default function EventsPage() {
       );
 
       const text2 = await rr.text();
-      let payload: any = null;
+      let payload: PayloadRecord = {};
 
       try {
-        payload = JSON.parse(text2);
+        payload = asRecord(JSON.parse(text2)) ?? {};
       } catch {
         payload = { error: text2?.slice(0, 300) || "Non-JSON response" };
       }
 
       if (!rr.ok) {
-        const msg = payload?.error || `Błąd /api/events (HTTP ${rr.status})`;
+        const msg =
+          safeString(payload.error) || `Błąd /api/events (HTTP ${rr.status})`;
         setMatchesError(msg);
         return;
       }
 
       const apiHorizonTo =
-        typeof payload?.horizonTo === "string" ? payload.horizonTo : null;
+        typeof payload.horizonTo === "string" ? payload.horizonTo : null;
 
       setHorizonYmd(apiHorizonTo);
 
-      const apiSaysBeyond = Boolean(payload?.isBeyondHorizon);
+      const apiSaysBeyond = Boolean(payload.isBeyondHorizon);
       const uiSaysBeyond = isBeyondHorizonDay(selectedDate, apiHorizonTo);
 
       if (apiSaysBeyond || uiSaysBeyond) {
@@ -1688,7 +1857,7 @@ export default function EventsPage() {
 
       const loadedAt =
         latestOddsUpdatedAt ??
-        (typeof payload?.updatedAt === "string"
+        (typeof payload.updatedAt === "string"
           ? payload.updatedAt
           : new Date().toISOString());
 
@@ -1738,10 +1907,10 @@ export default function EventsPage() {
         );
 
         const text = await r.text();
-        let payload: any = null;
+        let payload: PayloadRecord = {};
 
         try {
-          payload = JSON.parse(text);
+          payload = asRecord(JSON.parse(text)) ?? {};
         } catch {
           payload = { error: text?.slice(0, 300) || "Non-JSON response" };
         }
@@ -1749,18 +1918,18 @@ export default function EventsPage() {
         if (!r.ok) {
           if (!cancelled) {
             setMatchesError(
-              payload?.error || `Błąd /api/events (HTTP ${r.status})`
+              safeString(payload.error) || `Błąd /api/events (HTTP ${r.status})`
             );
           }
           return;
         }
 
         const apiHorizonTo =
-          typeof payload?.horizonTo === "string" ? payload.horizonTo : null;
+          typeof payload.horizonTo === "string" ? payload.horizonTo : null;
 
         if (!cancelled) setHorizonYmd(apiHorizonTo);
 
-        const apiSaysBeyond = Boolean(payload?.isBeyondHorizon);
+        const apiSaysBeyond = Boolean(payload.isBeyondHorizon);
         const uiSaysBeyond = isBeyondHorizonDay(selectedDate, apiHorizonTo);
 
         if (apiSaysBeyond || uiSaysBeyond) {
@@ -1787,7 +1956,7 @@ export default function EventsPage() {
 
         const loadedAt =
           latestOddsUpdatedAt ??
-          (typeof payload?.updatedAt === "string"
+          (typeof payload.updatedAt === "string"
             ? payload.updatedAt
             : new Date().toISOString());
 
@@ -1801,9 +1970,9 @@ export default function EventsPage() {
           setMatches(hydratedMatches);
           setMatchesLoadedAt(loadedAt);
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
-          setMatchesError(e?.message || "Nie udało się pobrać meczów.");
+          setMatchesError(getErrorMessage(e, "Nie udało się pobrać meczów."));
         }
       } finally {
         if (!cancelled) setLoadingMatches(false);
@@ -1840,10 +2009,10 @@ export default function EventsPage() {
         );
 
         const text = await r.text();
-        let j: any = null;
+        let j: PayloadRecord = {};
 
         try {
-          j = JSON.parse(text);
+          j = asRecord(JSON.parse(text)) ?? {};
         } catch {
           j = { error: text?.slice(0, 300) || "Non-JSON response" };
         }
@@ -1852,30 +2021,32 @@ export default function EventsPage() {
           if (!cancelled) {
             setStandings(null);
             setStandingsError(
-              j?.error || `Błąd /api/standings (HTTP ${r.status})`
+              safeString(j.error) || `Błąd /api/standings (HTTP ${r.status})`
             );
           }
           return;
         }
 
-        const rows: StandingsRowUI[] = Array.isArray(j?.rows) ? j.rows : [];
+        const rows: StandingsRowUI[] = Array.isArray(j.rows)
+          ? (j.rows as StandingsRowUI[])
+          : [];
         rows.sort((a, b) => Number(a.position) - Number(b.position));
 
         if (!cancelled) {
           setStandings({
-            competitionCode: String(j?.competitionCode || selectedLeague),
+            competitionCode: String(j.competitionCode || selectedLeague),
             competitionName:
-              String(j?.competitionName || "") ||
+              String(j.competitionName || "") ||
               FREE_TIER_LEAGUES.find((x) => x.code === selectedLeague)?.name ||
               selectedLeague,
-            season: j?.season ? String(j.season) : null,
+            season: j.season ? String(j.season) : null,
             rows,
           });
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (!cancelled) {
           setStandings(null);
-          setStandingsError(e?.message || "Nie udało się pobrać tabeli.");
+          setStandingsError(getErrorMessage(e, "Nie udało się pobrać tabeli."));
         }
       } finally {
         if (!cancelled) setLoadingStandings(false);
@@ -2195,6 +2366,8 @@ export default function EventsPage() {
           compact
         />
 
+        <MatchDataQualityStrip match={m} compact />
+
         <div className="mt-4">{renderMarketButtons(m)}</div>
 
         <div className="mt-3 text-xs text-neutral-500 transition group-hover:text-neutral-300">
@@ -2249,6 +2422,8 @@ export default function EventsPage() {
               homeTeam={m.home}
               awayTeam={m.away}
             />
+
+            <MatchDataQualityStrip match={m} />
 
             <div className="mt-3 text-xs text-neutral-500 transition group-hover:text-neutral-300">
               Kliknij kartę, aby zobaczyć wszystkie rynki

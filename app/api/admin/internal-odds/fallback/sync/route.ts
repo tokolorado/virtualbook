@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/requireAdmin";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import {
   buildInternalFallbackOdds,
+  buildInternalFallbackOddsFromFeatures,
   INTERNAL_FALLBACK_MODEL_VERSION,
   INTERNAL_FALLBACK_PRICING_METHOD,
   INTERNAL_FALLBACK_SOURCE,
@@ -41,6 +42,19 @@ type TeamSnapshotRow = {
 
 type OddsAvailabilityRow = {
   match_id: number | string;
+};
+
+type BsdEventFeaturesRow = {
+  match_id: number | string;
+  home_xg: number | string | null;
+  away_xg: number | string | null;
+  home_win_prob: number | string | null;
+  draw_prob: number | string | null;
+  away_win_prob: number | string | null;
+  over25_prob: number | string | null;
+  btts_prob: number | string | null;
+  model_version: string | null;
+  updated_at: string | null;
 };
 
 function isYYYYMMDD(value: unknown): value is string {
@@ -173,6 +187,31 @@ async function readInternalFallbackMatchIds(
   );
 }
 
+async function readBsdFeaturesMap(
+  supabase: ReturnType<typeof supabaseAdmin>,
+  matchIds: number[]
+) {
+  const featuresMap = new Map<number, BsdEventFeaturesRow>();
+  if (!matchIds.length) return featuresMap;
+
+  const { data, error } = await supabase
+    .from("bsd_event_features")
+    .select(
+      "match_id, home_xg, away_xg, home_win_prob, draw_prob, away_win_prob, over25_prob, btts_prob, model_version, updated_at"
+    )
+    .in("match_id", matchIds);
+
+  if (error) throw new Error(`bsd_event_features read failed: ${error.message}`);
+
+  for (const row of (data ?? []) as BsdEventFeaturesRow[]) {
+    const matchId = toNumber(row.match_id);
+    if (matchId === null) continue;
+    featuresMap.set(matchId, row);
+  }
+
+  return featuresMap;
+}
+
 export async function GET(req: Request) {
   const unauthorized = await authorize(req);
   if (unauthorized) return unauthorized;
@@ -220,6 +259,7 @@ export async function GET(req: Request) {
       supabase,
       matchIds
     );
+    const featuresByMatch = await readBsdFeaturesMap(supabase, matchIds);
 
     const candidates = matches.filter((match) => {
       const id = Number(match.id);
@@ -248,27 +288,53 @@ export async function GET(req: Request) {
         ),
       ]);
 
-      if (!homeSnapshot || !awaySnapshot) {
+      const features = featuresByMatch.get(Number(match.id)) ?? null;
+
+      let result =
+        homeSnapshot && awaySnapshot
+          ? buildInternalFallbackOdds({
+              home: homeSnapshot,
+              away: awaySnapshot,
+              neutralGround: match.is_neutral_ground,
+              localDerby: match.is_local_derby,
+            })
+          : null;
+
+      let inputMode: "team_stat_snapshots" | "bsd_event_features" =
+        "team_stat_snapshots";
+
+      if ((!result || !result.ok) && features) {
+        result = buildInternalFallbackOddsFromFeatures({
+          homeTeamName: match.home_team,
+          awayTeamName: match.away_team,
+          homeXg: toNumber(features.home_xg),
+          awayXg: toNumber(features.away_xg),
+          homeWinProb: toNumber(features.home_win_prob),
+          drawProb: toNumber(features.draw_prob),
+          awayWinProb: toNumber(features.away_win_prob),
+          over25Prob: toNumber(features.over25_prob),
+          bttsProb: toNumber(features.btts_prob),
+          neutralGround: match.is_neutral_ground,
+          localDerby: match.is_local_derby,
+        });
+        inputMode = "bsd_event_features";
+      }
+
+      if (!result) {
         skipped.push({
           matchId: match.id,
-          reason: "missing_team_stat_snapshot",
+          reason: "missing_team_stat_snapshot_and_bsd_features",
           homeTeamId: match.home_team_id,
           awayTeamId: match.away_team_id,
         });
         continue;
       }
 
-      const result = buildInternalFallbackOdds({
-        home: homeSnapshot,
-        away: awaySnapshot,
-        neutralGround: match.is_neutral_ground,
-        localDerby: match.is_local_derby,
-      });
-
       if (!result.ok) {
         skipped.push({
           matchId: match.id,
           reason: result.reason,
+          inputMode,
           diagnostics: result.diagnostics,
         });
         continue;
@@ -282,8 +348,22 @@ export async function GET(req: Request) {
         lambda_home: result.lambdaHome,
         lambda_away: result.lambdaAway,
         input_snapshot: {
+          inputMode,
           home: homeSnapshot,
           away: awaySnapshot,
+          bsdEventFeatures: features
+            ? {
+                homeXg: toNumber(features.home_xg),
+                awayXg: toNumber(features.away_xg),
+                homeWinProb: toNumber(features.home_win_prob),
+                drawProb: toNumber(features.draw_prob),
+                awayWinProb: toNumber(features.away_win_prob),
+                over25Prob: toNumber(features.over25_prob),
+                bttsProb: toNumber(features.btts_prob),
+                modelVersion: features.model_version,
+                updatedAt: features.updated_at,
+              }
+            : null,
           match: {
             id: match.id,
             competitionId: match.competition_id,
@@ -325,6 +405,7 @@ export async function GET(req: Request) {
             lambdaHome: result.lambdaHome,
             lambdaAway: result.lambdaAway,
             diagnostics: result.diagnostics,
+            inputMode,
           },
         });
       }
@@ -352,6 +433,9 @@ export async function GET(req: Request) {
       source: INTERNAL_FALLBACK_SOURCE,
       pricingMethod: INTERNAL_FALLBACK_PRICING_METHOD,
       modelVersion: INTERNAL_FALLBACK_MODEL_VERSION,
+      modelVersions: Array.from(
+        new Set(runs.map((run) => String(run.model_version)))
+      ),
       dryRun,
       overwrite,
       date,
@@ -370,6 +454,10 @@ export async function GET(req: Request) {
         confidence: run.confidence,
         lambdaHome: run.lambda_home,
         lambdaAway: run.lambda_away,
+        inputMode:
+          typeof run.input_snapshot === "object" && run.input_snapshot !== null
+            ? (run.input_snapshot as { inputMode?: string }).inputMode ?? null
+            : null,
       })),
     });
   } catch (error) {

@@ -51,6 +51,10 @@ function utcTodayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function isCronAuthorized(req: Request) {
   const expected = process.env.CRON_SECRET;
   if (!expected) return false;
@@ -187,6 +191,15 @@ export async function POST(req: Request) {
     qs.set("refreshStaleHours", "24");
 
     return await getInternal(`/api/predictions/bsd/sync?${qs.toString()}`);
+  };
+
+  const callInternalFallbackOddsSync = async (date: string) => {
+    const qs = new URLSearchParams();
+    qs.set("date", date);
+
+    return await getInternal(
+      `/api/admin/internal-odds/fallback/sync?${qs.toString()}`
+    );
   };
 
     const sb = supabaseAdmin();
@@ -327,12 +340,16 @@ export async function POST(req: Request) {
     let predictionsUpserted = 0;
     let predictionsMatched = 0;
     let predictionsRealOddsMatches = 0;
+    let fallbackPricedMatches = 0;
+    let fallbackOddsRows = 0;
+    let fallbackSkipped = 0;
     let message: string | null = null;
-    let extra: any = null;
+    let extra: Record<string, unknown> | null = null;
 
     try {
       const bsdRes = await callBsdMatchesSync({ date: cursorDate });
       const predictionsRes = await callBsdPredictionsSync(cursorDate);
+      const fallbackOddsRes = await callInternalFallbackOddsSync(cursorDate);
       const enqueueRes = await callEnqueueMatchMapping(cursorDate);
       const processRes = await callProcessMatchMapping();
 
@@ -352,18 +369,24 @@ export async function POST(req: Request) {
         Number(predictionsRes?.summary?.matchedCount ?? 0) || 0;
       predictionsRealOddsMatches =
         Number(predictionsRes?.db?.matchesWithRealBsdOddsCount ?? 0) || 0;
+      fallbackPricedMatches =
+        Number(fallbackOddsRes?.summary?.pricedMatches ?? 0) || 0;
+      fallbackOddsRows =
+        Number(fallbackOddsRes?.summary?.upsertedOddsRows ?? 0) || 0;
+      fallbackSkipped = Number(fallbackOddsRes?.summary?.skipped ?? 0) || 0;
 
       extra = {
         bsd: bsdRes,
         bsdPredictions: predictionsRes,
+        internalFallbackOdds: fallbackOddsRes,
         matchMapping: {
           enqueue: enqueueRes,
           process: processRes,
         },
       };
-    } catch (e: any) {
+    } catch (e: unknown) {
       stepOk = false;
-      message = e?.message ?? "runner_call_error";
+      message = errorMessage(e, "runner_call_error");
     }
 
     // 4) zapisz log
@@ -432,11 +455,16 @@ export async function POST(req: Request) {
         matched: predictionsMatched,
         matchesWithRealOdds: predictionsRealOddsMatches,
       },
+      internalFallbackOdds: {
+        pricedMatches: fallbackPricedMatches,
+        oddsRows: fallbackOddsRows,
+        skipped: fallbackSkipped,
+      },
       bettingClosedUpdated: closeRes.closed,
       bettingCloseCutoffIso: closeRes.cutoffIso,
       bettingCloseError: closeRes.ok ? null : closeRes.error,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (!released) {
       await sb.rpc("release_sync_lock", { p_now: nowIso });
     }
@@ -444,7 +472,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: e?.message ?? "sync_runner_failed",
+        error: errorMessage(e, "sync_runner_failed"),
       },
       { status: 500 }
     );
