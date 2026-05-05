@@ -192,7 +192,8 @@ export async function POST(req: Request) {
       .from("odds")
       .select("market_id,selection,fair_prob,book_odds")
       .eq("match_id", matchIds[0])
-      .eq("source", "bsd");
+      .eq("source", "bsd")
+      .eq("pricing_method", "bsd_market_normalized");
 
     if (oddsError) {
       return jsonError("Nie udalo sie pobrac kursow do Bet Buildera.", 500, {

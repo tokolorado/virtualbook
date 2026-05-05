@@ -611,13 +611,14 @@ export async function GET(req: Request) {
     });
   }
 
-  const { data: oddsData, error: oddsError } = await supabase
+    const { data: oddsData, error: oddsError } = await supabase
     .from("odds")
     .select(
-      "match_id,market_id,selection,book_odds,fair_prob,fair_odds,book_prob,margin,pricing_method,is_model,source,updated_at"
+        "match_id,market_id,selection,book_odds,fair_prob,fair_odds,book_prob,margin,pricing_method,is_model,source,updated_at"
     )
     .eq("match_id", matchId)
-    .eq("source", "bsd");
+    .eq("source", "bsd")
+    .eq("pricing_method", "bsd_market_normalized");
 
   if (oddsError) {
     return jsonError("Odds read failed", 500, {

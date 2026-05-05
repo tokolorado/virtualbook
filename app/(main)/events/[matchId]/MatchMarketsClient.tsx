@@ -1032,6 +1032,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
             )
             .eq("match_id", matchIdNum)
             .eq("source", "bsd")
+            .eq("pricing_method", "bsd_market_normalized")
             .order("market_id", { ascending: true })
             .order("selection", { ascending: true }),
 
@@ -1184,20 +1185,19 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     refreshKey,
   ]);
 
-  const markets = useMemo(() => {
-  const filteredOddsRows = oddsRows.filter((row) => {
-    if (row.source !== "bsd") return false;
-    return row.pricing_method === "bsd_market_normalized";
-  });
+    const markets = useMemo(() => {
+      const filteredOddsRows = oddsRows.filter(
+        (row) => row.pricing_method === "bsd_market_normalized"
+      );
 
-    return groupMarkets(
-      filteredOddsRows,
-      marketCatalog,
-      selectionCatalog,
-      matchUI.home,
-      matchUI.away
-    );
-  }, [
+      return groupMarkets(
+        filteredOddsRows,
+        marketCatalog,
+        selectionCatalog,
+        matchUI.home,
+        matchUI.away
+      );
+    }, [
     oddsRows,
     marketCatalog,
     selectionCatalog,
