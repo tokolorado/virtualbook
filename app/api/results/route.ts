@@ -1,168 +1,24 @@
-// app/api/results/route.ts
 import { NextResponse } from "next/server";
-import { requireCronSecret } from "@/lib/requireCronSecret";
-import { supabaseAdmin } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BASE = "https://api.football-data.org/v4";
-
-type JsonRecord = Record<string, unknown>;
-
-function jsonError(message: string, status = 500, extra?: JsonRecord) {
-  return NextResponse.json({ error: message, ...extra }, { status });
-}
-
-function safeJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
-}
-
-function asRecord(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : {};
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Server error";
-}
-
-async function fetchFD(url: string, apiKey: string) {
-  const r = await fetch(url, {
-    headers: { "X-Auth-Token": apiKey },
-    cache: "no-store",
-  });
-  const text = await r.text();
-  return { ok: r.ok, status: r.status, data: safeJson(text) };
-}
-
-function mapFdStatusToLocal(fdStatus: string | null | undefined): string {
-  // football-data: SCHEDULED | TIMED | IN_PLAY | PAUSED | FINISHED | POSTPONED | SUSPENDED | CANCELED | ...
-  const s = (fdStatus ?? "").toUpperCase();
-  if (s === "FINISHED") return "FINISHED";
-  if (s === "CANCELED") return "CANCELED";
-  if (s === "POSTPONED") return "POSTPONED";
-  if (s === "SUSPENDED") return "SUSPENDED";
-  if (s === "SCHEDULED" || s === "TIMED") return "SCHEDULED";
-  if (s === "IN_PLAY" || s === "PAUSED") return "LIVE";
-  return "SCHEDULED";
-}
-
-function toIntOrNull(x: unknown): number | null {
-  if (typeof x === "number" && Number.isFinite(x)) return x;
-  return null;
-}
-
-function canPersistScore(status: string) {
-  return status.toUpperCase() === "FINISHED";
-}
-
-export async function GET(req: Request) {
-  const unauthorized = requireCronSecret(req);
-  if (unauthorized) return unauthorized;
-
-  const apiKey = process.env.FOOTBALL_DATA_API_KEY;
-
-  if (!apiKey) return jsonError("Missing FOOTBALL_DATA_API_KEY in env", 500);
-
-  let supabase: ReturnType<typeof supabaseAdmin>;
-
-  try {
-    supabase = supabaseAdmin();
-  } catch (error) {
-    return jsonError(errorMessage(error), 500);
-  }
-
-  const { searchParams } = new URL(req.url);
-  const matchId = searchParams.get("matchId") || "";
-
-  if (!matchId.trim()) {
-    return jsonError("Missing matchId", 400);
-  }
-
-  // 1) Fetch match details
-  const matchRes = await fetchFD(`${BASE}/matches/${encodeURIComponent(matchId)}`, apiKey);
-  if (!matchRes.ok) {
-    return jsonError("football-data request failed", matchRes.status, {
-      upstream: matchRes.data,
-    });
-  }
-
-  const upstream = asRecord(matchRes.data);
-  const match = asRecord(upstream.match);
-
-  if (!upstream.match) {
-    return jsonError("Missing match in upstream response", 502, { upstream: matchRes.data });
-  }
-
-  // 2) Extract status + scores
-  const upstreamStatus =
-    typeof match.status === "string" ? match.status : undefined;
-
-  const localStatus = mapFdStatusToLocal(upstreamStatus);
-
-  // football-data typical shape:
-  // match.score.fullTime.home / away
-  // match.score.halfTime.home / away
-  const score = asRecord(match.score);
-  const fullTime = asRecord(score.fullTime);
-  const halfTime = asRecord(score.halfTime);
-
-  const ftHome = toIntOrNull(fullTime.home);
-  const ftAway = toIntOrNull(fullTime.away);
-  const htHome = toIntOrNull(halfTime.home);
-  const htAway = toIntOrNull(halfTime.away);
-  const scoreCanBePersisted = canPersistScore(localStatus);
-
-  const utcDate = match.utcDate ? String(match.utcDate) : null;
-
-  // 3) Save into match_results via RPC
-  const upsertPayload = {
-    p_match_id: String(matchId),
-    p_status: localStatus,
-    p_home_score: scoreCanBePersisted ? ftHome : null,
-    p_away_score: scoreCanBePersisted ? ftAway : null,
-    p_ht_home: scoreCanBePersisted ? htHome : null,
-    p_ht_away: scoreCanBePersisted ? htAway : null,
-    p_started_at: utcDate, // opcjonalnie: start = utcDate
-    p_finished_at: localStatus === "FINISHED" ? new Date().toISOString() : null,
-  };
-
-  const { error: upsertErr } = await supabase.rpc("upsert_match_result", upsertPayload);
-  if (upsertErr) {
-    return jsonError("RPC upsert_match_result failed", 500, { detail: upsertErr, payload: upsertPayload });
-  }
-
-  // 4) If finished, settle
-  let settleRan = false;
-  if (localStatus === "FINISHED") {
-    const { error: settleErr } = await supabase.rpc("settle_match", { p_match_id: String(matchId) });
-    if (settleErr) {
-      return jsonError("RPC settle_match failed", 500, { detail: settleErr, matchId });
-    }
-    settleRan = true;
-  }
-
-  return NextResponse.json({
-    ok: true,
-    match: {
-      id: String(matchId),
-      status: upstreamStatus ?? null,
-      status_local: localStatus,
-      utcDate,
-      score: {
-        fullTime: { home: ftHome, away: ftAway },
-        halfTime: { home: htHome, away: htAway },
-      },
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "This endpoint has been disabled. VirtualBook now uses BSD as the only match, odds and results provider.",
     },
-    db: {
-      upserted: true,
-      settled: settleRan,
+    { status: 410 }
+  );
+}
+
+export async function POST() {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: "This endpoint has been disabled. VirtualBook now uses BSD as the only match, odds and results provider.",
     },
-  });
+    { status: 410 }
+  );
 }

@@ -272,11 +272,8 @@ export async function GET(req: Request) {
     });
   }
 
-  const dateFrom = addDaysLocal(date, -1);
-  const dateTo = addDaysLocal(date, +1);
-
-  const rangeStart = isoStartOfUtcDay(dateFrom);
-  const rangeEnd = isoStartOfNextUtcDay(dateTo);
+  const rangeStart = isoStartOfUtcDay(date);
+  const rangeEnd = isoStartOfNextUtcDay(date);
 
   const sb = supabaseAdmin();
 
@@ -422,8 +419,8 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     date,
-    dateFrom,
-    dateTo,
+    dateFrom: date,
+    dateTo: date,
     horizonDays: HORIZON_DAYS,
     horizonTo: horizonToYmd,
     isBeyondHorizon: false,

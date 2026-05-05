@@ -150,6 +150,7 @@ async function backfillMissingMatchResults(
   const { data: matchRows, error: matchErr } = await supabase
     .from("matches")
     .select("id,status,utc_date,home_score,away_score")
+    .eq("source", "bsd")
     .in("id", missingIds)
     .eq("status", "FINISHED");
 
@@ -263,6 +264,7 @@ export async function POST(req: Request) {
       const { data: finishedRows, error: finErr } = await supabase
         .from("matches")
         .select("id,status,utc_date")
+        .eq("source", "bsd")
         .in("id", candidateIds)
         .eq("status", "FINISHED")
         .order("utc_date", { ascending: true })

@@ -804,6 +804,7 @@ async function fetchMatches(
       .select(
         "id, utc_date, status, competition_id, competition_name, home_team, away_team"
       )
+      .eq("source", "bsd")
       .in("id", options.matchIds)
       .order("utc_date", { ascending: true });
 
@@ -835,6 +836,7 @@ async function fetchMatches(
     .select(
       "id, utc_date, status, competition_id, competition_name, home_team, away_team"
     )
+    .eq("source", "bsd")
     .in("status", options.statuses)
     .gte("utc_date", windowStart)
     .lte("utc_date", windowEnd)

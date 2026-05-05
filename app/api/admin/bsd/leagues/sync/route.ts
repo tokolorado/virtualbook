@@ -53,7 +53,7 @@ type ProviderLeagueUpsertRow = {
   enabled: boolean;
   sort_order: number;
 
-  fallback_provider: "football-data" | null;
+  fallback_provider: string | null;
   fallback_code: string | null | undefined;
 
   logo_url: string | null;
@@ -389,7 +389,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         enabled: true,
         sort_order: target.sortOrder,
 
-        fallback_provider: target.fallbackCode ? "football-data" : null,
+        fallback_provider: null,
         fallback_code: target.fallbackCode,
 
         logo_url: bsdImageUrl("league", id),

@@ -881,6 +881,7 @@ export async function GET(req: Request) {
     .select(
       "id, utc_date, status, matchday, season, home_team, away_team, home_score, away_score, competition_id, competition_name, home_team_id, away_team_id"
     )
+    .eq("source", "bsd")
     .in(
       "competition_id",
       LEAGUES.map((l) => l.code)

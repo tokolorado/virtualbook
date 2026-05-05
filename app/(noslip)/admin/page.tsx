@@ -2119,7 +2119,7 @@ export default function AdminPage() {
 
       <Panel
         title="Auto-settlement engine"
-        description="Pobiera wyniki z football-data, zapisuje do match_results i uruchamia rozliczenie."
+        description="Pobiera wyniki z BSD, zapisuje do match_results i uruchamia rozliczenie."
         actions={
           <div className="flex flex-wrap gap-2">
             <button

@@ -3,10 +3,8 @@ name: VirtualBook Cron
 on:
   schedule:
     - cron: "*/5 * * * *"
-    - cron: "*/10 * * * *"
     - cron: "*/15 * * * *"
     - cron: "*/20 * * * *"
-    - cron: "0 * * * *"
   workflow_dispatch:
 
 jobs:
@@ -14,20 +12,13 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Call pipeline cron
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/10 * * * *'
-        run: |
-          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/pipeline" \
-            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
-
-
-      - name: Call results sync
+      - name: Call sync runner
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
         run: |
-          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/results/sync" \
+          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/sync-runner" \
             -H "content-type: application/json" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
-            --data '{"lookbackHours":12,"lookaheadHours":6,"batchLimit":80,"throttleMs":1200,"maxRetries":2}'
+            --data '{"maxAheadDays":14}'
 
       - name: Call hot settle cron
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
@@ -52,11 +43,3 @@ jobs:
         run: |
           curl -fsS "${{ secrets.CRON_BASE_URL }}/api/cron/import-match-center-batch?statuses=FINISHED&onlyMissingStats=1&limit=10&poolSize=60&finishedLookbackHours=18&refreshCooldownMinutes=20" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
-
-      - name: Call sync runner
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
-        run: |
-          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/sync-runner" \
-            -H "content-type: application/json" \
-            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
-            --data '{"maxAheadDays":14}'

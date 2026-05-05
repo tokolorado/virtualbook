@@ -392,6 +392,7 @@ export async function POST(req: Request) {
       .select(
         "id, utc_date, competition_name, home_team, away_team, home_team_id, away_team_id"
       )
+      .eq("source", "bsd")
       .eq("id", matchId)
       .maybeSingle();
 
@@ -525,6 +526,7 @@ export async function POST(req: Request) {
         home_team_id: homeTeamId,
         away_team_id: awayTeamId,
       })
+      .eq("source", "bsd")
       .eq("id", matchId);
 
     if (matchPatchError) {

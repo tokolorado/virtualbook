@@ -115,6 +115,7 @@ export async function POST(request: NextRequest) {
     const { data: matchesRaw, error: matchesError } = await supabase
       .from("matches")
       .select("id, utc_date, status")
+      .eq("source", "bsd")
       .gte("utc_date", fromIso)
       .lte("utc_date", toIso)
       .order("utc_date", { ascending: true })

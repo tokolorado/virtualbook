@@ -35,16 +35,6 @@ type MatchUI = {
   injuryTime: number | null;
 };
 
-type LiveScoreResponse = {
-  ok?: boolean;
-  status?: string | null;
-  isLive?: boolean;
-  isFinished?: boolean;
-  homeScore?: unknown;
-  awayScore?: unknown;
-  minute?: unknown;
-  injuryTime?: unknown;
-};
 
 type MarketCatalogRow = {
   market_id: string;
@@ -1004,66 +994,6 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   }, [shouldAutoRefreshMatch]);
 
   useEffect(() => {
-    if (!effectiveIsLive || matchUI.isFinished) return;
-
-    const matchIdNum = safeNum(matchId);
-    if (matchIdNum == null) return;
-
-    const controller = new AbortController();
-
-    const run = async () => {
-      try {
-        const response = await fetch(
-          `/api/live-score?matchId=${encodeURIComponent(String(matchIdNum))}`,
-          {
-            cache: "no-store",
-            signal: controller.signal,
-          }
-        );
-
-        const payload = (await response
-          .json()
-          .catch(() => null)) as LiveScoreResponse | null;
-
-        if (!response.ok || !payload?.ok || controller.signal.aborted) return;
-
-        const homeScore = safeNum(payload.homeScore);
-        const awayScore = safeNum(payload.awayScore);
-        const hasScore = homeScore !== null || awayScore !== null;
-
-        setMatchUI((prev) => {
-          const status =
-            typeof payload.status === "string" && payload.status
-              ? payload.status
-              : prev.status;
-
-          const isFinished =
-            payload.isFinished === true || status.toUpperCase() === "FINISHED";
-
-          return {
-            ...prev,
-            status,
-            isLive: !isFinished && (payload.isLive === true || isLiveStatus(status)),
-            isFinished,
-            homeScore: hasScore ? homeScore : prev.homeScore,
-            awayScore: hasScore ? awayScore : prev.awayScore,
-            minute: safeInt(payload.minute) ?? prev.minute,
-            injuryTime: safeInt(payload.injuryTime),
-          };
-        });
-      } catch {
-        // Live score is display-only; failures should not block betting UI.
-      }
-    };
-
-    void run();
-
-    return () => {
-      controller.abort();
-    };
-  }, [effectiveIsLive, matchId, matchUI.isFinished, refreshKey]);
-
-  useEffect(() => {
     let cancelled = false;
 
     const run = async () => {
@@ -1091,6 +1021,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           .select(
             "home_team, away_team, competition_id, competition_name, utc_date, status, home_score, away_score, minute, injury_time"
           )
+          .eq("source", "bsd")
           .eq("id", matchIdNum)
           .maybeSingle(),
 

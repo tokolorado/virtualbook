@@ -140,6 +140,7 @@ export async function getSystemHealth(
   const { data: stuckCandidatesRaw, error: stuckErr } = await supabase
     .from("matches")
     .select("id,status,utc_date,last_sync_at,competition_id,home_score,away_score")
+    .eq("source", "bsd")
     .in("status", ["IN_PLAY", "PAUSED"])
     .order("utc_date", { ascending: true })
     .limit(Math.max(limit * 4, 200));
@@ -176,6 +177,7 @@ export async function getSystemHealth(
     const { data: finishedMatchesRaw, error: finishedErr } = await supabase
       .from("matches")
       .select("id,status,utc_date,last_sync_at,competition_id,home_score,away_score")
+      .eq("source", "bsd")
       .in("id", matchIdsFromItems)
       .eq("status", "FINISHED");
 

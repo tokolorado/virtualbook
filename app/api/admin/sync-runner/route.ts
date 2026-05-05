@@ -11,7 +11,7 @@ const COOLDOWN_SECONDS = 65;
 // PRE-MATCH ONLY: zamykamy zakłady 60s przed kickoff
 const BETTING_CLOSE_BUFFER_MS = 60_000;
 
-// statusy z football-data, które traktujemy jako jeszcze nie zakończone
+// statusy meczów, które traktujemy jako jeszcze nie zakończone
 const OPEN_STATUSES = ["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED"] as const;
 
 type RunnerBody = {

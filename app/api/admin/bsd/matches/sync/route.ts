@@ -1074,6 +1074,99 @@ async function syncFinishedMatchResults(
 }
 
 
+function roundOdds(value: number) {
+  if (!Number.isFinite(value)) return null;
+  return Math.round(Math.min(50, Math.max(1.01, value)) * 1000) / 1000;
+}
+
+function appendMissingFullTime1x2FromDc(oddsRows: OddsUpsertRow[]) {
+  const has1x2 = new Set<number>();
+
+  for (const row of oddsRows) {
+    if (row.market_id === "1x2") {
+      has1x2.add(Number(row.match_id));
+    }
+  }
+
+  const byMatch = new Map<number, Record<string, number>>();
+
+  for (const row of oddsRows) {
+    if (row.market_id !== "dc") continue;
+
+    const matchId = Number(row.match_id);
+    const selection = String(row.selection);
+    const odd = Number(row.book_odds);
+
+    if (!Number.isFinite(matchId) || !Number.isFinite(odd) || odd <= 1) {
+      continue;
+    }
+
+    const map = byMatch.get(matchId) ?? {};
+    map[selection] = odd;
+    byMatch.set(matchId, map);
+  }
+
+  const updatedAt = new Date().toISOString();
+
+  for (const [matchId, dc] of byMatch.entries()) {
+    if (has1x2.has(matchId)) continue;
+
+    const odd1x = dc["1X"];
+    const odd12 = dc["12"];
+    const oddx2 = dc["X2"];
+
+    if (!odd1x || !odd12 || !oddx2) continue;
+
+    const p1x = 1 / odd1x;
+    const p12 = 1 / odd12;
+    const px2 = 1 / oddx2;
+
+    const p1 = (p1x + p12 - px2) / 2;
+    const px = (p1x + px2 - p12) / 2;
+    const p2 = (p12 + px2 - p1x) / 2;
+
+    const odd1 = roundOdds(1 / p1);
+    const oddX = roundOdds(1 / px);
+    const odd2 = roundOdds(1 / p2);
+
+    if (!odd1 || !oddX || !odd2) continue;
+
+    oddsRows.push(
+      {
+        match_id: matchId,
+        market_id: "1x2",
+        selection: "1",
+        book_odds: odd1,
+        source: "bsd",
+        pricing_method: "bsd_model_derived",
+        updated_at: updatedAt,
+      } as OddsUpsertRow,
+      {
+        match_id: matchId,
+        market_id: "1x2",
+        selection: "X",
+        book_odds: oddX,
+        source: "bsd",
+        pricing_method: "bsd_model_derived",
+        updated_at: updatedAt,
+      } as OddsUpsertRow,
+      {
+        match_id: matchId,
+        market_id: "1x2",
+        selection: "2",
+        book_odds: odd2,
+        source: "bsd",
+        pricing_method: "bsd_model_derived",
+        updated_at: updatedAt,
+      } as OddsUpsertRow
+    );
+
+    has1x2.add(matchId);
+  }
+}
+
+
+
 export async function GET(req: Request): Promise<Response> {
   const auth = requireCronSecret(req);
   if (!auth.ok) return auth.response;
@@ -1152,6 +1245,7 @@ export async function GET(req: Request): Promise<Response> {
       .select(
         "id,utc_date,competition_id,home_team,away_team,home_team_id,away_team_id,source,source_event_id"
       )
+      .eq("source", "bsd")
       .in("competition_id", appCodes)
       .gte("utc_date", rangeStart)
       .lt("utc_date", rangeEnd);
@@ -1277,10 +1371,14 @@ export async function GET(req: Request): Promise<Response> {
 
     const uniqueMatchRows = uniqueBy(matchRows, (row) => String(row.id));
 
+    appendMissingFullTime1x2FromDc(oddsRows);
+
     const uniqueOddsRows = uniqueBy(
       oddsRows,
       (row) => `${row.match_id}__${row.market_id}__${row.selection}`
     );
+
+    
 
     const oddsCountByMatch = new Map<number, number>();
 

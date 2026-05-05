@@ -568,6 +568,7 @@ export async function GET(req: Request) {
     .select(
       "id,home_team,away_team,competition_id,competition_name,utc_date,status,home_score,away_score,source,source_event_id"
     )
+    .eq("source", "bsd")
     .eq("id", matchId)
     .maybeSingle();
 
