@@ -7,6 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MARKET_ID_1X2 = "1x2";
+const DISPLAYABLE_BSD_PRICING_METHOD = "bsd_market_normalized";
 
 type DbMatchRow = {
   id: number;
@@ -30,6 +31,9 @@ type OddsRow = {
   match_id: number;
   selection: string;
   book_odds: number | string | null;
+  source: string | null;
+  pricing_method: string | null;
+  updated_at: string | null;
 };
 
 type PredictionRow = {
@@ -59,7 +63,11 @@ type PredictionRow = {
   updated_at: string | null;
 };
 
-function jsonError(message: string, status = 500, extra?: Record<string, unknown>) {
+function jsonError(
+  message: string,
+  status = 500,
+  extra?: Record<string, unknown>
+) {
   return NextResponse.json(
     { ok: false, error: message, ...(extra ?? {}) },
     { status }
@@ -137,6 +145,14 @@ function canExposeDisplayScore(status: string | null | undefined) {
   return isLiveStatus(status) || isFinishedStatus(status);
 }
 
+function emptyOdds() {
+  return {
+    "1": null,
+    X: null,
+    "2": null,
+  } satisfies { "1": number | null; X: number | null; "2": number | null };
+}
+
 function buildPrediction(row: PredictionRow | null) {
   if (!row) return null;
 
@@ -181,10 +197,12 @@ async function readOddsMap(matchIds: number[]) {
 
   const { data, error } = await sb
     .from("odds")
-    .select("match_id, selection, book_odds")
+    .select("match_id, selection, book_odds, source, pricing_method, updated_at")
     .in("match_id", matchIds)
     .eq("market_id", MARKET_ID_1X2)
-    .eq("source", "bsd");
+    .eq("source", "bsd")
+    .eq("pricing_method", DISPLAYABLE_BSD_PRICING_METHOD)
+    .order("updated_at", { ascending: false });
 
   if (error) {
     throw new Error(`DB odds read error: ${error.message}`);
@@ -196,13 +214,12 @@ async function readOddsMap(matchIds: number[]) {
     const odd = safeNum(row.book_odds);
 
     if (!Number.isFinite(matchId)) continue;
+    if (row.source !== "bsd") continue;
+    if (row.pricing_method !== DISPLAYABLE_BSD_PRICING_METHOD) continue;
     if (odd === null || odd <= 0) continue;
+    if (selection !== "1" && selection !== "X" && selection !== "2") continue;
 
-    const current = oddsMap.get(matchId) ?? {
-      "1": null,
-      X: null,
-      "2": null,
-    };
+    const current = oddsMap.get(matchId) ?? emptyOdds();
 
     if (selection === "1") current["1"] = odd;
     if (selection === "X") current.X = odd;
@@ -372,11 +389,7 @@ export async function GET(req: Request) {
                   }
                 : null;
 
-            const odds = oddsMap.get(Number(m.id)) ?? {
-              "1": null,
-              X: null,
-              "2": null,
-            };
+            const odds = oddsMap.get(Number(m.id)) ?? emptyOdds();
 
             const prediction = buildPrediction(
               predictionsMap.get(Number(m.id)) ?? null

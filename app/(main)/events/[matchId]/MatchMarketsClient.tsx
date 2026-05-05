@@ -1185,10 +1185,10 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   ]);
 
   const markets = useMemo(() => {
-    const filteredOddsRows =
-      effectiveIsLive || matchUI.isFinished
-        ? oddsRows.filter((row) => row.pricing_method === "bsd_market_normalized")
-        : oddsRows;
+  const filteredOddsRows = oddsRows.filter((row) => {
+    if (row.source !== "bsd") return false;
+    return row.pricing_method === "bsd_market_normalized";
+  });
 
     return groupMarkets(
       filteredOddsRows,

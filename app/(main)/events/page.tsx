@@ -1225,6 +1225,13 @@ export default function EventsPage() {
 
   const [enabledDates, setEnabledDates] = useState<string[]>([]);
   const [enabledDatesLoaded, setEnabledDatesLoaded] = useState(false);
+  const enabledDatesCacheRef = useRef<string[] | null>(null);
+  const enabledDatesRequestRef = useRef<Promise<string[]> | null>(null);
+  const initialSelectedDateRef = useRef<string | null>(null);
+
+  if (initialSelectedDateRef.current === null) {
+    initialSelectedDateRef.current = selectedDate;
+}
 
   const [matches, setMatches] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -1379,44 +1386,92 @@ export default function EventsPage() {
     );
   }, [availableLeagues, selectedLeague]);
 
-  const loadEnabledDates = useCallback(async (preferredDate?: string) => {
-    try {
-      setEnabledDatesLoaded(false);
-
+  const loadEnabledDates = useCallback(
+    async (preferredDate?: string, options?: { force?: boolean }) => {
+      const force = options?.force === true;
       const base = todayLocalYYYYMMDD();
 
-      const r = await fetch(
-        `/api/events-enabled-dates?from=${encodeURIComponent(base)}&days=14`,
-        { cache: "no-store" }
-      );
+      if (!force && enabledDatesCacheRef.current) {
+        const cached = enabledDatesCacheRef.current;
+        setEnabledDates(cached);
+        setEnabledDatesLoaded(true);
+        return cached;
+      }
 
-      const text = await r.text();
-      let payload: any = null;
+      if (!force && enabledDatesRequestRef.current) {
+        return enabledDatesRequestRef.current;
+      }
+
+      const request = (async () => {
+        const hadCache = enabledDatesCacheRef.current !== null;
+
+        if (!hadCache) {
+          setEnabledDatesLoaded(false);
+        }
+
+        const r = await fetch(
+          `/api/events-enabled-dates?from=${encodeURIComponent(base)}&days=14`,
+          { cache: "no-store" }
+        );
+
+        const payload = await r.json().catch(() => null);
+
+        if (!r.ok || !Array.isArray(payload?.enabledDates)) {
+          throw new Error(
+            typeof payload?.error === "string"
+              ? payload.error
+              : "events-enabled-dates failed"
+          );
+        }
+
+        const rawEnabledDates = payload.enabledDates as unknown[];
+
+        const arr: string[] = Array.from(
+          new Set(
+            rawEnabledDates
+              .map((value) => String(value))
+              .filter((value): value is string => /^\d{4}-\d{2}-\d{2}$/.test(value))
+          )
+        ).sort();
+
+        enabledDatesCacheRef.current = arr;
+        setEnabledDates(arr);
+        setEnabledDatesLoaded(true);
+
+        if (
+          preferredDate &&
+          arr.length > 0 &&
+          !arr.includes(preferredDate)
+        ) {
+          setSelectedDate(arr[0]);
+        }
+
+        return arr;
+      })();
+
+      enabledDatesRequestRef.current = request;
 
       try {
-        payload = JSON.parse(text);
+        return await request;
       } catch {
-        payload = null;
+        const cached = enabledDatesCacheRef.current;
+
+        if (cached) {
+          setEnabledDates(cached);
+          setEnabledDatesLoaded(true);
+          return cached;
+        }
+
+        setEnabledDatesLoaded(true);
+        return [];
+      } finally {
+        if (enabledDatesRequestRef.current === request) {
+          enabledDatesRequestRef.current = null;
+        }
       }
-
-      if (!r.ok || !Array.isArray(payload?.enabledDates)) {
-        throw new Error(payload?.error || "Nie udało się pobrać dni z meczami.");
-      }
-
-      const arr = [...payload.enabledDates].sort();
-      setEnabledDates(arr);
-
-      if (arr.length > 0 && preferredDate && !arr.includes(preferredDate)) {
-        setSelectedDate(arr[0]);
-      }
-
-      setEnabledDatesLoaded(true);
-    } catch {
-      setEnabledDates([]);
-      setEnabledDatesLoaded(true);
-    }
-  }, []);
-
+    },
+    []
+  );
   const refreshCurrentDay = () => {
     delete matchesCacheRef.current[selectedDate];
     delete matchesLoadedAtCacheRef.current[selectedDate];
@@ -1498,8 +1553,8 @@ export default function EventsPage() {
   }, []);
 
   useEffect(() => {
-    void loadEnabledDates(selectedDate);
-  }, [loadEnabledDates, selectedDate]);
+    void loadEnabledDates(initialSelectedDateRef.current ?? undefined);
+  }, [loadEnabledDates]);
 
   async function manualSyncOddsForDay(args: { date: string; league: string }) {
     if (oddsSyncInFlightRef.current) return;
@@ -1593,7 +1648,7 @@ export default function EventsPage() {
         setMatchesLoadedAt(new Date().toISOString());
         setMatchesError(null);
 
-        await loadEnabledDates(selectedDate);
+        void loadEnabledDates();
         return;
       }
 
@@ -1620,7 +1675,7 @@ export default function EventsPage() {
       setMatches(hydratedMatches);
       setMatchesLoadedAt(loadedAt);
 
-      await loadEnabledDates(selectedDate);
+      void loadEnabledDates();
     } finally {
       setSyncingOdds(false);
       oddsSyncInFlightRef.current = false;
