@@ -1347,7 +1347,7 @@ export async function GET(req: Request): Promise<Response> {
       });
 
       matchRows.push(matchRow);
-      oddsRows.push(...eventOddsRows);
+      //oddsRows.push(...eventOddsRows);
 
       previewRows.push({
         id: matchRow.id,
