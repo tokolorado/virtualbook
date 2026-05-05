@@ -90,6 +90,45 @@ function formatDate(value: string | null) {
   });
 }
 
+function dateGroupKey(value: string | null) {
+  if (!value) return "unknown";
+
+  const ts = Date.parse(value);
+  if (!Number.isFinite(ts)) return "unknown";
+
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Europe/Warsaw",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(ts));
+}
+
+function formatDateGroupLabel(key: string) {
+  if (key === "unknown") return "Bez daty meczu";
+
+  const ts = Date.parse(`${key}T00:00:00.000Z`);
+  if (!Number.isFinite(ts)) return key;
+
+  const today = dateGroupKey(new Date().toISOString());
+
+  const tomorrowDate = new Date();
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrow = dateGroupKey(tomorrowDate.toISOString());
+
+  const base = new Intl.DateTimeFormat("pl-PL", {
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(new Date(ts));
+
+  if (key === today) return `Dzisiaj · ${base}`;
+  if (key === tomorrow) return `Jutro · ${base}`;
+
+  return base;
+}
+
 function formatPct(value: number | null) {
   if (value === null) return "—";
   const pct = value <= 1 ? value * 100 : value;
@@ -259,9 +298,41 @@ export default function AdminMatchMappingPage() {
   );
 
   const reviewCount = useMemo(
-    () => items.filter((item) => item.status === "needs_review").length,
-    [items]
-  );
+      () => items.filter((item) => item.status === "needs_review").length,
+      [items]
+    );
+
+    const groupedItems = useMemo(() => {
+    const map = new Map<string, ReviewRow[]>();
+
+    for (const item of items) {
+      const key = dateGroupKey(item.match?.utc_date ?? null);
+      const arr = map.get(key) ?? [];
+      arr.push(item);
+      map.set(key, arr);
+    }
+
+    return Array.from(map.entries())
+      .sort(([a], [b]) => {
+        if (a === "unknown") return 1;
+        if (b === "unknown") return -1;
+        return a.localeCompare(b);
+      })
+      .map(([key, rows]) => ({
+        key,
+        label: formatDateGroupLabel(key),
+        rows: rows.sort((a, b) => {
+          const at = Date.parse(a.match?.utc_date ?? "");
+          const bt = Date.parse(b.match?.utc_date ?? "");
+
+          if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) {
+            return at - bt;
+          }
+
+          return a.match_id - b.match_id;
+        }),
+      }));
+  }, [items]);
 
   const mappedCount = useMemo(
     () => items.filter((item) => !!item.mapping).length,
@@ -688,11 +759,28 @@ export default function AdminMatchMappingPage() {
           </div>
         </SurfaceCard>
       ) : (
-        <div className="space-y-5">
-          {items.map((item) => {
-            const matchTitle = item.match
-              ? `${item.match.home_team} vs ${item.match.away_team}`
-              : `matchId ${item.match_id}`;
+        <div className="space-y-8">
+          {groupedItems.map((group) => (
+            <section key={group.key} className="space-y-3">
+              <div className="sticky top-20 z-10 rounded-2xl border border-neutral-800 bg-neutral-950/95 px-4 py-3 backdrop-blur">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white">
+                      {group.label}
+                    </div>
+                    <div className="mt-1 text-xs text-neutral-500">
+                      Mecze do mapowania SofaScore w tym dniu
+                    </div>
+                  </div>
+
+                  <StatusPill tone="blue">{group.rows.length} meczów</StatusPill>
+                </div>
+              </div>
+
+              {group.rows.map((item) => {
+                const matchTitle = item.match
+                  ? `${item.match.home_team} vs ${item.match.away_team}`
+                  : `matchId ${item.match_id}`;
 
             const assignBusy = actionLoading === `assign:${item.match_id}`;
             const pendingBusy = actionLoading === `pending:${item.match_id}`;
@@ -976,6 +1064,8 @@ export default function AdminMatchMappingPage() {
               </SurfaceCard>
             );
           })}
+            </section>
+          ))}
         </div>
       )}
     </div>

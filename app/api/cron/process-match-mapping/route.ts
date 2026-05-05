@@ -57,6 +57,36 @@ function backoffMinutes(attempt: number) {
   return Math.min(240, 5 * Math.pow(2, Math.max(0, attempt - 1)));
 }
 
+function shouldMoveToManualReview(args: {
+  responseStatus: number;
+  errorMessage: string;
+  payload: Record<string, unknown> | null;
+}) {
+  const message = String(args.errorMessage || "").toLowerCase();
+
+  if (args.payload?.needsReview === true) return true;
+  if (args.payload?.blockedBySofaScore === true) return true;
+
+  if (args.responseStatus === 403) return true;
+  if (args.responseStatus === 404) return true;
+
+  if (
+    message.includes("sofascore") &&
+    (message.includes("403") ||
+      message.includes("block") ||
+      message.includes("blocked") ||
+      message.includes("not found") ||
+      message.includes("no mapping") ||
+      message.includes("candidate") ||
+      message.includes("brak kandydat") ||
+      message.includes("nie znaleziono"))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const unauthorized = requireCronSecret(request);
@@ -93,8 +123,8 @@ export async function POST(request: NextRequest) {
       .from("match_mapping_queue")
       .select("match_id, status, attempts, next_retry_at")
       .in("status", ["pending", "failed"])
-      .lte("next_retry_at", nowIso)
-      .order("next_retry_at", { ascending: true })
+      .or(`next_retry_at.is.null,next_retry_at.lte.${nowIso}`)
+      .order("next_retry_at", { ascending: true, nullsFirst: true })
       .limit(batchSize);
 
     if (candidatesError) {
@@ -221,7 +251,11 @@ export async function POST(request: NextRequest) {
         }
 
         const shouldNeedsReview =
-          nextAttempt >= maxAttempts || response.status === 404;
+          shouldMoveToManualReview({
+            responseStatus: response.status,
+            errorMessage,
+            payload,
+          }) || nextAttempt >= maxAttempts;
 
         await supabase
           .from("match_mapping_queue")
@@ -230,9 +264,11 @@ export async function POST(request: NextRequest) {
             locked_at: null,
             locked_by: null,
             next_retry_at: shouldNeedsReview
-              ? addMinutes(720)
+              ? null
               : addMinutes(backoffMinutes(nextAttempt)),
-            last_error: errorMessage,
+            last_error: shouldNeedsReview
+              ? `Manual review required: ${errorMessage}`
+              : errorMessage,
             updated_at: new Date().toISOString(),
           })
           .eq("match_id", candidate.match_id);
@@ -246,7 +282,12 @@ export async function POST(request: NextRequest) {
         const message =
           error instanceof Error ? error.message : "worker_processing_error";
 
-        const shouldNeedsReview = nextAttempt >= maxAttempts;
+        const shouldNeedsReview =
+          shouldMoveToManualReview({
+            responseStatus: 0,
+            errorMessage: message,
+            payload: null,
+          }) || nextAttempt >= maxAttempts;
 
         await supabase
           .from("match_mapping_queue")
@@ -255,9 +296,11 @@ export async function POST(request: NextRequest) {
             locked_at: null,
             locked_by: null,
             next_retry_at: shouldNeedsReview
-              ? addMinutes(720)
+              ? null
               : addMinutes(backoffMinutes(nextAttempt)),
-            last_error: message,
+            last_error: shouldNeedsReview
+              ? `Manual review required: ${message}`
+              : message,
             updated_at: new Date().toISOString(),
           })
           .eq("match_id", candidate.match_id);

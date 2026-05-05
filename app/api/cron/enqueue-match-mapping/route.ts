@@ -51,10 +51,48 @@ function hoursFromNow(offsetHours: number) {
   return dt.toISOString();
 }
 
+function isYYYYMMDD(value: string | null) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function addDaysYmd(dateYYYYMMDD: string, days: number) {
+  const [year, month, day] = dateYYYYMMDD.split("-").map(Number);
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function buildDateWindow(args: {
+  date: string | null;
+  lookbackHours: number;
+  lookaheadHours: number;
+}) {
+  if (args.date) {
+    return {
+      fromIso: `${addDaysYmd(args.date, -1)}T00:00:00.000Z`,
+      toIso: `${addDaysYmd(args.date, 2)}T00:00:00.000Z`,
+    };
+  }
+
+  return {
+    fromIso: hoursFromNow(-args.lookbackHours),
+    toIso: hoursFromNow(args.lookaheadHours),
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const unauthorized = requireCronSecret(request);
     if (unauthorized) return unauthorized;
+
+    const date = request.nextUrl.searchParams.get("date");
+
+    if (date && !isYYYYMMDD(date)) {
+      return NextResponse.json(
+        { ok: false, error: "Invalid date. Use YYYY-MM-DD." },
+        { status: 400 }
+      );
+    }
 
     const lookbackHours = safeNumber(
       request.nextUrl.searchParams.get("lookbackHours"),
@@ -66,8 +104,11 @@ export async function POST(request: NextRequest) {
     );
     const limit = safeNumber(request.nextUrl.searchParams.get("limit"), 300);
 
-    const fromIso = hoursFromNow(-lookbackHours);
-    const toIso = hoursFromNow(lookaheadHours);
+    const { fromIso, toIso } = buildDateWindow({
+      date,
+      lookbackHours,
+      lookaheadHours,
+    });
 
     const supabase = getSupabaseAdmin();
 

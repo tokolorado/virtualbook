@@ -51,6 +51,19 @@ function utcTodayYYYYMMDD() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function isCronAuthorized(req: Request) {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) return false;
+
+  const headerSecret = req.headers.get("x-cron-secret");
+  const bearerSecret = req.headers
+    .get("authorization")
+    ?.replace(/^Bearer\s+/i, "")
+    .trim();
+
+  return headerSecret === expected || bearerSecret === expected;
+}
+
 async function closeBettingForStartedMatches(
   sb: ReturnType<typeof supabaseAdmin>
 ) {
@@ -80,20 +93,24 @@ async function closeBettingForStartedMatches(
 }
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin(req);
-  if (!guard.ok) {
-    return NextResponse.json(
-      { ok: false, error: guard.error },
-      { status: guard.status }
-    );
-  }
-
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
     return NextResponse.json(
       { ok: false, error: "Missing CRON_SECRET in env" },
       { status: 500 }
     );
+  }
+
+  const cronAuthorized = isCronAuthorized(req);
+
+  if (!cronAuthorized) {
+    const guard = await requireAdmin(req);
+    if (!guard.ok) {
+      return NextResponse.json(
+        { ok: false, error: guard.error },
+        { status: guard.status }
+      );
+    }
   }
 
   const host = req.headers.get("host");
@@ -116,6 +133,28 @@ export async function POST(req: Request) {
       headers: {
         "x-cron-secret": cronSecret,
       },
+      cache: "no-store",
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(
+        `${path} failed: ${data?.error ?? data?.message ?? res.statusText}`
+      );
+    }
+
+    return data;
+  };
+
+    const postInternal = async (path: string, body: unknown = {}) => {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "x-cron-secret": cronSecret,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
       cache: "no-store",
     });
 
@@ -170,6 +209,29 @@ export async function POST(req: Request) {
       updated_at: nowIso,
     });
   }
+
+
+    const callEnqueueMatchMapping = async (date: string) => {
+    const qs = new URLSearchParams();
+    qs.set("date", date);
+    qs.set("limit", "500");
+
+    return await postInternal(
+      `/api/cron/enqueue-match-mapping?${qs.toString()}`,
+      {}
+    );
+  };
+
+  const callProcessMatchMapping = async () => {
+    const qs = new URLSearchParams();
+    qs.set("batchSize", "50");
+    qs.set("maxAttempts", "1");
+
+    return await postInternal(
+      `/api/cron/process-match-mapping?${qs.toString()}`,
+      {}
+    );
+  };
 
   // 1) lock (atomowy)
   const { data: locked, error: lockErr } = await sb.rpc("acquire_sync_lock", {
@@ -248,16 +310,37 @@ export async function POST(req: Request) {
     let stepOk = false;
     let matchesUpserted = 0;
     let oddsUpserted = 0;
+    let mappingEnqueued = 0;
+    let mappingClaimed = 0;
+    let mappingMapped = 0;
+    let mappingFailed = 0;
+    let mappingNeedsReview = 0;
     let message: string | null = null;
     let extra: any = null;
 
     try {
-        const res = await callBsdMatchesSync({ date: cursorDate });
+      const bsdRes = await callBsdMatchesSync({ date: cursorDate });
+      const enqueueRes = await callEnqueueMatchMapping(cursorDate);
+      const processRes = await callProcessMatchMapping();
 
-        stepOk = true;
-        extra = res;
-        matchesUpserted = Number(res?.upsertedMatchesCount ?? 0) || 0;
-        oddsUpserted = Number(res?.upsertedOddsCount ?? 0) || 0;
+      stepOk = true;
+
+      matchesUpserted = Number(bsdRes?.upsertedMatchesCount ?? 0) || 0;
+      oddsUpserted = Number(bsdRes?.upsertedOddsCount ?? 0) || 0;
+
+      mappingEnqueued = Number(enqueueRes?.enqueued ?? 0) || 0;
+      mappingClaimed = Number(processRes?.claimed ?? 0) || 0;
+      mappingMapped = Number(processRes?.mapped ?? 0) || 0;
+      mappingFailed = Number(processRes?.failed ?? 0) || 0;
+      mappingNeedsReview = Number(processRes?.needsReview ?? 0) || 0;
+
+      extra = {
+        bsd: bsdRes,
+        matchMapping: {
+          enqueue: enqueueRes,
+          process: processRes,
+        },
+      };
     } catch (e: any) {
       stepOk = false;
       message = e?.message ?? "runner_call_error";
@@ -317,6 +400,13 @@ export async function POST(req: Request) {
       oddsUpserted,
       nextRunAt,
       message,
+      matchMapping: {
+        enqueued: mappingEnqueued,
+        claimed: mappingClaimed,
+        mapped: mappingMapped,
+        failed: mappingFailed,
+        needsReview: mappingNeedsReview,
+      },
       bettingClosedUpdated: closeRes.closed,
       bettingCloseCutoffIso: closeRes.cutoffIso,
       bettingCloseError: closeRes.ok ? null : closeRes.error,

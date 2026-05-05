@@ -719,32 +719,11 @@ function buildMatchesFromPayload(payload: any, selectedDate: string): Match[] {
 
       const time = formatLocalTime(utc);
 
-      const homeTeamRaw =
-        m?.homeTeam ??
-        m?.home_team_obj ??
-        m?.home_team ??
-        m?.home;
-
-      const awayTeamRaw =
-        m?.awayTeam ??
-        m?.away_team_obj ??
-        m?.away_team ??
-        m?.away;
-
       const homeId = readTeamIdFromMatch(m, "home");
       const awayId = readTeamIdFromMatch(m, "away");
 
       const homeName = readTeamNameFromMatch(m, "home");
       const awayName = readTeamNameFromMatch(m, "away");
-      if (String(m?.id) === "552095") {
-          console.log("MATCH 552095 RAW:", m);
-          console.log("MATCH 552095 NAMES:", {
-            homeTeamName: m?.homeTeam?.name,
-            awayTeamName: m?.awayTeam?.name,
-            homeName,
-            awayName,
-          });
-        }
       const displayHomeScore = safeNum(m?.displayScore?.home);
       const displayAwayScore = safeNum(m?.displayScore?.away);
       const canonicalHomeScore = safeNum(m?.score?.fullTime?.home);
@@ -1351,14 +1330,54 @@ export default function EventsPage() {
     return () => window.clearInterval(id);
   }, [selectedDate, matches]);
 
+
+
+    const availableLeagues = useMemo(() => {
+    const baseOrder = new Map(
+      FREE_TIER_LEAGUES.map((league, index) => [league.code, index])
+    );
+
+    const byCode = new Map<string, League>();
+
+    for (const league of FREE_TIER_LEAGUES) {
+      byCode.set(league.code, league);
+    }
+
+    for (const match of matches) {
+      const code = String(match.competitionCode ?? "").trim().toUpperCase();
+      const name = String(match.competitionName ?? "").trim();
+
+      if (!code) continue;
+
+      if (!byCode.has(code)) {
+        byCode.set(code, {
+          code,
+          name: name || code,
+        });
+      }
+    }
+
+    return Array.from(byCode.values()).sort((a, b) => {
+      const orderA = baseOrder.get(a.code) ?? 999;
+      const orderB = baseOrder.get(b.code) ?? 999;
+
+      if (orderA !== orderB) return orderA - orderB;
+
+      return a.name.localeCompare(b.name, "pl");
+    });
+  }, [matches]);
+
+
+
+
   const selectedLeagueLabel = useMemo(() => {
     if (selectedLeague === "ALL") return "Wszystkie ligi";
 
     return (
-      FREE_TIER_LEAGUES.find((x) => x.code === selectedLeague)?.name ??
+      availableLeagues.find((x) => x.code === selectedLeague)?.name ??
       selectedLeague
     );
-  }, [selectedLeague]);
+  }, [availableLeagues, selectedLeague]);
 
   const loadEnabledDates = useCallback(async (preferredDate?: string) => {
     try {
@@ -1884,17 +1903,18 @@ export default function EventsPage() {
     [openMatches, featuredMatchIds]
   );
 
+
   const leagueCounts = useMemo(() => {
     const map: Record<string, number> = { ALL: matches.length };
 
-    for (const league of FREE_TIER_LEAGUES) {
+    for (const league of availableLeagues) {
       map[league.code] = matches.filter(
         (m) => m.competitionCode === league.code
       ).length;
     }
 
     return map;
-  }, [matches]);
+  }, [availableLeagues, matches]);
 
   const goMatch = (m: Match) => {
     const qs = new URLSearchParams();
@@ -2634,7 +2654,7 @@ export default function EventsPage() {
                   }}
                 />
 
-              {FREE_TIER_LEAGUES.map((lg) => (
+              {availableLeagues.map((lg) => (
                 <LeagueButton
                   key={lg.code}
                   active={selectedLeague === lg.code}
@@ -2694,7 +2714,7 @@ export default function EventsPage() {
               </span>
               </button>
 
-              {FREE_TIER_LEAGUES.map((lg) => (
+              {availableLeagues.map((lg) => (
                 <button
                   key={lg.code}
                   type="button"
