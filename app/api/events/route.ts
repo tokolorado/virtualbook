@@ -285,6 +285,7 @@ export async function GET(req: Request) {
     .select(
       "id, utc_date, status, matchday, season, home_team, away_team, home_score, away_score, minute, injury_time, competition_id, competition_name, home_team_id, away_team_id"
     )
+    .eq("source", "bsd")
     .gte("utc_date", rangeStart)
     .lt("utc_date", rangeEnd)
     .order("utc_date", { ascending: true });

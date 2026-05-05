@@ -85,6 +85,7 @@ export async function GET(req: Request) {
   const { data, error } = await supabase
     .from("matches")
     .select("id, utc_date, competition_id")
+    .eq("source", "bsd")
     .in("competition_id", LEAGUES)
     .gte("utc_date", rangeStart)
     .lt("utc_date", rangeEnd)
