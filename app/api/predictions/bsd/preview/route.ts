@@ -1,3 +1,4 @@
+//app/api/predictions/bsd/preview/route.ts
 import { NextResponse } from "next/server";
 import { addDaysLocal, todayLocalYYYYMMDD } from "@/lib/date";
 

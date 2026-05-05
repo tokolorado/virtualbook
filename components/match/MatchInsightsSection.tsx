@@ -22,6 +22,7 @@ type MatchInsightsSectionProps = {
 };
 
 type TabKey =
+  | "ai"
   | "lineups"
   | "comparison"
   | "h2h"
@@ -171,6 +172,106 @@ type TimelineResponse = {
   updatedAt: string | null;
   source: string | null;
   message: string | null;
+};
+
+type BsdInsightPick = {
+  marketId: string;
+  selection: string;
+  odds: number;
+  fairProbability: number | null;
+  impliedProbability: number | null;
+  fairProbabilityPercent: number | null;
+  impliedProbabilityPercent: number | null;
+  edge: number | null;
+  edgePercentPoints: number | null;
+  pricingMethod: string | null;
+  isModel: boolean;
+};
+
+type BsdMatchInsightsResponse = {
+  ok: boolean;
+  source: "bsd";
+  matchId: number;
+  fetchedAt: string;
+  available: boolean;
+
+  prediction: {
+    predictedScore: string | null;
+    predictedHomeScore: number | null;
+    predictedAwayScore: number | null;
+    predictedResult: string | null;
+    predictedLabel: string | null;
+    direction: "home" | "draw" | "away" | null;
+    winnerLabel: string | null;
+    scoreDirection: "home" | "draw" | "away" | null;
+    hasScoreDirectionConflict: boolean;
+    expectedHomeGoals: number | null;
+    expectedAwayGoals: number | null;
+    probabilities: {
+      homeWin: number | null;
+      draw: number | null;
+      awayWin: number | null;
+      over15: number | null;
+      over25: number | null;
+      over35: number | null;
+      bttsYes: number | null;
+    };
+    confidence: number | null;
+    confidenceDecimal: number | null;
+    confidenceLabel: string;
+    modelVersion: string | null;
+    updatedAt: string | null;
+  };
+
+  analysis: {
+    title: string;
+    bullets: string[];
+  };
+
+  features: {
+    homeXg: number | null;
+    awayXg: number | null;
+    totalXg: number | null;
+    homeWinProb: number | null;
+    drawProb: number | null;
+    awayWinProb: number | null;
+    over25Prob: number | null;
+    bttsProb: number | null;
+    unavailableHomeCount: number;
+    unavailableAwayCount: number;
+    injuredHomeCount: number;
+    injuredAwayCount: number;
+    doubtfulHomeCount: number;
+    doubtfulAwayCount: number;
+    live: {
+      homeXg: number | null;
+      awayXg: number | null;
+      homeShots: number | null;
+      awayShots: number | null;
+      homeShotsOnTarget: number | null;
+      awayShotsOnTarget: number | null;
+      homePossession: number | null;
+      awayPossession: number | null;
+    };
+    updatedAt: string | null;
+  } | null;
+
+  topPicks: BsdInsightPick[];
+  marketSnapshot: BsdInsightPick[];
+
+  valueStatus: {
+    hasPositiveEdge: boolean;
+    message: string;
+  };
+
+  meta: {
+    hasEventPrediction: boolean;
+    hasBsdEventFeatures: boolean;
+    oddsCount: number;
+    topPicksCount: number;
+    marketSnapshotCount: number;
+    note: string;
+  };
 };
 
 const AUTO_REFRESH_MS = 20_000;
@@ -804,6 +905,66 @@ function timelineEventLabel(eventType: string) {
   return eventType || "Zdarzenie";
 }
 
+function formatInsightNumber(
+  value: number | null | undefined,
+  digits = 2
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  return value.toFixed(digits).replace(/\.?0+$/, "");
+}
+
+function formatInsightPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  return `${formatInsightNumber(value, 1)}%`;
+}
+
+function formatEdgePercentPoints(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "—";
+  }
+
+  const sign = value > 0 ? "+" : "";
+  return `${sign}${formatInsightNumber(value, 2)} pp`;
+}
+
+function marketLabel(marketId: string): string {
+  if (marketId === "1x2") return "1X2";
+  if (marketId === "ou_2_5") return "Over/Under 2.5";
+  if (marketId === "btts") return "BTTS";
+  if (marketId === "dc") return "Podwójna szansa";
+  if (marketId === "dnb") return "Draw No Bet";
+
+  return marketId;
+}
+
+function selectionLabel(
+  pick: BsdInsightPick,
+  homeTeam: string,
+  awayTeam: string
+): string {
+  if (pick.marketId === "1x2") {
+    if (pick.selection === "1") return homeTeam;
+    if (pick.selection === "X") return "Remis";
+    if (pick.selection === "2") return awayTeam;
+  }
+
+  if (pick.marketId === "btts") {
+    if (pick.selection === "yes") return "Tak";
+    if (pick.selection === "no") return "Nie";
+  }
+
+  if (pick.selection === "over") return "Powyżej";
+  if (pick.selection === "under") return "Poniżej";
+
+  return pick.selection;
+}
+
 function Surface({
   children,
   className,
@@ -942,9 +1103,17 @@ function WidgetTroubleshooting({
         <div className="font-medium text-white">Najczęstsze przyczyny:</div>
 
         <ul className="mt-3 list-disc space-y-1.5 pl-5">
-          <li>SofaScore nie opublikował jeszcze składu albo widżetu dla tego meczu.</li>
-          <li>Masz włączony VPN, proxy, AdBlock albo restrykcyjną ochronę prywatności.</li>
-          <li>Widżet został chwilowo ograniczony lub nie załadował się po stronie zewnętrznej.</li>
+          <li>
+            SofaScore nie opublikował jeszcze składu albo widżetu dla tego meczu.
+          </li>
+          <li>
+            Masz włączony VPN, proxy, AdBlock albo restrykcyjną ochronę
+            prywatności.
+          </li>
+          <li>
+            Widżet został chwilowo ograniczony lub nie załadował się po stronie
+            zewnętrznej.
+          </li>
         </ul>
 
         <div className="mt-3">
@@ -1218,11 +1387,15 @@ function StatBarRow({ item }: { item: StatLikeItem }) {
   return (
     <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-base font-semibold text-white">{item.homeValue}</div>
+        <div className="text-base font-semibold text-white">
+          {item.homeValue}
+        </div>
         <div className="text-center text-xs font-medium uppercase tracking-wide text-neutral-400">
           {item.label}
         </div>
-        <div className="text-base font-semibold text-white">{item.awayValue}</div>
+        <div className="text-base font-semibold text-white">
+          {item.awayValue}
+        </div>
       </div>
 
       <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-4">
@@ -1314,13 +1487,18 @@ export default function MatchInsightsSection({
   isLive,
   isFinished,
 }: MatchInsightsSectionProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>("lineups");
+  const [activeTab, setActiveTab] = useState<TabKey>("ai");
   const [refreshTick, setRefreshTick] = useState(0);
 
   const [lineupsWidgetMapped, setLineupsWidgetMapped] = useState<boolean | null>(
     null
   );
   const [lineupsWidgetLoaded, setLineupsWidgetLoaded] = useState(false);
+
+  const [aiInsightsLoading, setAiInsightsLoading] = useState(true);
+  const [aiInsightsError, setAiInsightsError] = useState<string | null>(null);
+  const [aiInsights, setAiInsights] =
+    useState<BsdMatchInsightsResponse | null>(null);
 
   const [lineupsLoading, setLineupsLoading] = useState(true);
   const [lineupsError, setLineupsError] = useState<string | null>(null);
@@ -1345,7 +1523,6 @@ export default function MatchInsightsSection({
   const [timelineLoading, setTimelineLoading] = useState(true);
   const [timelineError, setTimelineError] = useState<string | null>(null);
   const [timeline, setTimeline] = useState<TimelineResponse | null>(null);
-
 
   const isPreMatch = useMemo(() => {
     return isPreMatchState(matchStatus, isLive, isFinished);
@@ -1385,6 +1562,7 @@ export default function MatchInsightsSection({
 
     if (isPreMatch) {
       return withChampionsLeagueTabs([
+        { key: "ai" as const, label: "AI" },
         { key: "lineups" as const, label: "Składy" },
         { key: "comparison" as const, label: "Porównanie" },
         { key: "h2h" as const, label: "H2H" },
@@ -1394,6 +1572,7 @@ export default function MatchInsightsSection({
 
     if (isLive) {
       return withChampionsLeagueTabs([
+        { key: "ai" as const, label: "AI" },
         { key: "lineups" as const, label: "Składy" },
         { key: "liveStats" as const, label: "Statystyki" },
         { key: "table" as const, label: "Tabela" },
@@ -1403,6 +1582,7 @@ export default function MatchInsightsSection({
     }
 
     return withChampionsLeagueTabs([
+      { key: "ai" as const, label: "AI" },
       { key: "lineups" as const, label: "Składy" },
       { key: "liveStats" as const, label: "Statystyki" },
       { key: "table" as const, label: "Tabela" },
@@ -1433,6 +1613,56 @@ export default function MatchInsightsSection({
   useEffect(() => {
     const controller = new AbortController();
     const isBackgroundRefresh = refreshTick > 0;
+
+    const loadAiInsights = async () => {
+      if (!isBackgroundRefresh || !aiInsights) {
+        setAiInsightsLoading(true);
+      }
+
+      setAiInsightsError(null);
+
+      if (!isBackgroundRefresh) {
+        setAiInsights(null);
+      }
+
+      try {
+        const response = await fetch(
+          `/api/predictions/bsd/match-insights?matchId=${encodeURIComponent(String(matchId))}`,
+          {
+            method: "GET",
+            cache: "no-store",
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`AI insights fetch failed: ${response.status}`);
+        }
+
+        const json = (await response.json()) as BsdMatchInsightsResponse;
+
+        if (!json.ok) {
+          throw new Error("AI insights response is not ok.");
+        }
+
+        if (!controller.signal.aborted) {
+          setAiInsights(json);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Błąd ładowania analizy AI.";
+
+        setAiInsightsError(message);
+      } finally {
+        if (!controller.signal.aborted) {
+          setAiInsightsLoading(false);
+        }
+      }
+    };
 
     const loadLineups = async () => {
       if (!isBackgroundRefresh || !lineups) {
@@ -1740,6 +1970,7 @@ export default function MatchInsightsSection({
     };
 
     void Promise.all([
+      loadAiInsights(),
       loadLineups(),
       loadLiveStats(),
       loadComparison(),
@@ -1800,6 +2031,336 @@ export default function MatchInsightsSection({
       return hasNumeric || hasDisplayValue;
     });
   }, [comparison]);
+
+  const renderAiInsights = () => {
+    const hasData = aiInsights?.available === true;
+    const prediction = aiInsights?.prediction ?? null;
+    const features = aiInsights?.features ?? null;
+    const topPicks = aiInsights?.topPicks ?? [];
+    const marketSnapshot = aiInsights?.marketSnapshot ?? [];
+
+    if (aiInsightsLoading && !hasData) {
+      return (
+        <StateBox
+          title="Ładowanie analizy AI..."
+          description="Pobieramy zapisany snapshot BSD: predykcję, xG, prawdopodobieństwa, absencje i ocenę value."
+        />
+      );
+    }
+
+    if (!hasData && aiInsightsError) {
+      return (
+        <StateBox
+          title="Nie udało się załadować analizy AI"
+          description={aiInsightsError}
+          tone="error"
+        />
+      );
+    }
+
+    if (!hasData || !prediction) {
+      return (
+        <StateBox
+          title="Brak analizy AI dla tego meczu"
+          description="Dla tego spotkania nie ma jeszcze zapisanego snapshotu BSD ani predykcji w bazie."
+        />
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {aiInsightsError ? (
+          <InlineWarning message="Nie udało się odświeżyć analizy AI. Pokazujemy ostatnio pobrane dane." />
+        ) : null}
+
+        <Surface className="overflow-hidden">
+          <div className="border-b border-neutral-800 bg-neutral-950/70 px-5 py-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-300">
+                  AI Preview BSD
+                </div>
+                <div className="mt-2 text-2xl font-semibold text-white">
+                  {aiInsights?.analysis?.title ?? "Analiza modelowa BSD"}
+                </div>
+                <div className="mt-2 max-w-3xl text-sm text-neutral-400">
+                  Sekcja oparta o zapisane dane BSD, snapshot modelu, kursy i
+                  audyt prawdopodobieństw. Nie pobiera danych upstream przy
+                  renderze strony.
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <StatusChip tone="blue">
+                  Model:{" "}
+                  <span className="ml-1 font-semibold text-white">
+                    {prediction.modelVersion ?? "bsd"}
+                  </span>
+                </StatusChip>
+
+                <StatusChip
+                  tone={
+                    prediction.confidenceLabel === "Wysoka"
+                      ? "green"
+                      : prediction.confidenceLabel === "Średnia"
+                        ? "yellow"
+                        : "neutral"
+                  }
+                >
+                  Pewność:{" "}
+                  <span className="ml-1 font-semibold text-white">
+                    {prediction.confidenceLabel}
+                  </span>
+                </StatusChip>
+
+                <StatusChip>
+                  Aktualizacja: {formatDateTime(prediction.updatedAt)}
+                </StatusChip>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
+              <div className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+                Typowany wynik
+              </div>
+              <div className="mt-2 text-2xl font-bold text-white">
+                {prediction.predictedScore ?? "—"}
+              </div>
+              <div className="mt-2 text-sm text-neutral-400">
+                Kierunek:{" "}
+                <span className="font-semibold text-white">
+                  {prediction.winnerLabel ?? "—"}
+                </span>
+              </div>
+
+              {prediction.hasScoreDirectionConflict ? (
+                <div className="mt-3 rounded-xl border border-yellow-500/20 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-200">
+                  Wynik dokładny i kierunek 1X2 nie są identyczne. To normalne:
+                  exact score może wskazywać remis, a suma rozkładu 1X2 może
+                  faworyzować jedną stronę.
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
+              <div className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+                Prawdopodobieństwa 1X2
+              </div>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-neutral-400">{homeTeam}</span>
+                  <span className="font-semibold text-white">
+                    {formatInsightPercent(prediction.probabilities.homeWin)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-neutral-400">Remis</span>
+                  <span className="font-semibold text-white">
+                    {formatInsightPercent(prediction.probabilities.draw)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-neutral-400">{awayTeam}</span>
+                  <span className="font-semibold text-white">
+                    {formatInsightPercent(prediction.probabilities.awayWin)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
+              <div className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+                Expected goals
+              </div>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-neutral-400">{homeTeam}</span>
+                  <span className="font-semibold text-white">
+                    {formatInsightNumber(prediction.expectedHomeGoals, 2)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-neutral-400">{awayTeam}</span>
+                  <span className="font-semibold text-white">
+                    {formatInsightNumber(prediction.expectedAwayGoals, 2)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3 border-t border-neutral-800 pt-2">
+                  <span className="text-neutral-400">Model snapshot</span>
+                  <span className="font-semibold text-white">
+                    {formatInsightNumber(features?.totalXg, 2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-4">
+              <div className="text-xs uppercase tracking-[0.18em] text-neutral-500">
+                Bramki i BTTS
+              </div>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex justify-between gap-3">
+                  <span className="text-neutral-400">Over 2.5</span>
+                  <span className="font-semibold text-white">
+                    {formatInsightPercent(prediction.probabilities.over25)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-neutral-400">BTTS</span>
+                  <span className="font-semibold text-white">
+                    {formatInsightPercent(prediction.probabilities.bttsYes)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3 border-t border-neutral-800 pt-2">
+                  <span className="text-neutral-400">Absencje</span>
+                  <span className="font-semibold text-white">
+                    {features
+                      ? `${features.unavailableHomeCount}:${features.unavailableAwayCount}`
+                      : "—"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Surface>
+
+        <Surface className="p-5">
+          <div className="text-lg font-semibold text-white">
+            Uzasadnienie modelu
+          </div>
+
+          <div className="mt-4 grid gap-3">
+            {(aiInsights?.analysis?.bullets ?? []).map((bullet, index) => (
+              <div
+                key={`${index}-${bullet}`}
+                className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-300"
+              >
+                {bullet}
+              </div>
+            ))}
+          </div>
+        </Surface>
+
+        <Surface className="p-5">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <div className="text-lg font-semibold text-white">
+                Value monitor
+              </div>
+              <div className="mt-1 text-sm text-neutral-400">
+                {aiInsights?.valueStatus?.message ??
+                  "Oceniamy przewagę modelu względem kursów."}
+              </div>
+            </div>
+
+            <StatusChip tone={topPicks.length > 0 ? "green" : "neutral"}>
+              {topPicks.length > 0
+                ? `${topPicks.length} value pick`
+                : "Brak dodatniego edge"}
+            </StatusChip>
+          </div>
+
+          {topPicks.length > 0 ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {topPicks.map((pick) => (
+                <div
+                  key={`${pick.marketId}-${pick.selection}`}
+                  className="rounded-2xl border border-green-500/20 bg-green-500/10 px-4 py-4"
+                >
+                  <div className="text-xs uppercase tracking-[0.18em] text-green-300">
+                    {marketLabel(pick.marketId)}
+                  </div>
+                  <div className="mt-2 text-base font-semibold text-white">
+                    {selectionLabel(pick, homeTeam, awayTeam)}
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div>
+                      <div className="text-neutral-500">Kurs</div>
+                      <div className="mt-1 font-semibold text-white">
+                        {formatInsightNumber(pick.odds, 2)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-neutral-500">Fair</div>
+                      <div className="mt-1 font-semibold text-white">
+                        {formatInsightPercent(pick.fairProbabilityPercent)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-neutral-500">Edge</div>
+                      <div className="mt-1 font-semibold text-green-300">
+                        {formatEdgePercentPoints(pick.edgePercentPoints)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : marketSnapshot.length > 0 ? (
+            <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-800">
+              <table className="min-w-full text-sm">
+                <thead className="border-b border-neutral-800 bg-neutral-950 text-neutral-400">
+                  <tr>
+                    <th className="px-3 py-3 text-left">Rynek</th>
+                    <th className="px-3 py-3 text-left">Typ</th>
+                    <th className="px-3 py-3 text-right">Kurs</th>
+                    <th className="px-3 py-3 text-right">Fair</th>
+                    <th className="px-3 py-3 text-right">Impl.</th>
+                    <th className="px-3 py-3 text-right">Edge</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {marketSnapshot.slice(0, 8).map((pick) => (
+                    <tr
+                      key={`${pick.marketId}-${pick.selection}`}
+                      className="border-b border-neutral-800/70"
+                    >
+                      <td className="px-3 py-3 text-neutral-300">
+                        {marketLabel(pick.marketId)}
+                        {pick.isModel ? (
+                          <span className="ml-2 rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold text-sky-300">
+                            Model
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-3 font-medium text-white">
+                        {selectionLabel(pick, homeTeam, awayTeam)}
+                      </td>
+                      <td className="px-3 py-3 text-right text-neutral-300">
+                        {formatInsightNumber(pick.odds, 2)}
+                      </td>
+                      <td className="px-3 py-3 text-right text-neutral-300">
+                        {formatInsightPercent(pick.fairProbabilityPercent)}
+                      </td>
+                      <td className="px-3 py-3 text-right text-neutral-300">
+                        {formatInsightPercent(pick.impliedProbabilityPercent)}
+                      </td>
+                      <td
+                        className={cn(
+                          "px-3 py-3 text-right font-semibold",
+                          (pick.edgePercentPoints ?? 0) > 0
+                            ? "text-green-300"
+                            : "text-red-300"
+                        )}
+                      >
+                        {formatEdgePercentPoints(pick.edgePercentPoints)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-2xl border border-dashed border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-500">
+              Brak kursów do audytu value.
+            </div>
+          )}
+        </Surface>
+      </div>
+    );
+  };
 
   const renderLineups = () => {
     const hasData = !!lineups?.home || !!lineups?.away;
@@ -2260,8 +2821,12 @@ export default function MatchInsightsSection({
                             <span className="font-medium text-white">
                               {row.teamName}
                             </span>
-                            {isHome ? <TableRowHighlightBadge label="HOME" /> : null}
-                            {isAway ? <TableRowHighlightBadge label="AWAY" /> : null}
+                            {isHome ? (
+                              <TableRowHighlightBadge label="HOME" />
+                            ) : null}
+                            {isAway ? (
+                              <TableRowHighlightBadge label="AWAY" />
+                            ) : null}
                           </div>
                         </td>
 
@@ -2441,16 +3006,13 @@ export default function MatchInsightsSection({
       );
     }
 
-    if (!liveWidgetsAvailable) {
-      return (
-        <StateBox
-          title="Timeline niedostępny przed meczem"
-          description="Oś zdarzeń pojawi się automatycznie po rozpoczęciu spotkania. Przed meczem SofaScore zwykle nie zwraca jeszcze incydentów."
-        />
-      );
-    }
+    return (
+      <StateBox
+        title="Timeline niedostępny przed meczem"
+        description="Oś zdarzeń pojawi się automatycznie po rozpoczęciu spotkania. Przed meczem SofaScore zwykle nie zwraca jeszcze incydentów."
+      />
+    );
   };
-
 
   return (
     <section className="min-w-0 rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 sm:p-5">
@@ -2474,21 +3036,23 @@ export default function MatchInsightsSection({
       </div>
 
       <div className="mt-4">
-        {activeTab === "lineups"
-          ? renderLineups()
-          : activeTab === "comparison"
-            ? renderComparison()
-            : activeTab === "h2h"
-              ? renderH2H()
-              : activeTab === "liveStats"
-                ? renderLiveStats()
-                : activeTab === "momentum"
-                  ? renderMomentum()
-                  : activeTab === "playoff"
-                    ? renderChampionsLeaguePlayoff()
-                    : activeTab === "timeline"
-                      ? renderTimeline()
-                      : renderTable()}
+        {activeTab === "ai"
+          ? renderAiInsights()
+          : activeTab === "lineups"
+            ? renderLineups()
+            : activeTab === "comparison"
+              ? renderComparison()
+              : activeTab === "h2h"
+                ? renderH2H()
+                : activeTab === "liveStats"
+                  ? renderLiveStats()
+                  : activeTab === "momentum"
+                    ? renderMomentum()
+                    : activeTab === "playoff"
+                      ? renderChampionsLeaguePlayoff()
+                      : activeTab === "timeline"
+                        ? renderTimeline()
+                        : renderTable()}
       </div>
     </section>
   );
