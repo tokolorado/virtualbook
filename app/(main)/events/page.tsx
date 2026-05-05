@@ -1906,6 +1906,10 @@ export default function EventsPage() {
     qs.set("hn", m.home);
     qs.set("an", m.away);
 
+    if (m.prediction) {
+      qs.set("tab", "ai");
+    }
+
     router.push(`/events/${m.id}?${qs.toString()}`);
   };
 

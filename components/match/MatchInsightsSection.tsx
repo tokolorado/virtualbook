@@ -4,6 +4,7 @@
 import SofaScoreEventWidget from "@/components/sofascore/SofaScoreEventWidget";
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   getTableLegendZones,
   getTableZone,
@@ -1478,6 +1479,25 @@ function TableLegendChip({ zone }: { zone: Exclude<TableZone, null> }) {
   );
 }
 
+function normalizeTabParam(value: string | null): TabKey | null {
+  if (
+    value === "ai" ||
+    value === "lineups" ||
+    value === "comparison" ||
+    value === "h2h" ||
+    value === "table" ||
+    value === "playoff" ||
+    value === "liveStats" ||
+    value === "momentum" ||
+    value === "timeline"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+
 export default function MatchInsightsSection({
   matchId,
   homeTeam,
@@ -1487,7 +1507,10 @@ export default function MatchInsightsSection({
   isLive,
   isFinished,
 }: MatchInsightsSectionProps) {
-  const [activeTab, setActiveTab] = useState<TabKey>("ai");
+  const searchParams = useSearchParams();
+  const requestedTab = normalizeTabParam(searchParams.get("tab"));
+
+  const [activeTab, setActiveTab] = useState<TabKey>(requestedTab ?? "ai");
   const [refreshTick, setRefreshTick] = useState(0);
 
   const [lineupsWidgetMapped, setLineupsWidgetMapped] = useState<boolean | null>(
@@ -1605,10 +1628,15 @@ export default function MatchInsightsSection({
   }, [matchId]);
 
   useEffect(() => {
+    if (requestedTab && visibleTabs.some((tab) => tab.key === requestedTab)) {
+      setActiveTab(requestedTab);
+      return;
+    }
+
     if (!visibleTabs.some((tab) => tab.key === activeTab)) {
       setActiveTab(visibleTabs[0].key);
     }
-  }, [activeTab, visibleTabs]);
+  }, [activeTab, requestedTab, visibleTabs]);
 
   useEffect(() => {
     const controller = new AbortController();

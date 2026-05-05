@@ -179,6 +179,92 @@ function poisson(lambda: number, goals: number): number {
   return (Math.exp(-lambda) * Math.pow(lambda, goals)) / factorial;
 }
 
+
+function buildScoreProbabilityMatrix(
+  homeXg: number,
+  awayXg: number,
+  maxGoals = 10
+): Array<{ h: number; a: number; p: number }> {
+  const matrix: Array<{ h: number; a: number; p: number }> = [];
+
+  for (let h = 0; h <= maxGoals; h += 1) {
+    for (let a = 0; a <= maxGoals; a += 1) {
+      matrix.push({
+        h,
+        a,
+        p: poisson(homeXg, h) * poisson(awayXg, a),
+      });
+    }
+  }
+
+  return matrix;
+}
+
+function probabilityFromMatrix(
+  matrix: Array<{ h: number; a: number; p: number }>,
+  predicate: (h: number, a: number) => boolean
+): number {
+  return clamp(
+    matrix
+      .filter((row) => predicate(row.h, row.a))
+      .reduce((sum, row) => sum + row.p, 0),
+    0.0001,
+    0.999
+  );
+}
+
+function estimate1x2FromExpectedGoals(
+  homeXg: number,
+  awayXg: number
+): {
+  homeWin: number;
+  draw: number;
+  awayWin: number;
+} {
+  const matrix = buildScoreProbabilityMatrix(homeXg, awayXg);
+
+  const [homeWin, draw, awayWin] = normalizeProbabilities([
+    probabilityFromMatrix(matrix, (h, a) => h > a),
+    probabilityFromMatrix(matrix, (h, a) => h === a),
+    probabilityFromMatrix(matrix, (h, a) => h < a),
+  ]);
+
+  return {
+    homeWin: roundNumber(clamp(homeWin, 0.001, 0.999)),
+    draw: roundNumber(clamp(draw, 0.001, 0.999)),
+    awayWin: roundNumber(clamp(awayWin, 0.001, 0.999)),
+  };
+}
+
+function estimateTotalGoalsOverProbability(
+  homeXg: number,
+  awayXg: number,
+  line: number
+): number {
+  const matrix = buildScoreProbabilityMatrix(homeXg, awayXg);
+
+  const [over] = normalizeProbabilities([
+    probabilityFromMatrix(matrix, (h, a) => h + a > line),
+    probabilityFromMatrix(matrix, (h, a) => h + a < line),
+  ]);
+
+  return roundNumber(clamp(over, 0.001, 0.999));
+}
+
+function estimateBttsYesFromExpectedGoals(
+  homeXg: number,
+  awayXg: number
+): number {
+  const matrix = buildScoreProbabilityMatrix(homeXg, awayXg);
+
+  const [yes] = normalizeProbabilities([
+    probabilityFromMatrix(matrix, (h, a) => h > 0 && a > 0),
+    probabilityFromMatrix(matrix, (h, a) => !(h > 0 && a > 0)),
+  ]);
+
+  return roundNumber(clamp(yes, 0.001, 0.999));
+}
+
 function readPredictionRecord(event: UnknownRecord): UnknownRecord | null {
   return (
     readRecord(event, "prediction") ??
@@ -275,11 +361,9 @@ function estimate1x2Probabilities(event: UnknownRecord): {
     };
   }
 
-  return {
-    homeWin: null,
-    draw: null,
-    awayWin: null,
-  };
+  const { homeXg, awayXg } = estimateExpectedGoals(event);
+
+  return estimate1x2FromExpectedGoals(homeXg, awayXg);
 }
 
 function estimateOver25Probability(event: UnknownRecord): number | null {
@@ -297,7 +381,9 @@ function estimateOver25Probability(event: UnknownRecord): number | null {
     return roundNumber(clamp(over25, 0.001, 0.999));
   }
 
-  return null;
+  const { homeXg, awayXg } = estimateExpectedGoals(event);
+
+  return estimateTotalGoalsOverProbability(homeXg, awayXg, 2.5);
 }
 
 function estimateBttsProbability(event: UnknownRecord): number | null {
@@ -314,8 +400,9 @@ function estimateBttsProbability(event: UnknownRecord): number | null {
     const [bttsYes] = normalizeProbabilities([1 / bttsYesOdd, 1 / bttsNoOdd]);
     return roundNumber(clamp(bttsYes, 0.001, 0.999));
   }
+  const { homeXg, awayXg } = estimateExpectedGoals(event);
 
-  return null;
+  return estimateBttsYesFromExpectedGoals(homeXg, awayXg);
 }
 
 function estimateExpectedGoals(event: UnknownRecord): {
@@ -665,6 +752,87 @@ export function buildModelOddsInputs(event: UnknownRecord): OddsInput[] {
   const pHome = prob((h, a) => h > a);
   const pDraw = prob((h, a) => h === a);
   const pAway = prob((h, a) => h < a);
+
+    const [pHomeFair, pDrawFair, pAwayFair] = normalizeProbabilities([
+    pHome,
+    pDraw,
+    pAway,
+  ]);
+
+  if (!readPositiveOdd(event, "odds_home")) {
+    rows.push(input("1x2", "1", pHomeFair, "model_1x2_1"));
+  }
+
+  if (!readPositiveOdd(event, "odds_draw")) {
+    rows.push(input("1x2", "X", pDrawFair, "model_1x2_x"));
+  }
+
+  if (!readPositiveOdd(event, "odds_away")) {
+    rows.push(input("1x2", "2", pAwayFair, "model_1x2_2"));
+  }
+
+  const totalGoalLines = [
+    {
+      line: 1.5,
+      key: "1_5",
+      overField: "odds_over_15",
+      underField: "odds_under_15",
+    },
+    {
+      line: 2.5,
+      key: "2_5",
+      overField: "odds_over_25",
+      underField: "odds_under_25",
+    },
+    {
+      line: 3.5,
+      key: "3_5",
+      overField: "odds_over_35",
+      underField: "odds_under_35",
+    },
+  ];
+
+  for (const line of totalGoalLines) {
+    const [overFair, underFair] = normalizeProbabilities([
+      prob((h, a) => h + a > line.line),
+      prob((h, a) => h + a < line.line),
+    ]);
+
+    if (!readPositiveOdd(event, line.overField)) {
+      rows.push(
+        input(
+          `ou_${line.key}`,
+          "over",
+          overFair,
+          `model_ou_${line.key}_over`
+        )
+      );
+    }
+
+    if (!readPositiveOdd(event, line.underField)) {
+      rows.push(
+        input(
+          `ou_${line.key}`,
+          "under",
+          underFair,
+          `model_ou_${line.key}_under`
+        )
+      );
+    }
+  }
+
+  const [bttsYesFair, bttsNoFair] = normalizeProbabilities([
+    prob((h, a) => h > 0 && a > 0),
+    prob((h, a) => !(h > 0 && a > 0)),
+  ]);
+
+  if (!readPositiveOdd(event, "odds_btts_yes")) {
+    rows.push(input("btts", "yes", bttsYesFair, "model_btts_yes"));
+  }
+
+  if (!readPositiveOdd(event, "odds_btts_no")) {
+    rows.push(input("btts", "no", bttsNoFair, "model_btts_no"));
+  }
 
   rows.push(input("dc", "1X", pHome + pDraw, "model_dc_1x"));
   rows.push(input("dc", "12", pHome + pAway, "model_dc_12"));
