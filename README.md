@@ -1,353 +1,265 @@
 # VirtualBook
 
-VirtualBook to wirtualna aplikacja bukmacherska do obstawiania zakładów piłkarskich bez prawdziwych pieniędzy.  
-Projekt działa na Next.js + Supabase i obsługuje:
+VirtualBook to aplikacja bukmacherska bez prawdziwych pieniędzy, zbudowana na Next.js i Supabase. Projekt służy do przeglądania meczów piłkarskich, kursów, analiz, kuponów i wirtualnego salda VB.
 
-- listę meczów i rynków,
-- kupon gracza,
-- zapis zakładów do bazy,
-- historię kuponów,
-- automatyczną synchronizację meczów / kursów / wyników,
-- automatyczne rozliczanie kuponów,
-- ledger i saldo VB,
-- panel admina do monitoringu, ręcznych akcji i diagnostyki.
+Aktualnym źródłem danych meczowych, kursów i statusów jest BSD / Bzzoiro Sports. Starsze źródła typu `football-data` są wyłączone i nie powinny wracać jako źródło prawdy.
 
-------------------------------------------------------------------------
+## Najważniejsze Zasady
 
-## Aktualny stan projektu
+- Mecze publicznie używane przez aplikację pochodzą z BSD: `matches.source = 'bsd'`.
+- Publiczne kursy bukmacherskie mogą być pokazywane tylko z `odds.source = 'bsd'` i `odds.pricing_method = 'bsd_market_normalized'`.
+- Aplikacja nie może udawać kursów realnego bukmachera, jeżeli BSD ich nie zwróciło.
+- Dla meczu bez realnych kursów UI pokazuje: `Jeszcze nie ma kursów dla tego meczu.`
+- `bsd_model_derived` jest wyłączone i nie powinno wracać.
+- Przyszły fallback modelowy musi być jawnie oznaczony osobną metodą, np. `internal_model_fallback`, i nie może być traktowany jako kurs BSD.
 
-Projekt ma obecnie działające:
+## Stack
 
-- logowanie / rejestrację,
-- stronę meczów z wyborem dnia i ligi,
-- dodawanie pozycji do kuponu,
-- stawianie kuponów przez backend + bazę,
-- historię kuponów,
-- automatyczne rozliczanie wyników,
-- dopisywanie wypłat do salda VB,
-- ledger VB,
+- Next.js App Router
+- React
+- TypeScript
+- Tailwind CSS v4
+- Supabase Auth
+- Supabase Postgres
+- Supabase RPC / funkcje SQL
+- BSD / Bzzoiro Sports API
+- SofaScore jako dodatkowe źródło mapowania i match center, gdy mapping jest dostępny
+
+## Główne Funkcje
+
+- lista wydarzeń z kalendarzem dni meczowych,
+- szczegóły meczu i match center,
+- kursy 1X2 oraz wybrane rynki dodatkowe,
+- kupon standardowy,
+- Bet Builder dla jednego meczu,
+- historia kuponów,
+- wirtualny portfel VB i ledger,
+- ranking, misje i profile użytkowników,
 - panel admina,
-- lokalny skrypt cron,
-- zabezpieczenie endpointów operacyjnych przez `CRON_SECRET`,
-- zabezpieczenie endpointów administracyjnych przez `requireAdmin`.
+- crony synchronizacji BSD, predykcji, mapowania i rozliczeń,
+- AI prediction / insights dla kwalifikujących się meczów.
 
-------------------------------------------------------------------------
+## Struktura Projektu
 
-## Stack technologiczny
+- `app/` - routing, strony i API routes.
+- `components/` - komponenty UI.
+- `lib/` - logika domenowa, Supabase, auth, odds, formatowanie.
+- `scripts/` - lokalne narzędzia i workery.
+- `supabase/` - migracje SQL i snapshoty funkcji.
+- `tests/` - testy Node/TypeScript.
+- `public/` - statyczne assety.
 
-- **Next.js (App Router)**
-- **React**
-- **TypeScript**
-- **Tailwind CSS v4**
-- **Supabase**
-  - Auth
-  - Postgres
-  - RPC / funkcje SQL
-- **football-data.org API** jako źródło danych meczowych / wyników
+## Najważniejsze Ścieżki UI
 
-------------------------------------------------------------------------
+- `/events` - lista meczów, kalendarz i kursy.
+- `/events/[matchId]` - szczegóły meczu, rynki, informacje, porównanie i insighty.
+- `/bets` - historia kuponów.
+- `/wallet` - saldo VB i ledger.
+- `/account` - konto użytkownika.
+- `/admin` - panel administracyjny.
+- `/leaderboard` - ranking.
+- `/missions` - misje.
 
-## Struktura projektu
+## Najważniejsze Endpointy
 
-### Główne katalogi
+### Publiczne / Użytkownika
 
-- `app/` – routing i strony aplikacji
-- `app/api/` – endpointy backendowe
-- `components/` – komponenty UI
-- `lib/` – helpery, auth, supabase, logika pomocnicza
-- `scripts/` – narzędzia lokalne, m.in. lokalny cron
-- `public/` – statyczne assety
-- `app/globals.css` – globalne style aplikacji
+- `GET /api/events` - mecze z bazy, tylko BSD.
+- `GET /api/events-enabled-dates` - dni z meczami BSD.
+- `POST /api/bets` - zapis kuponu standardowego lub Bet Buildera.
+- `GET /api/match-center/info` - informacje meczowe z BSD/raw snapshotów.
+- `GET /api/match-center/comparison` - porównanie drużyn, forma i statystyki.
+- `GET /api/predictions/bsd/match-insights` - zapisane insighty dla meczu.
 
-------------------------------------------------------------------------
+### BSD / Admin
 
-## Najważniejsze ścieżki aplikacji
+- `GET /api/admin/bsd/leagues/sync` - synchronizacja lig BSD i mapowania do `competitions`.
+- `GET /api/admin/bsd/matches/sync?date=YYYY-MM-DD` - synchronizacja meczów, wyników, snapshotów i realnych kursów BSD.
+- `GET /api/admin/bsd/debug/events` - diagnostyka eventów BSD.
+- `GET /api/admin/sync-runner` - główny runner administracyjny.
+- `GET /api/admin/internal-odds/fallback/sync` - eksperymentalny zapis jawnych kursów modelowych `internal_model_fallback` dla meczów bez BSD odds.
 
-### Frontend
+### Cron
 
-- `/events` – lista meczów, dzień, ligi, ręczna synchronizacja kursów dla admina
-- `/bets` – historia kuponów
-- `/wallet` – saldo i historia VB
-- `/account` – konto użytkownika
-- `/admin` – panel administracyjny
-- `/login` – logowanie
-- `/register` – rejestracja
-- `/leaderboard` – ranking
-- `/groups` – grupy
+- `GET /api/cron/sync-runner` - cronowy wrapper sync runnera.
+- `GET /api/cron/sync-bsd-predictions` - automatyzacja predykcji BSD dla meczów z realnymi kursami.
+- `GET /api/cron/settle` - rozliczanie kuponów.
+- `GET /api/cron/enqueue-match-mapping` - kolejka mapowania SofaScore.
+- `GET /api/cron/process-match-mapping` - przetwarzanie kolejki mapowania.
+- `GET /api/cron/import-match-center-batch` - import danych match center dla zmapowanych meczów.
 
-------------------------------------------------------------------------
+Niektóre stare endpointy istnieją tylko jako świadome blokady i zwracają `410 Gone`, np. `/api/matches`, `/api/fixtures`, `/api/results/sync`, `/api/standings`.
 
-## Najważniejsze endpointy API
+## Dane I Kursy
 
-### Endpointy użytkowe
+Podstawowy flow danych:
 
-- `app/api/bets/route.ts` – postawienie kuponu
-- `app/api/events/route.ts` – lista meczów
-- `app/api/events-enabled-dates/route.ts` – dni z dostępnymi meczami
-- `app/api/wallet/...` – dane salda / ledgera
-- `app/api/users/...` – dane userów publiczne / profilowe
-- `app/api/auth/...` – auth pomocniczy
+1. Cron lub admin uruchamia synchronizację BSD.
+2. Dane są zapisywane w Supabase.
+3. Frontend czyta bazę przez `/api/events` i endpointy match center.
+4. Klikanie po kalendarzu nie powinno robić ciężkich fetchy do BSD.
 
-### Endpointy operacyjne / cron
+Ważne tabele:
 
-- `app/api/odds/sync/route.ts` – synchronizacja kursów
-- `app/api/results/sync/route.ts` – synchronizacja wyników
-- `app/api/ratings/update/route.ts` – aktualizacja ratingów
-- `app/api/import/standings/route.ts` – import standings
-- `app/api/cron/enqueue-day/route.ts` – kolejka dnia
-- `app/api/cron/results/route.ts` – pobieranie wyników do rozliczeń
-- `app/api/cron/settle/route.ts` – rozliczanie kuponów
-- `app/api/cron/pipeline/route.ts` – pipeline operacyjny
+- `matches` - mecze, statusy, źródło BSD i `raw_bsd`.
+- `odds` - kursy i metadane pricingu.
+- `provider_leagues` - aktywne ligi providera.
+- `competitions` - dane lig używane w UI, w tym ikony.
+- `match_pricing_features` - snapshoty cech pricingowych.
+- `bsd_event_features` - snapshoty cech eventów BSD.
+- `event_predictions` - zapisane predykcje/insighty.
+- `team_stat_snapshots` - fundament pod statystyki drużynowe.
+- `internal_odds_model_runs` - log uruchomień fallback odds modelu.
 
-### Endpointy administracyjne
+## Reguły Zakładów
 
-- `app/api/admin/run-settle/route.ts`
-- `app/api/admin/manual-odds-sync/route.ts`
-- `app/api/admin/sync-runner/route.ts`
-- `app/api/admin/settle-stats/route.ts`
-- `app/api/admin/system-health-ui/route.ts`
-- `app/api/admin/users/route.ts`
-- `app/api/admin/send-surprise/route.ts`
-- `app/api/admin/cron-logs/...`
+Warstwa aplikacji i funkcje SQL w bazie wymagają realnych kursów BSD:
 
-------------------------------------------------------------------------
+```sql
+source = 'bsd'
+pricing_method = 'bsd_market_normalized'
+coalesce(is_model, false) = false
+```
 
-## Aktualny model bezpieczeństwa
+Funkcje `place_bet` i `place_bet_builder` dodatkowo wymagają, aby mecz pochodził z BSD. To zabezpieczenie jest celowo zdublowane: UI daje dobry komunikat użytkownikowi, API waliduje payload, a SQL jest ostatnią granicą przed zapisem kuponu.
 
-### 1. Endpointy adminowe
-Endpointy administracyjne są chronione przez:
+## Predykcje AI
 
-- `lib/requireAdmin.ts`
+Predykcje BSD są automatyzowane przez:
 
-To oznacza, że klient musi mieć poprawny token użytkownika admina.
+- `GET /api/predictions/bsd/sync`
+- `GET /api/cron/sync-bsd-predictions`
 
-### 2. Endpointy operacyjne / cron
-Endpointy techniczne i synchronizacyjne są chronione przez:
+Kwalifikacja meczu:
 
-- `lib/requireCronSecret.ts`
+- `matches.source = 'bsd'`,
+- mecz ma realne kursy `bsd_market_normalized`,
+- BSD udostępnia predykcję lub dane wystarczające do zmapowania,
+- rekord `event_predictions` nie istnieje albo wymaga odświeżenia.
 
-Te endpointy wymagają nagłówka:
+## Match Center
 
-- `x-cron-secret: <CRON_SECRET>`
+Match center zbiera dane z kilku źródeł:
 
-### 3. Ważna zasada
-Frontend **nie powinien** bezpośrednio wywoływać chronionych endpointów cronowych.  
-Jeśli admin ma ręcznie uruchamiać akcję, robi to przez endpoint adminowy-proxy, np.:
+- `matches` i `raw_bsd`,
+- `bsd_event_features`,
+- `event_predictions`,
+- dane SofaScore, jeśli istnieje mapping.
 
-- frontend → `/api/admin/manual-odds-sync`
-- backend adminowy → `/api/odds/sync` z `x-cron-secret`
+Zakładka informacji meczowych pokazuje m.in. stadion, lokalizację, sędziego, trenerów, rundę, sezon, pogodę i identyfikatory BSD, o ile dane są dostępne.
 
-------------------------------------------------------------------------
+Zakładka porównania pokazuje ostatnie mecze, formę, gole, trendy BTTS/over, ratingi i krótkie summary.
 
-## Najważniejsze pliki w `lib/`
+## Uruchomienie Lokalnie
 
-- `lib/requireAdmin.ts` – guard admina
-- `lib/requireUser.ts` – guard usera
-- `lib/requireCronSecret.ts` – guard endpointów cronowych
-- `lib/supabase.ts` – klient Supabase po stronie klienta
-- `lib/supabaseServer.ts` – klient serwerowy / admin
-- `lib/BetSlipContext.tsx` – stan kuponu
-- `lib/cronLogger.ts` – logowanie operacji cronowych
-- `lib/format.ts` – helpery formatowania
-- `lib/date.ts` – helpery dat
-- `lib/matchSync.ts` – logika synchronizacji meczów
-- `lib/odds/engine-v1.ts`
-- `lib/odds/engine-v2.ts`
+```bash
+npm install
+npm run dev
+```
 
-### Uwaga
-Stary legacy pakiet oddsów został usunięty:
-- `lib/odds.ts`
-- `lib/oddsEngine.ts`
-- `lib/oddsComputeAndStore.ts`
-- `lib/lambdaMvp.ts`
-- `app/api/odds/route.ts`
+Aplikacja lokalnie działa zwykle pod:
 
-To nie powinno już wracać jako source of truth.
+```text
+http://localhost:3000
+```
 
-------------------------------------------------------------------------
+Testy:
 
-## Panel admina
+```bash
+npm test
+```
 
-Panel admina służy do:
+Build produkcyjny:
 
-- przeglądu użytkowników,
-- dodawania VB,
-- resetu salda,
-- ban / unban,
-- health check systemu,
-- sprawdzania pozycji do rozliczenia,
-- ręcznego uruchamiania auto-rozliczania,
-- ręcznej synchronizacji kursów,
-- wysyłania „niespodzianek” użytkownikom,
-- wglądu w logi cronów i audyty.
+```bash
+npm run build
+```
 
-### Ważne
-Hard delete użytkownika jest **tymczasowo wyłączony**.  
-Powód: wcześniejsza implementacja nie była transakcyjna i mogła zostawić bazę w niespójnym stanie.
+Lokalny cron:
 
-Docelowo trzeba to zastąpić:
-- bezpiecznym RPC,
-- albo archiwizacją / soft-delete.
+```bash
+npm run cron:local
+```
 
-------------------------------------------------------------------------
+Worker mapowania SofaScore:
 
-## Automatyczne rozliczanie kuponów
+```bash
+npm run sofascore:worker
+```
 
-System rozliczeń działa w oparciu o:
+## Zmienne Środowiskowe
 
-- wyniki meczów,
-- statusy pozycji kuponu,
-- finalne rozliczenie kuponu,
-- dopisanie wypłaty do VB ledger.
-
-### Kluczowe założenia
-- rozliczenie powinno być idempotentne,
-- payout nie może być dopisany drugi raz,
-- ledger jest source of truth dla salda,
-- rozliczenie nie powinno zależeć od UI.
-
-------------------------------------------------------------------------
-
-## System Health
-
-Admin UI pokazuje obecnie m.in.:
-
-- mecze utkwione zbyt długo w `IN_PLAY` / `PAUSED`,
-- mecze zakończone, ale z nierozliczonymi `bet_items`,
-- kupony `pending`, mimo że wszystkie pozycje są już settled,
-- rozliczone kupony z payoutem, ale bez wpisu `BET_PAYOUT` w ledgerze.
-
-To służy do szybkiego wykrywania niespójności operacyjnych.
-
-------------------------------------------------------------------------
-
-## Lokalny cron
-
-Plik:
-
-- `scripts/cron-local.ts`
-
-pozwala lokalnie odpalać pipeline cykliczny.
-
-### Założenia
-- wymaga uruchomionego Next dev na `localhost:3000`
-- wymaga `CRON_SECRET`
-- chronione trasy dostają `x-cron-secret`
-
-### Konfiguracja
-Wykorzystywane są m.in.:
-
-- `CRON_BASE_URL`
-- `CRON_SECRET`
-- `CRON_INTERVAL_MS`
-- `CRON_RANGE_EVERY_N_TICKS`
-- `CRON_STALE_LIMIT`
-- `CRON_RANGE_LIMIT`
-- `CRON_RANGE_DAYS_BACK`
-
-------------------------------------------------------------------------
-
-## Environment variables
-
-Minimalnie projekt wymaga konfiguracji z `.env.local`.
-
-Najważniejsze zmienne używane w projekcie:
+Minimalny zestaw do pracy lokalnej:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_URL=
 SUPABASE_SERVICE_ROLE_KEY=
+BSD_API_KEY=
 CRON_SECRET=
 CRON_BASE_URL=http://localhost:3000
-FOOTBALL_DATA_API_KEY=
-
-
-------------------------------------------------------------------------
-
-
-Uwaga bezpieczeństwa
-
-.env.local nie powinien być wrzucany do zipa / backupów wysyłanych dalej
-
-nie należy udostępniać SUPABASE_SERVICE_ROLE_KEY
-
-CRON_SECRET nie może trafiać do klienta
-
-
-
-------------------------------------------------------------------------
-
-
-Ważne konwencje projektowe
-1. Nie wywołuj endpointów cronowych z klienta
-
-Zawsze:
-
-klient → endpoint adminowy / użytkowy
-
-endpoint adminowy → endpoint techniczny z sekretem
-
-2. Ledger jest źródłem prawdy dla salda
-
-Nie dopisujemy salda „na skróty” poza kontrolowanym flow.
-
-3. Rozliczenia muszą być idempotentne
-
-Każda operacja payout / settlement musi być odporna na ponowne uruchomienie.
-
-4. Admin delete user nie może wrócić bez transakcyjnego rozwiązania
-
-Najpierw RPC / archiwizacja, potem ewentualne usuwanie.
-
-
-------------------------------------------------------------------------
-
-Uruchamianie lokalne:
-
-npm install
-npm run dev
-
-Lokalny cron:
-
-npm run cron:local
-
-
-
-------------------------------------------------------------------------
-
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
-
-## Getting Started
-
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Opcjonalnie używane są też:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```env
+NEXT_PUBLIC_BASE_URL=
+NEXT_PUBLIC_SITE_URL=
+SITE_URL=
+APP_URL=
+VERCEL_URL=
+PREFETCH_SECRET=
+CRON_INTERVAL_MS=
+CRON_RANGE_EVERY_N_TICKS=
+CRON_STALE_LIMIT=
+CRON_RANGE_LIMIT=
+CRON_RANGE_DAYS_BACK=
+SETTLE_BATCH_LIMIT=
+SETTLE_BET_BACKFILL_LIMIT=
+MAPPING_WORKER_ID=
+MAPPING_BATCH_SIZE=
+MAPPING_MAX_ATTEMPTS=
+MAPPING_MIN_CONFIDENCE=
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Nie commituj `.env.local`. `SUPABASE_SERVICE_ROLE_KEY`, `BSD_API_KEY` i `CRON_SECRET` nie mogą trafić do klienta.
 
-## Learn More
+## Migracje SQL
 
-To learn more about Next.js, take a look at the following resources:
+Migracje w `supabase/migrations/` są częścią kontraktu produkcyjnego. Szczególnie ważne:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- migracje hardeningowe funkcji SQL,
+- migracje tabel BSD i predykcji,
+- migracje idempotentnego rozliczania kuponów,
+- migracje misji, ledgera i publicznego udostępniania kuponów.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Po zmianie funkcji `SECURITY DEFINER` warto sprawdzić definicje:
 
-## Deploy on Vercel
+```sql
+select
+  p.proname,
+  pg_get_functiondef(p.oid)
+from pg_proc p
+join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public'
+  and p.proname in ('place_bet', 'place_bet_builder');
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Konwencje Operacyjne
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Endpointy cronowe nie są wywoływane bezpośrednio z klienta.
+2. Admin UI używa endpointów adminowych, a backend dopiero wtedy wywołuje chronione flow.
+3. Ledger VB jest źródłem prawdy dla salda.
+4. Rozliczanie kuponów musi być idempotentne.
+5. Brak kursów jest poprawnym stanem produktu, nie błędem do maskowania.
+6. Każdy modelowy fallback kursów musi być jawnie oznaczony i oddzielony od realnych kursów BSD.
+
+## Znane Kierunki Rozwoju
+
+- rozbudowa `team_stat_snapshots` i danych drużynowych,
+- jakościowy fallback odds model oparty o statystyki, a nie placeholdery,
+- bogatszy head-to-head i porównanie drużyn,
+- dalsze wzbogacanie match center o dane BSD,
+- stabilniejsze pobieranie danych SofaScore tam, gdzie pojawia się `403`,
+- porządkowanie starszego długu ESLint.
