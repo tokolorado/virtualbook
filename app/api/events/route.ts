@@ -9,6 +9,8 @@ export const dynamic = "force-dynamic";
 
 const MARKET_ID_1X2 = "1x2";
 const DISPLAYABLE_BSD_PRICING_METHOD = "bsd_market_normalized";
+const INTERNAL_FALLBACK_PRICING_METHOD = "internal_model_fallback";
+const INTERNAL_FALLBACK_SOURCE = "internal_model";
 
 type DbMatchRow = {
   id: number;
@@ -79,6 +81,17 @@ type FeaturesRow = {
 };
 
 type OddsSet = { "1": number | null; X: number | null; "2": number | null };
+type OddsMeta = {
+  source: string | null;
+  pricingMethod: string | null;
+  isModel: boolean;
+  label: string;
+  updatedAt: string | null;
+};
+type OddsBundle = {
+  odds: OddsSet;
+  meta: OddsMeta | null;
+};
 
 function jsonError(
   message: string,
@@ -330,6 +343,14 @@ function hasRealBsdOdds(odds: OddsSet) {
   );
 }
 
+function isRealBsdOddsMeta(meta: OddsMeta | null) {
+  return (
+    meta?.source === "bsd" &&
+    meta.pricingMethod === DISPLAYABLE_BSD_PRICING_METHOD &&
+    !meta.isModel
+  );
+}
+
 function probabilityToDecimal(value: number | null | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
     return null;
@@ -343,11 +364,14 @@ function probabilityToDecimal(value: number | null | undefined) {
 
 function buildValueAlert(
   odds: OddsSet,
+  oddsMeta: OddsMeta | null,
   prediction: BuiltPrediction | null,
   homeTeam: string,
   awayTeam: string
 ) {
-  if (!prediction || !hasRealBsdOdds(odds)) return null;
+  if (!prediction || !hasRealBsdOdds(odds) || !isRealBsdOddsMeta(oddsMeta)) {
+    return null;
+  }
 
   const candidates = [
     {
@@ -403,11 +427,16 @@ function buildValueAlert(
 
 function buildDataQuality(args: {
   odds: OddsSet;
+  oddsMeta: OddsMeta | null;
   predictionRow: PredictionRow | null;
   features: FeaturesRow | null;
   prediction: BuiltPrediction | null;
 }) {
-  const hasOdds = hasRealBsdOdds(args.odds);
+  const hasOdds = hasRealBsdOdds(args.odds) && isRealBsdOddsMeta(args.oddsMeta);
+  const hasModelOdds =
+    hasRealBsdOdds(args.odds) &&
+    args.oddsMeta?.source === INTERNAL_FALLBACK_SOURCE &&
+    args.oddsMeta.pricingMethod === INTERNAL_FALLBACK_PRICING_METHOD;
   const hasBsdPrediction = !!args.predictionRow;
   const hasBsdFeatures = !!args.features;
   const hasModelScore = args.prediction?.scoreSource === "model_snapshot";
@@ -420,6 +449,7 @@ function buildDataQuality(args: {
 
   const sourceBadges: string[] = [];
   if (hasOdds) sourceBadges.push("Kursy BSD");
+  if (hasModelOdds) sourceBadges.push("Kurs modelowy");
   if (hasBsdPrediction) sourceBadges.push("Predykcja BSD");
   if (hasBsdFeatures) sourceBadges.push("Features BSD");
   if (hasModelScore) sourceBadges.push("Model xG");
@@ -442,6 +472,7 @@ function buildDataQuality(args: {
     score,
     label,
     hasRealBsdOdds: hasOdds,
+    hasModelOdds,
     hasBsdPrediction,
     hasBsdFeatures,
     hasModelScore,
@@ -453,7 +484,7 @@ function buildDataQuality(args: {
 }
 
 async function readOddsMap(matchIds: number[]) {
-  const oddsMap = new Map<number, OddsSet>();
+  const oddsMap = new Map<number, OddsBundle>();
 
   if (!matchIds.length) return oddsMap;
 
@@ -464,8 +495,7 @@ async function readOddsMap(matchIds: number[]) {
     .select("match_id, selection, book_odds, source, pricing_method, updated_at")
     .in("match_id", matchIds)
     .eq("market_id", MARKET_ID_1X2)
-    .eq("source", "bsd")
-    .eq("pricing_method", DISPLAYABLE_BSD_PRICING_METHOD)
+    .or(`source.eq.bsd,source.eq.${INTERNAL_FALLBACK_SOURCE}`)
     .order("updated_at", { ascending: false });
 
   if (error) {
@@ -478,18 +508,38 @@ async function readOddsMap(matchIds: number[]) {
     const odd = safeNum(row.book_odds);
 
     if (!Number.isFinite(matchId)) continue;
-    if (row.source !== "bsd") continue;
-    if (row.pricing_method !== DISPLAYABLE_BSD_PRICING_METHOD) continue;
+    const isRealBsd =
+      row.source === "bsd" &&
+      row.pricing_method === DISPLAYABLE_BSD_PRICING_METHOD;
+    const isInternalFallback =
+      row.source === INTERNAL_FALLBACK_SOURCE &&
+      row.pricing_method === INTERNAL_FALLBACK_PRICING_METHOD;
+    if (!isRealBsd && !isInternalFallback) continue;
     if (odd === null || odd <= 0) continue;
     if (selection !== "1" && selection !== "X" && selection !== "2") continue;
 
-    const current = oddsMap.get(matchId) ?? emptyOdds();
+    const existing = oddsMap.get(matchId);
+    if (existing && isRealBsdOddsMeta(existing.meta) && !isRealBsd) continue;
+
+    const current =
+      existing && (!isRealBsd || !isRealBsdOddsMeta(existing.meta))
+        ? existing.odds
+        : emptyOdds();
 
     if (selection === "1") current["1"] = odd;
     if (selection === "X") current.X = odd;
     if (selection === "2") current["2"] = odd;
 
-    oddsMap.set(matchId, current);
+    oddsMap.set(matchId, {
+      odds: current,
+      meta: {
+        source: row.source,
+        pricingMethod: row.pricing_method,
+        isModel: isInternalFallback,
+        label: isRealBsd ? "Kursy BSD" : "Kurs modelowy",
+        updatedAt: row.updated_at,
+      },
+    });
   }
 
   return oddsMap;
@@ -582,7 +632,7 @@ export async function GET(req: Request) {
     .map((m) => Number(m.id))
     .filter((id) => Number.isFinite(id));
 
-  let oddsMap = new Map<number, OddsSet>();
+  let oddsMap = new Map<number, OddsBundle>();
 
   let predictionsMap = new Map<number, PredictionRow>();
   let featuresMap = new Map<number, FeaturesRow>();
@@ -657,7 +707,11 @@ export async function GET(req: Request) {
                   }
                 : null;
 
-            const odds = oddsMap.get(Number(m.id)) ?? emptyOdds();
+            const oddsBundle = oddsMap.get(Number(m.id)) ?? {
+              odds: emptyOdds(),
+              meta: null,
+            };
+            const odds = oddsBundle.odds;
 
             const matchId = Number(m.id);
             const predictionRow = predictionsMap.get(matchId) ?? null;
@@ -667,12 +721,14 @@ export async function GET(req: Request) {
             const awayTeamName = cleanString(m.away_team, "Away");
             const dataQuality = buildDataQuality({
               odds,
+              oddsMeta: oddsBundle.meta,
               predictionRow,
               features: featuresRow,
               prediction,
             });
             const valueAlert = buildValueAlert(
               odds,
+              oddsBundle.meta,
               prediction,
               homeTeamName,
               awayTeamName
@@ -706,6 +762,7 @@ export async function GET(req: Request) {
               },
               displayScore,
               odds,
+              oddsMeta: oddsBundle.meta,
               prediction,
               dataQuality,
               valueAlert,

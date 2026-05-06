@@ -59,6 +59,9 @@ type MarketSelectionUI = {
   label: string;
   odd: number | null;
   sortOrder: number;
+  source: string | null;
+  pricingMethod: string | null;
+  isModel: boolean;
 };
 
 type MarketUI = {
@@ -94,6 +97,8 @@ type MarketDisplayBlock =
 
 const BETTING_CLOSE_BUFFER_MS = 60_000;
 const ESTIMATED_LIVE_AFTER_KICKOFF_MS = 150 * 60 * 1000;
+const INTERNAL_FALLBACK_SOURCE = "internal_model";
+const INTERNAL_FALLBACK_PRICING_METHOD = "internal_model_fallback";
 const NO_ODDS_MESSAGE = "Jeszcze nie ma kursów dla tego meczu.";
 
 const FALLBACK_MARKETS: Record<
@@ -526,7 +531,6 @@ function isNonLiveTerminalStatus(status?: string | null) {
     s === "AWARDED"
   );
 }
-
 function isEffectivelyLiveByClock(args: {
   status?: string | null;
   kickoffUtc?: string | null;
@@ -557,50 +561,6 @@ function isEffectivelyLiveByClock(args: {
     args.nowMs >= kickoffTs &&
     args.nowMs <= kickoffTs + ESTIMATED_LIVE_AFTER_KICKOFF_MS
   );
-}
-
-function estimateLiveMinute(kickoffUtc: string, nowMs: number): number | null {
-  const kickoffTs = Date.parse(kickoffUtc);
-  if (!Number.isFinite(kickoffTs)) return null;
-
-  const elapsed = Math.floor((nowMs - kickoffTs) / 60_000) + 1;
-  if (elapsed < 1) return null;
-
-  if (elapsed <= 45) return elapsed;
-  if (elapsed <= 60) return 45;
-
-  const secondHalfMinute = elapsed - 15;
-  if (secondHalfMinute <= 90) return Math.max(46, secondHalfMinute);
-
-  return 90;
-}
-
-function formatLiveClock(args: {
-  match: MatchUI;
-  kickoffIso: string;
-  nowMs: number;
-  effectiveIsLive: boolean;
-}) {
-  if (!args.effectiveIsLive) return null;
-
-  const minute =
-    typeof args.match.minute === "number" &&
-    Number.isFinite(args.match.minute) &&
-    args.match.minute >= 0
-      ? args.match.minute
-      : estimateLiveMinute(args.kickoffIso, args.nowMs);
-
-  if (minute === null) return null;
-
-  const injuryTime =
-    typeof args.match.injuryTime === "number" &&
-    Number.isFinite(args.match.injuryTime) &&
-    args.match.injuryTime > 0
-      ? args.match.injuryTime
-      : null;
-
-  if (injuryTime !== null) return `${minute}+${injuryTime}'`;
-  return `${minute}'`;
 }
 
 function resolveTemplate(template: string, home: string, away: string) {
@@ -874,6 +834,11 @@ function groupMarkets(
           label: resolveSelectionLabel(marketId, row.selection, home, away, meta),
           odd: safeNum(row.book_odds),
           sortOrder: selectionSortOrder(marketId, row.selection, meta),
+          source: row.source ?? null,
+          pricingMethod: row.pricing_method ?? null,
+          isModel:
+            row.source === INTERNAL_FALLBACK_SOURCE &&
+            row.pricing_method === INTERNAL_FALLBACK_PRICING_METHOD,
         };
       })
       .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -957,14 +922,6 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   ]);
 
   const effectiveMatchStatus = effectiveIsLive ? "LIVE" : matchUI.status;
-  const liveClockLabel = useMemo(() => {
-    return formatLiveClock({
-      match: matchUI,
-      kickoffIso,
-      nowMs,
-      effectiveIsLive,
-    });
-  }, [effectiveIsLive, kickoffIso, matchUI, nowMs]);
 
   const closed = useMemo(() => {
     if (effectiveIsLive || matchUI.isFinished) return true;
@@ -1034,8 +991,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
               "match_id, market_id, selection, book_odds, updated_at, source, pricing_method"
             )
             .eq("match_id", matchIdNum)
-            .eq("source", "bsd")
-            .eq("pricing_method", "bsd_market_normalized")
+            .or(`source.eq.bsd,source.eq.${INTERNAL_FALLBACK_SOURCE}`)
             .order("market_id", { ascending: true })
             .order("selection", { ascending: true }),
 
@@ -1189,9 +1145,24 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   ]);
 
     const markets = useMemo(() => {
-      const filteredOddsRows = oddsRows.filter(
-        (row) => row.pricing_method === "bsd_market_normalized"
-      );
+      const bySelection = new Map<string, OddsRow>();
+
+      for (const row of oddsRows) {
+        const isBsd =
+          row.source === "bsd" && row.pricing_method === "bsd_market_normalized";
+        const isModel =
+          row.source === INTERNAL_FALLBACK_SOURCE &&
+          row.pricing_method === INTERNAL_FALLBACK_PRICING_METHOD;
+
+        if (!isBsd && !isModel) continue;
+
+        const key = `${row.market_id}__${row.selection}`;
+        const existing = bySelection.get(key);
+        if (existing?.source === "bsd" && !isBsd) continue;
+        bySelection.set(key, row);
+      }
+
+      const filteredOddsRows = Array.from(bySelection.values());
 
       return groupMarkets(
         filteredOddsRows,
@@ -1206,8 +1177,6 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     selectionCatalog,
     matchUI.home,
     matchUI.away,
-    effectiveIsLive,
-    matchUI.isFinished,
   ]);
 
   const groupedSections = useMemo(() => {
@@ -1242,6 +1211,11 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
       .sort((a, b) => a.order - b.order);
   }, [markets]);
 
+  const hasModelMarkets = useMemo(
+    () => markets.some((market) => market.selections.some((item) => item.isModel)),
+    [markets]
+  );
+
   const renderSelectionButton = (
     market: MarketUI,
     item: MarketSelectionUI,
@@ -1249,6 +1223,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   ) => {
     const hasOdd =
       typeof item.odd === "number" && Number.isFinite(item.odd) && item.odd > 0;
+    const isModelOdd = item.isModel;
 
     const active = isActivePick(matchId, market.marketId, item.selection);
 
@@ -1283,7 +1258,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
             ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
             : active
               ? "border-neutral-200 bg-white text-black"
-              : "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-800"
+              : isModelOdd
+                ? "border-cyan-500/25 bg-cyan-500/10 text-cyan-100 hover:border-cyan-400/40 hover:bg-cyan-500/15"
+                : "border-neutral-800 bg-neutral-950 text-white hover:bg-neutral-800"
         )}
         title={
           !hasOdd
@@ -1295,7 +1272,14 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                 : `Kurs: ${formatOdd(item.odd!)}`
         }
       >
-        <div className="truncate text-sm font-medium">{item.label}</div>
+        <div className="flex items-center justify-between gap-2">
+          <div className="truncate text-sm font-medium">{item.label}</div>
+          {isModelOdd ? (
+            <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-cyan-200">
+              model
+            </span>
+          ) : null}
+        </div>
         <div className="mt-1 text-sm font-semibold">
           {hasOdd ? formatOdd(item.odd!) : "—"}
         </div>
@@ -1387,6 +1371,12 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
       {noOdds && !loading ? (
         <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 text-sm text-neutral-300">
           {NO_ODDS_MESSAGE}
+        </div>
+      ) : null}
+
+      {hasModelMarkets && !loading ? (
+        <div className="rounded-3xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-100">
+          Kursy modelowe sa fallbackiem VirtualBook, bo BSD nie podalo kursow dla tych rynkow. Mozesz je obstawiac jak normalne kursy wirtualne.
         </div>
       ) : null}
 

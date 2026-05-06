@@ -5,6 +5,11 @@ import { supabaseAdmin } from "@/lib/supabaseServer";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const DISPLAYABLE_BSD_SOURCE = "bsd";
+const DISPLAYABLE_BSD_PRICING_METHOD = "bsd_market_normalized";
+const INTERNAL_FALLBACK_SOURCE = "internal_model";
+const INTERNAL_FALLBACK_PRICING_METHOD = "internal_model_fallback";
+
 type SlipItem = {
   matchId?: string | number | null;
   market?: string | null;
@@ -37,6 +42,23 @@ function matchIdFromSlip(slip: SlipItem[]) {
   return Number.isFinite(parsed) ? Math.trunc(parsed) : null;
 }
 
+function isBettableOddsRow(row: {
+  source?: string | null;
+  pricing_method?: string | null;
+  is_model?: boolean | null;
+}) {
+  const isRealBsd =
+    row.source === DISPLAYABLE_BSD_SOURCE &&
+    row.pricing_method === DISPLAYABLE_BSD_PRICING_METHOD &&
+    row.is_model !== true;
+  const isInternalFallback =
+    row.source === INTERNAL_FALLBACK_SOURCE &&
+    row.pricing_method === INTERNAL_FALLBACK_PRICING_METHOD &&
+    row.is_model === true;
+
+  return isRealBsd || isInternalFallback;
+}
+
 export async function POST(req: Request) {
   let body: Body;
 
@@ -57,10 +79,9 @@ export async function POST(req: Request) {
 
   const { data: oddsRows, error: oddsError } = await supabase
     .from("odds")
-    .select("market_id,selection,fair_prob,book_odds")
+    .select("market_id,selection,fair_prob,book_odds,source,pricing_method,is_model")
     .eq("match_id", matchId)
-    .eq("source", "bsd")
-    .eq("pricing_method", "bsd_market_normalized");
+    .or(`source.eq.${DISPLAYABLE_BSD_SOURCE},source.eq.${INTERNAL_FALLBACK_SOURCE}`);
 
   if (oddsError) {
     return jsonError("Nie udało się pobrać kursów do Bet Buildera.", 500, {
@@ -70,7 +91,15 @@ export async function POST(req: Request) {
 
   const quote = priceBetBuilderSlip({
     items: slip,
-    oddsRows: oddsRows ?? [],
+    oddsRows: ((oddsRows ?? []) as Array<{
+      market_id: string;
+      selection: string;
+      fair_prob?: number | string | null;
+      book_odds?: number | string | null;
+      source?: string | null;
+      pricing_method?: string | null;
+      is_model?: boolean | null;
+    }>).filter(isBettableOddsRow),
     stake: toNumber(body.stake),
   });
 

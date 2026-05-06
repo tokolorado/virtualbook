@@ -48,6 +48,7 @@ type MatchDataQuality = {
   score: number;
   label: string;
   hasRealBsdOdds: boolean;
+  hasModelOdds: boolean;
   hasBsdPrediction: boolean;
   hasBsdFeatures: boolean;
   hasModelScore: boolean;
@@ -84,6 +85,13 @@ type Match = {
   minute: number | null;
   injuryTime: number | null;
   odds: { "1": number | null; X: number | null; "2": number | null };
+  oddsMeta: {
+    source: string | null;
+    pricingMethod: string | null;
+    isModel: boolean;
+    label: string;
+    updatedAt: string | null;
+  } | null;
   prediction: MatchPrediction | null;
   dataQuality: MatchDataQuality | null;
   valueAlert: MatchValueAlert | null;
@@ -234,6 +242,7 @@ function buildDataQualityFromPayload(raw: unknown): MatchDataQuality | null {
     score: score ?? 0,
     label: label ?? "Braki",
     hasRealBsdOdds: record.hasRealBsdOdds === true,
+    hasModelOdds: record.hasModelOdds === true,
     hasBsdPrediction: record.hasBsdPrediction === true,
     hasBsdFeatures: record.hasBsdFeatures === true,
     hasModelScore: record.hasModelScore === true,
@@ -271,6 +280,26 @@ function buildValueAlertFromPayload(raw: unknown): MatchValueAlert | null {
     impliedProbability,
     edgePercentPoints,
     odds,
+  };
+}
+
+function buildOddsMetaFromPayload(raw: unknown): Match["oddsMeta"] {
+  const record = asRecord(raw);
+  if (!record) return null;
+
+  const source = safeString(record.source);
+  const pricingMethod = safeString(record.pricingMethod);
+
+  if (!source && !pricingMethod) return null;
+
+  return {
+    source,
+    pricingMethod,
+    isModel: record.isModel === true || source === "internal_model",
+    label:
+      safeString(record.label) ??
+      (source === "internal_model" ? "Kurs modelowy" : "Kursy BSD"),
+    updatedAt: safeString(record.updatedAt),
   };
 }
 
@@ -870,6 +899,7 @@ function buildMatchesFromPayload(payload: unknown, selectedDate: string): Match[
           X: safeNum(odds?.X),
           "2": safeNum(odds?.["2"]),
         },
+        oddsMeta: buildOddsMetaFromPayload(m?.oddsMeta),
         prediction: buildPredictionFromPayload(m?.prediction),
         dataQuality: buildDataQualityFromPayload(m?.dataQuality),
         valueAlert: buildValueAlertFromPayload(m?.valueAlert),
@@ -904,14 +934,14 @@ async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
     .select("match_id, selection, book_odds, updated_at, source, pricing_method")
     .in("match_id", matchIds)
     .eq("market_id", MARKET_ID_1X2)
-    .eq("source", "bsd")
-    .eq("pricing_method", "bsd_market_normalized");
+    .or("source.eq.bsd,source.eq.internal_model");
 
   if (error) {
     throw new Error(`Nie udało się pobrać kursów 1X2 z bazy: ${error.message}`);
   }
 
   const byMatch = new Map<string, Match["odds"]>();
+  const metaByMatch = new Map<string, NonNullable<Match["oddsMeta"]>>();
   let latestOddsUpdatedAt: string | null = null;
 
   for (const row of (data ?? []) as Odds1x2DbRow[]) {
@@ -919,12 +949,29 @@ async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
     const selection = String(row.selection) as Pick;
 
     if (selection !== "1" && selection !== "X" && selection !== "2") continue;
+    const isBsd =
+      row.source === "bsd" && row.pricing_method === "bsd_market_normalized";
+    const isModel =
+      row.source === "internal_model" &&
+      row.pricing_method === "internal_model_fallback";
+    if (!isBsd && !isModel) continue;
 
     const odd = safeNum(row.book_odds);
+    if (odd === null || odd <= 0) continue;
+    const existingMeta = metaByMatch.get(matchId);
+    if (existingMeta?.source === "bsd" && !isBsd) continue;
+
     const current = byMatch.get(matchId) ?? { "1": null, X: null, "2": null };
 
     current[selection] = odd;
     byMatch.set(matchId, current);
+    metaByMatch.set(matchId, {
+      source: row.source,
+      pricingMethod: row.pricing_method ?? null,
+      isModel,
+      label: isBsd ? "Kursy BSD" : "Kurs modelowy",
+      updatedAt: row.updated_at,
+    });
 
     if (typeof row.updated_at === "string" && row.updated_at) {
       if (
@@ -947,6 +994,7 @@ async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
           X: dbOdds?.X ?? null,
           "2": dbOdds?.["2"] ?? null,
         },
+        oddsMeta: metaByMatch.get(m.id) ?? null,
       };
     }),
     latestOddsUpdatedAt,
@@ -2263,9 +2311,16 @@ export default function EventsPage() {
   const renderMarketButtons = (m: Match) => {
     const availability = getMatchAvailability(m, nowMs);
     const hasAnyOdds = hasDisplayable1x2Odds(m.odds);
+    const isModelOdds = m.oddsMeta?.isModel === true;
 
     return (
       <div onClick={(e) => e.stopPropagation()}>
+        {isModelOdds ? (
+          <div className="mb-2 flex items-center justify-between gap-2 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-semibold text-cyan-200">
+            <span>Kurs modelowy</span>
+            <span className="text-cyan-200/70">BSD nie podało kursów</span>
+          </div>
+        ) : null}
         <div className="grid grid-cols-3 gap-2">
           {(["1", "X", "2"] as Pick[]).map((pick) => {
             const active = isActivePick(m.id, MARKET_ID_1X2, pick);
@@ -2314,7 +2369,9 @@ export default function EventsPage() {
                     ? "cursor-not-allowed border-neutral-800 bg-neutral-950/70 text-neutral-600"
                     : active
                       ? "border-white bg-white text-black shadow-[0_10px_35px_rgba(255,255,255,0.12)]"
-                      : "border-neutral-800 bg-neutral-950 text-white hover:border-neutral-600 hover:bg-neutral-900"
+                      : isModelOdds
+                        ? "border-cyan-500/25 bg-cyan-500/10 text-cyan-100 hover:border-cyan-400/40 hover:bg-cyan-500/15"
+                        : "border-neutral-800 bg-neutral-950 text-white hover:border-neutral-600 hover:bg-neutral-900"
                 )}
                 title={title}
                 aria-label={`${pickLabel(pick)} ${hasOdd ? formatOdd(odd) : "brak kursu"}`}

@@ -37,6 +37,11 @@ const bsdBettingOddsHardeningMigration = fs.readFileSync(
   "utf8"
 );
 
+const internalFallbackBettingMigration = fs.readFileSync(
+  "supabase/migrations/20260506_allow_internal_model_fallback_bets.sql",
+  "utf8"
+);
+
 test("production function snapshot documents every inspected public function", () => {
   const functionHeaders = snapshot.match(/^-- Function:/gm) ?? [];
 
@@ -159,6 +164,32 @@ test("bet placement SQL only prices real normalized BSD odds", () => {
   );
   assert.doesNotMatch(
     bsdBettingOddsHardeningMigration,
+    /bsd_model_derived/i
+  );
+});
+
+test("bet placement SQL allows explicit internal fallback odds only", () => {
+  const internalFallbackFilters =
+    internalFallbackBettingMigration.match(
+      /o\.source\s*=\s*'internal_model'\s+and\s+o\.pricing_method\s*=\s*'internal_model_fallback'\s+and\s+coalesce\(o\.is_model,\s*false\)\s*=\s*true/gi
+    ) ?? [];
+  const realBsdFilters =
+    internalFallbackBettingMigration.match(
+      /o\.source\s*=\s*'bsd'\s+and\s+o\.pricing_method\s*=\s*'bsd_market_normalized'\s+and\s+coalesce\(o\.is_model,\s*false\)\s*=\s*false/gi
+    ) ?? [];
+
+  assert.equal(internalFallbackFilters.length, 2);
+  assert.ok(realBsdFilters.length >= 2);
+  assert.match(
+    internalFallbackBettingMigration,
+    /create\s+or\s+replace\s+function\s+public\.place_bet\(/i
+  );
+  assert.match(
+    internalFallbackBettingMigration,
+    /create\s+or\s+replace\s+function\s+public\.place_bet_builder\(/i
+  );
+  assert.doesNotMatch(
+    internalFallbackBettingMigration,
     /bsd_model_derived/i
   );
 });

@@ -28,6 +28,10 @@ type Body = {
 
 const MAX_ITEMS = 20;
 const MAX_STAKE = 10000;
+const DISPLAYABLE_BSD_SOURCE = "bsd";
+const DISPLAYABLE_BSD_PRICING_METHOD = "bsd_market_normalized";
+const INTERNAL_FALLBACK_SOURCE = "internal_model";
+const INTERNAL_FALLBACK_PRICING_METHOD = "internal_model_fallback";
 
 function toNumber(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(value);
@@ -67,6 +71,23 @@ function jsonError(
   extra?: Record<string, unknown>
 ) {
   return NextResponse.json({ error: message, ...(extra ?? {}) }, { status });
+}
+
+function isBettableOddsRow(row: {
+  source?: string | null;
+  pricing_method?: string | null;
+  is_model?: boolean | null;
+}) {
+  const isRealBsd =
+    row.source === DISPLAYABLE_BSD_SOURCE &&
+    row.pricing_method === DISPLAYABLE_BSD_PRICING_METHOD &&
+    row.is_model !== true;
+  const isInternalFallback =
+    row.source === INTERNAL_FALLBACK_SOURCE &&
+    row.pricing_method === INTERNAL_FALLBACK_PRICING_METHOD &&
+    row.is_model === true;
+
+  return isRealBsd || isInternalFallback;
 }
 
 export async function POST(req: Request) {
@@ -169,10 +190,9 @@ export async function POST(req: Request) {
       const admin = supabaseAdmin();
       const { data: oddsRows, error: oddsError } = await admin
         .from("odds")
-        .select("match_id,market_id,selection,book_odds")
+        .select("match_id,market_id,selection,book_odds,source,pricing_method,is_model")
         .in("match_id", matchIds)
-        .eq("source", "bsd")
-        .eq("pricing_method", "bsd_market_normalized");
+        .or(`source.eq.${DISPLAYABLE_BSD_SOURCE},source.eq.${INTERNAL_FALLBACK_SOURCE}`);
 
       if (oddsError) {
         return jsonError("Nie udalo sie pobrac kursow do kuponu.", 500, {
@@ -186,10 +206,13 @@ export async function POST(req: Request) {
           market_id: string;
           selection: string;
           book_odds: number | string | null;
+          source: string | null;
+          pricing_method: string | null;
+          is_model: boolean | null;
         }>)
           .filter((row) => {
             const odd = toNumber(row.book_odds);
-            return Number.isFinite(odd) && odd > 1;
+            return Number.isFinite(odd) && odd > 1 && isBettableOddsRow(row);
           })
           .map(
             (row) =>
@@ -199,11 +222,11 @@ export async function POST(req: Request) {
           )
       );
 
-      const allItemsHaveRealBsdOdds = payloadItems.every((item) =>
+      const allItemsHaveBettableOdds = payloadItems.every((item) =>
         activeOdds.has(payloadItemKey(item))
       );
 
-      if (!allItemsHaveRealBsdOdds) {
+      if (!allItemsHaveBettableOdds) {
         return jsonError("Jeszcze nie ma kursów dla tego meczu.", 400, {
           code: "missing_odds",
         });
@@ -245,10 +268,9 @@ export async function POST(req: Request) {
 
     const { data: oddsRows, error: oddsError } = await admin
       .from("odds")
-      .select("market_id,selection,fair_prob,book_odds")
+      .select("market_id,selection,fair_prob,book_odds,source,pricing_method,is_model")
       .eq("match_id", matchIds[0])
-      .eq("source", "bsd")
-      .eq("pricing_method", "bsd_market_normalized");
+      .or(`source.eq.${DISPLAYABLE_BSD_SOURCE},source.eq.${INTERNAL_FALLBACK_SOURCE}`);
 
     if (oddsError) {
       return jsonError("Nie udalo sie pobrac kursow do Bet Buildera.", 500, {
@@ -258,7 +280,15 @@ export async function POST(req: Request) {
 
     const builderPricing = priceBetBuilderSlip({
       items: body.slip,
-      oddsRows: oddsRows ?? [],
+      oddsRows: ((oddsRows ?? []) as Array<{
+        market_id: string;
+        selection: string;
+        fair_prob?: number | string | null;
+        book_odds?: number | string | null;
+        source?: string | null;
+        pricing_method?: string | null;
+        is_model?: boolean | null;
+      }>).filter(isBettableOddsRow),
       stake,
     });
 
