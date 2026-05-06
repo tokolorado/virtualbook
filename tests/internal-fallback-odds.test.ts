@@ -6,6 +6,41 @@ import {
   INTERNAL_FALLBACK_PRICING_METHOD,
 } from "../lib/odds/internalFallback";
 
+function assertAuditableFallbackRows(
+  rows: Array<{
+    marketId: string;
+    selection: string;
+    fairProbability: number;
+    bookOdds: number;
+  }>
+) {
+  assert.ok(rows.length > 0);
+  assert.ok(
+    rows.every(
+      (row) =>
+        Number.isFinite(row.fairProbability) &&
+        row.fairProbability > 0 &&
+        row.fairProbability < 1 &&
+        Number.isFinite(row.bookOdds) &&
+        row.bookOdds >= 1.01 &&
+        row.bookOdds <= 100
+    )
+  );
+
+  for (const marketId of ["1x2", "ou_1_5", "ou_2_5", "ou_3_5", "btts"]) {
+    const marketRows = rows.filter((row) => row.marketId === marketId);
+    assert.ok(marketRows.length > 0, `missing ${marketId}`);
+    const probabilitySum = marketRows.reduce(
+      (sum, row) => sum + row.fairProbability,
+      0
+    );
+    assert.ok(
+      Math.abs(probabilitySum - 1) <= 0.015,
+      `${marketId} probability sum ${probabilitySum}`
+    );
+  }
+}
+
 test("internal fallback odds require meaningful team history", () => {
   const result = buildInternalFallbackOdds({
     home: {
@@ -57,7 +92,7 @@ test("internal fallback odds produce core markets with explicit fallback method"
     assert.ok(result.rows.some((row) => row.marketId === "1x2"));
     assert.ok(result.rows.some((row) => row.marketId === "ou_2_5"));
     assert.ok(result.rows.some((row) => row.marketId === "btts"));
-    assert.ok(result.rows.every((row) => row.bookOdds > 1));
+    assertAuditableFallbackRows(result.rows);
     assert.equal(INTERNAL_FALLBACK_PRICING_METHOD, "internal_model_fallback");
   }
 });
@@ -82,7 +117,7 @@ test("internal fallback odds can price from BSD event features", () => {
     assert.ok(result.rows.some((row) => row.marketId === "1x2"));
     assert.ok(result.rows.some((row) => row.marketId === "ou_2_5"));
     assert.ok(result.rows.some((row) => row.marketId === "btts"));
-    assert.ok(result.rows.every((row) => row.bookOdds > 1));
+    assertAuditableFallbackRows(result.rows);
   }
 });
 

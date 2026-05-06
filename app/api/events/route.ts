@@ -264,7 +264,7 @@ function modelScoreFromXg(homeXg: number | null, awayXg: number | null) {
 }
 
 function buildPrediction(row: PredictionRow | null, features: FeaturesRow | null) {
-  if (!row && !features) return null;
+  if (!row) return null;
 
   const expectedHomeGoals = firstNumber(row?.expected_home_goals, features?.home_xg);
   const expectedAwayGoals = firstNumber(row?.expected_away_goals, features?.away_xg);
@@ -349,80 +349,6 @@ function isRealBsdOddsMeta(meta: OddsMeta | null) {
     meta.pricingMethod === DISPLAYABLE_BSD_PRICING_METHOD &&
     !meta.isModel
   );
-}
-
-function probabilityToDecimal(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-
-  if (value <= 1) return value;
-  if (value <= 100) return value / 100;
-
-  return null;
-}
-
-function buildValueAlert(
-  odds: OddsSet,
-  oddsMeta: OddsMeta | null,
-  prediction: BuiltPrediction | null,
-  homeTeam: string,
-  awayTeam: string
-) {
-  if (!prediction || !hasRealBsdOdds(odds) || !isRealBsdOddsMeta(oddsMeta)) {
-    return null;
-  }
-
-  const candidates = [
-    {
-      pick: "1" as const,
-      label: homeTeam,
-      modelProbability: probabilityToDecimal(prediction.probabilities.homeWin),
-      odds: odds["1"],
-    },
-    {
-      pick: "X" as const,
-      label: "Remis",
-      modelProbability: probabilityToDecimal(prediction.probabilities.draw),
-      odds: odds.X,
-    },
-    {
-      pick: "2" as const,
-      label: awayTeam,
-      modelProbability: probabilityToDecimal(prediction.probabilities.awayWin),
-      odds: odds["2"],
-    },
-  ]
-    .map((candidate) => {
-      if (
-        candidate.modelProbability === null ||
-        typeof candidate.odds !== "number" ||
-        !Number.isFinite(candidate.odds) ||
-        candidate.odds <= 1
-      ) {
-        return null;
-      }
-
-      const impliedProbability = 1 / candidate.odds;
-      const edgePercentPoints =
-        (candidate.modelProbability - impliedProbability) * 100;
-
-      return {
-        pick: candidate.pick,
-        label: candidate.label,
-        modelProbability: candidate.modelProbability,
-        impliedProbability,
-        edgePercentPoints,
-        odds: candidate.odds,
-      };
-    })
-    .filter((candidate): candidate is NonNullable<typeof candidate> => !!candidate)
-    .sort((a, b) => b.edgePercentPoints - a.edgePercentPoints);
-
-  const best = candidates[0] ?? null;
-  if (!best || best.edgePercentPoints < 2.5) return null;
-
-  return best;
 }
 
 function buildDataQuality(args: {
@@ -726,14 +652,6 @@ export async function GET(req: Request) {
               features: featuresRow,
               prediction,
             });
-            const valueAlert = buildValueAlert(
-              odds,
-              oddsBundle.meta,
-              prediction,
-              homeTeamName,
-              awayTeamName
-            );
-
             return {
               id: m.id,
               utcDate: m.utc_date,
@@ -765,7 +683,6 @@ export async function GET(req: Request) {
               oddsMeta: oddsBundle.meta,
               prediction,
               dataQuality,
-              valueAlert,
             };
           }),
         },

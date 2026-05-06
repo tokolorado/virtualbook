@@ -37,6 +37,20 @@ function noticeClasses(tone: NoticeTone) {
   return "border-sky-500/30 bg-sky-500/10 text-sky-200";
 }
 
+function messageFromUnknown(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
 function InputField({
   label,
   type,
@@ -217,8 +231,10 @@ export default function LoginPageClient() {
         tone: "success",
         text: "Wysłaliśmy nowy link potwierdzający na Twój adres e-mail.",
       });
-    } catch (e: any) {
-      setFieldError(e?.message || "Nie udało się wysłać linku ponownie.");
+    } catch (e: unknown) {
+      setFieldError(
+        messageFromUnknown(e, "Nie udało się wysłać linku ponownie.")
+      );
     } finally {
       setResending(false);
     }
@@ -290,8 +306,8 @@ export default function LoginPageClient() {
       }
 
       router.replace("/events");
-    } catch (err: any) {
-      setFieldError(err?.message || "Wystąpił błąd podczas logowania.");
+    } catch (err: unknown) {
+      setFieldError(messageFromUnknown(err, "Wystąpił błąd podczas logowania."));
     } finally {
       setLoading(false);
     }
@@ -372,8 +388,10 @@ export default function LoginPageClient() {
       }
 
       setForgotSent(true);
-    } catch (e: any) {
-      setForgotError(e?.message || "Nie udało się wysłać linku resetującego.");
+    } catch (e: unknown) {
+      setForgotError(
+        messageFromUnknown(e, "Nie udało się wysłać linku resetującego.")
+      );
     } finally {
       setForgotLoading(false);
     }
@@ -392,6 +410,17 @@ export default function LoginPageClient() {
               ? "Odzyskaj dostęp do konta"
               : "Wróć do gry w VirtualBook"}
           </h1>
+
+          {view === "login" ? (
+            <div className="mt-5 rounded-3xl border border-sky-400/25 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.24),transparent_34%),linear-gradient(135deg,rgba(14,165,233,0.14),rgba(10,10,10,0.94))] px-5 py-5 shadow-[0_18px_80px_rgba(14,165,233,0.12)]">
+              <div className="text-[clamp(2rem,5vw,4.8rem)] font-black uppercase leading-[0.95] tracking-normal text-white">
+                WRÓĆ DO GRY ZE ZNAJOMYMI!
+              </div>
+              <div className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">
+                VB balance, kupony i rywalizacja czekają
+              </div>
+            </div>
+          ) : null}
 
           <p className="mt-3 max-w-xl text-sm leading-6 text-neutral-400">
             {view === "forgot-password"

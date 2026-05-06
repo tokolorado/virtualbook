@@ -86,7 +86,11 @@ export type InternalFallbackResult =
     }
   | {
       ok: false;
-      reason: "insufficient_team_stats" | "invalid_lambdas";
+      reason:
+        | "insufficient_team_stats"
+        | "invalid_lambdas"
+        | "invalid_market_probabilities"
+        | "invalid_odds_output";
       diagnostics: Record<string, unknown>;
     };
 
@@ -95,6 +99,9 @@ const DEFAULT_HOME_GOALS = 1.42;
 const DEFAULT_AWAY_GOALS = 1.13;
 const MARGIN_3WAY = 1.07;
 const MARGIN_2WAY = 1.06;
+const MIN_BOOK_ODDS = 1.01;
+const MAX_BOOK_ODDS = 100;
+const MARKET_PROBABILITY_SUM_TOLERANCE = 0.015;
 
 function validRate(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -315,6 +322,127 @@ function bttsTrend(home: TeamModelSnapshot, away: TeamModelSnapshot) {
   return avgProbabilities([directTrend, scoringTrend, concessionTrend]);
 }
 
+function validateInternalFallbackRows(rows: InternalFallbackOddsRow[]) {
+  if (!rows.length) {
+    return {
+      ok: false as const,
+      reason: "invalid_odds_output" as const,
+      diagnostics: { issue: "empty_rows" },
+    };
+  }
+
+  const markets = new Map<string, InternalFallbackOddsRow[]>();
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    const key = `${row.marketId}:${row.selection}`;
+    if (seen.has(key)) {
+      return {
+        ok: false as const,
+        reason: "invalid_odds_output" as const,
+        diagnostics: { issue: "duplicate_selection", key },
+      };
+    }
+    seen.add(key);
+
+    if (!row.marketId || !row.selection) {
+      return {
+        ok: false as const,
+        reason: "invalid_odds_output" as const,
+        diagnostics: { issue: "missing_market_or_selection", row },
+      };
+    }
+
+    if (
+      !Number.isFinite(row.fairProbability) ||
+      row.fairProbability <= 0 ||
+      row.fairProbability >= 1 ||
+      !Number.isFinite(row.bookProbability) ||
+      row.bookProbability <= 0 ||
+      !Number.isFinite(row.fairOdds) ||
+      row.fairOdds < MIN_BOOK_ODDS ||
+      !Number.isFinite(row.bookOdds) ||
+      row.bookOdds < MIN_BOOK_ODDS ||
+      row.bookOdds > MAX_BOOK_ODDS ||
+      !Number.isFinite(row.margin) ||
+      row.margin < 1 ||
+      row.margin > 1.25
+    ) {
+      return {
+        ok: false as const,
+        reason: "invalid_odds_output" as const,
+        diagnostics: { issue: "invalid_row_numbers", row },
+      };
+    }
+
+    markets.set(row.marketId, [...(markets.get(row.marketId) ?? []), row]);
+  }
+
+  const expectedSelections = new Map<string, string[]>([
+    ["1x2", ["1", "X", "2"]],
+    ["ou_1_5", ["over", "under"]],
+    ["ou_2_5", ["over", "under"]],
+    ["ou_3_5", ["over", "under"]],
+    ["btts", ["over", "under"]],
+  ]);
+
+  for (const [marketId, selections] of expectedSelections) {
+    const marketRows = markets.get(marketId);
+    if (!marketRows || marketRows.length !== selections.length) {
+      return {
+        ok: false as const,
+        reason: "invalid_market_probabilities" as const,
+        diagnostics: {
+          issue: "missing_market_rows",
+          marketId,
+          expectedSelections: selections,
+          actualSelections: marketRows?.map((row) => row.selection) ?? [],
+        },
+      };
+    }
+
+    const actualSelections = new Set(marketRows.map((row) => row.selection));
+    if (!selections.every((selection) => actualSelections.has(selection))) {
+      return {
+        ok: false as const,
+        reason: "invalid_market_probabilities" as const,
+        diagnostics: {
+          issue: "unexpected_market_selections",
+          marketId,
+          expectedSelections: selections,
+          actualSelections: [...actualSelections],
+        },
+      };
+    }
+
+    const probabilitySum = marketRows.reduce(
+      (sum, row) => sum + row.fairProbability,
+      0
+    );
+    if (Math.abs(probabilitySum - 1) > MARKET_PROBABILITY_SUM_TOLERANCE) {
+      return {
+        ok: false as const,
+        reason: "invalid_market_probabilities" as const,
+        diagnostics: { issue: "probability_sum", marketId, probabilitySum },
+      };
+    }
+  }
+
+  const oneXTwoOdds = (markets.get("1x2") ?? []).map((row) => row.bookOdds);
+  if (
+    oneXTwoOdds.length === 3 &&
+    oneXTwoOdds.every((odds) => odds === oneXTwoOdds[0])
+  ) {
+    return {
+      ok: false as const,
+      reason: "invalid_odds_output" as const,
+      diagnostics: { issue: "placeholder_like_1x2_odds", oneXTwoOdds },
+    };
+  }
+
+  return { ok: true as const };
+}
+
 export function buildInternalFallbackOdds(
   input: InternalFallbackInput
 ): InternalFallbackResult {
@@ -458,6 +586,40 @@ export function buildInternalFallbackOdds(
   );
   rows.push(...build2WayRows("btts", pBttsYes, 1 - pBttsYes, MARGIN_2WAY));
 
+  const diagnostics = {
+    homeQuality,
+    awayQuality,
+    leagueHome,
+    leagueAway,
+    homeAttack,
+    awayAttack,
+    homeDefenseAllowed,
+    awayDefenseAllowed,
+    homeAdvantage,
+    homeFitness,
+    awayFitness,
+    marketTrends: {
+      over15: overTrendForLine(1.5, input.home, input.away),
+      over25: overTrendForLine(2.5, input.home, input.away),
+      over35: overTrendForLine(3.5, input.home, input.away),
+      btts: bttsTrend(input.home, input.away),
+    },
+    neutralGround: input.neutralGround ?? null,
+    localDerby: input.localDerby ?? null,
+  };
+  const validation = validateInternalFallbackRows(rows);
+
+  if (!validation.ok) {
+    return {
+      ok: false,
+      reason: validation.reason,
+      diagnostics: {
+        ...diagnostics,
+        validation: validation.diagnostics,
+      },
+    };
+  }
+
   return {
     ok: true,
     modelVersion: INTERNAL_FALLBACK_MODEL_VERSION,
@@ -465,27 +627,7 @@ export function buildInternalFallbackOdds(
     lambdaAway: Number(lambdaAway.toFixed(4)),
     confidence: Number(confidence.toFixed(4)),
     rows,
-    diagnostics: {
-      homeQuality,
-      awayQuality,
-      leagueHome,
-      leagueAway,
-      homeAttack,
-      awayAttack,
-      homeDefenseAllowed,
-      awayDefenseAllowed,
-      homeAdvantage,
-      homeFitness,
-      awayFitness,
-      marketTrends: {
-        over15: overTrendForLine(1.5, input.home, input.away),
-        over25: overTrendForLine(2.5, input.home, input.away),
-        over35: overTrendForLine(3.5, input.home, input.away),
-        btts: bttsTrend(input.home, input.away),
-      },
-      neutralGround: input.neutralGround ?? null,
-      localDerby: input.localDerby ?? null,
-    },
+    diagnostics,
   };
 }
 
@@ -574,6 +716,34 @@ export function buildInternalFallbackOddsFromFeatures(
     )
   );
 
+  const diagnostics = {
+    mode: "bsd_event_features",
+    homeTeamName: input.homeTeamName,
+    awayTeamName: input.awayTeamName,
+    homeXg: input.homeXg,
+    awayXg: input.awayXg,
+    homeWinProb: input.homeWinProb ?? null,
+    drawProb: input.drawProb ?? null,
+    awayWinProb: input.awayWinProb ?? null,
+    over25Prob: input.over25Prob ?? null,
+    bttsProb: input.bttsProb ?? null,
+    neutralGround: input.neutralGround ?? null,
+    localDerby: input.localDerby ?? null,
+    quality,
+  };
+  const validation = validateInternalFallbackRows(rows);
+
+  if (!validation.ok) {
+    return {
+      ok: false,
+      reason: validation.reason,
+      diagnostics: {
+        ...diagnostics,
+        validation: validation.diagnostics,
+      },
+    };
+  }
+
   return {
     ok: true,
     modelVersion: INTERNAL_FALLBACK_FEATURES_MODEL_VERSION,
@@ -581,20 +751,6 @@ export function buildInternalFallbackOddsFromFeatures(
     lambdaAway: Number(lambdaAway.toFixed(4)),
     confidence: Number(clamp(quality, 0, 1).toFixed(4)),
     rows,
-    diagnostics: {
-      mode: "bsd_event_features",
-      homeTeamName: input.homeTeamName,
-      awayTeamName: input.awayTeamName,
-      homeXg: input.homeXg,
-      awayXg: input.awayXg,
-      homeWinProb: input.homeWinProb ?? null,
-      drawProb: input.drawProb ?? null,
-      awayWinProb: input.awayWinProb ?? null,
-      over25Prob: input.over25Prob ?? null,
-      bttsProb: input.bttsProb ?? null,
-      neutralGround: input.neutralGround ?? null,
-      localDerby: input.localDerby ?? null,
-      quality,
-    },
+    diagnostics,
   };
 }

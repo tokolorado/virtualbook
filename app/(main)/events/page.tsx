@@ -57,15 +57,6 @@ type MatchDataQuality = {
   updatedAt: string | null;
 };
 
-type MatchValueAlert = {
-  pick: Pick;
-  label: string;
-  modelProbability: number;
-  impliedProbability: number;
-  edgePercentPoints: number;
-  odds: number;
-};
-
 type Match = {
   id: string;
   competitionCode: string;
@@ -94,7 +85,6 @@ type Match = {
   } | null;
   prediction: MatchPrediction | null;
   dataQuality: MatchDataQuality | null;
-  valueAlert: MatchValueAlert | null;
 };
 
 type Odds1x2DbRow = {
@@ -249,37 +239,6 @@ function buildDataQualityFromPayload(raw: unknown): MatchDataQuality | null {
     sourceBadges: safeStringArray(record.sourceBadges),
     missing: safeStringArray(record.missing),
     updatedAt: safeString(record.updatedAt),
-  };
-}
-
-function buildValueAlertFromPayload(raw: unknown): MatchValueAlert | null {
-  const record = asRecord(raw);
-  if (!record) return null;
-
-  const pick = String(record.pick ?? "") as Pick;
-  if (pick !== "1" && pick !== "X" && pick !== "2") return null;
-
-  const modelProbability = safeNum(record.modelProbability);
-  const impliedProbability = safeNum(record.impliedProbability);
-  const edgePercentPoints = safeNum(record.edgePercentPoints);
-  const odds = safeNum(record.odds);
-
-  if (
-    modelProbability === null ||
-    impliedProbability === null ||
-    edgePercentPoints === null ||
-    odds === null
-  ) {
-    return null;
-  }
-
-  return {
-    pick,
-    label: safeString(record.label) ?? pick,
-    modelProbability,
-    impliedProbability,
-    edgePercentPoints,
-    odds,
   };
 }
 
@@ -902,7 +861,6 @@ function buildMatchesFromPayload(payload: unknown, selectedDate: string): Match[
         oddsMeta: buildOddsMetaFromPayload(m?.oddsMeta),
         prediction: buildPredictionFromPayload(m?.prediction),
         dataQuality: buildDataQualityFromPayload(m?.dataQuality),
-        valueAlert: buildValueAlertFromPayload(m?.valueAlert),
       });
     }
   }
@@ -1234,9 +1192,8 @@ function MatchDataQualityStrip({
   compact?: boolean;
 }) {
   const quality = match.dataQuality;
-  const valueAlert = match.valueAlert;
 
-  if (!quality && !valueAlert) return null;
+  if (!quality) return null;
 
   const badges = quality?.sourceBadges.slice(0, compact ? 2 : 4) ?? [];
   const missing = quality?.missing.slice(0, compact ? 1 : 2) ?? [];
@@ -1257,12 +1214,6 @@ function MatchDataQualityStrip({
           {badge}
         </span>
       ))}
-
-      {valueAlert ? (
-        <span className="rounded-full border border-green-500/25 bg-green-500/10 px-2.5 py-1 font-semibold text-green-300">
-          Value {valueAlert.pick} · +{valueAlert.edgePercentPoints.toFixed(1)} pp
-        </span>
-      ) : null}
 
       {!quality?.hasRealBsdOdds && missing.length > 0 ? (
         <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2.5 py-1 font-semibold text-yellow-300">
@@ -2250,10 +2201,6 @@ export default function EventsPage() {
     qs.set("k", m.kickoffUtc);
     qs.set("hn", m.home);
     qs.set("an", m.away);
-
-    if (m.prediction) {
-      qs.set("tab", "ai");
-    }
 
     router.push(`/events/${m.id}?${qs.toString()}`);
   };

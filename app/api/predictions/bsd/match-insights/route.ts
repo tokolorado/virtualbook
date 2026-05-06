@@ -21,6 +21,7 @@ type MatchRow = {
   away_score: number | null;
   source: string | null;
   source_event_id: string | null;
+  raw_bsd: unknown | null;
 };
 
 type EventPredictionRow = {
@@ -110,18 +111,9 @@ type OddsRow = {
 type OutcomeKey = "home" | "draw" | "away";
 type ScoreSource = "bsd_prediction" | "model_snapshot" | null;
 
-type ValuePick = {
-  marketId: string;
-  selection: string;
-  odds: number;
-  fairProbability: number | null;
-  impliedProbability: number | null;
-  fairProbabilityPercent: number | null;
-  impliedProbabilityPercent: number | null;
-  edge: number | null;
-  edgePercentPoints: number | null;
-  pricingMethod: string | null;
-  isModel: boolean;
+type BsdAiPreview = {
+  title: string | null;
+  bullets: string[];
 };
 
 function jsonError(
@@ -229,6 +221,69 @@ function parsePredictedScore(value: string | null): {
     label: `${home}-${away}`,
     outcome: home > away ? "home" : home < away ? "away" : "draw",
   };
+}
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readRecord(input: UnknownRecord | null, key: string) {
+  const value = input?.[key];
+  return isRecord(value) ? value : null;
+}
+
+function readString(input: UnknownRecord | null, key: string) {
+  const value = input?.[key];
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  return text.length ? text : null;
+}
+
+function readStringList(input: unknown) {
+  if (Array.isArray(input)) {
+    return input
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item.length > 0)
+      .slice(0, 8);
+  }
+
+  if (typeof input === "string") {
+    return input
+      .split(/\n+|(?:\s*[-•]\s*)/u)
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .slice(0, 8);
+  }
+
+  return [];
+}
+
+function extractBsdAiPreview(rawBsd: unknown): BsdAiPreview | null {
+  const raw = isRecord(rawBsd) ? rawBsd : null;
+  const preview =
+    readRecord(raw, "ai_preview") ??
+    readRecord(raw, "aiPreview") ??
+    readRecord(readRecord(raw, "ai"), "preview") ??
+    readRecord(readRecord(raw, "prediction"), "preview");
+
+  if (!preview) return null;
+
+  const title =
+    readString(preview, "title") ??
+    readString(preview, "headline") ??
+    readString(preview, "summary");
+
+  const bulletCandidates = [
+    readStringList(preview.bullets),
+    readStringList(preview.points),
+    readStringList(preview.reasons),
+    readStringList(preview.analysis),
+  ];
+  const bullets = bulletCandidates.find((items) => items.length > 0) ?? [];
+
+  if (!title && bullets.length === 0) return null;
+
+  return { title, bullets };
 }
 
 function emptyScorePrediction() {
@@ -566,90 +621,6 @@ function buildNarrative(args: {
   };
 }
 
-function isPreferredMarket(row: OddsRow): boolean {
-  return (
-    row.market_id === "1x2" ||
-    row.market_id === "ou_2_5" ||
-    row.market_id === "btts" ||
-    row.market_id === "dc" ||
-    row.market_id === "dnb"
-  );
-}
-
-function marketSortWeight(marketId: string): number {
-  if (marketId === "1x2") return 10;
-  if (marketId === "ou_2_5") return 20;
-  if (marketId === "btts") return 30;
-  if (marketId === "dc") return 40;
-  if (marketId === "dnb") return 50;
-
-  return 999;
-}
-
-function mapOddToPick(row: OddsRow): ValuePick | null {
-  if (row.source !== "bsd") return null;
-  if (!Number.isFinite(row.book_odds) || row.book_odds <= 1) return null;
-
-  const fairProb = normalizeProbabilityDecimal(row.fair_prob);
-  const bookProb = normalizeProbabilityDecimal(
-    row.book_prob ?? 1 / row.book_odds
-  );
-
-  const edge =
-    fairProb !== null && bookProb !== null ? fairProb - bookProb : null;
-
-  return {
-    marketId: row.market_id,
-    selection: row.selection,
-    odds: row.book_odds,
-    fairProbability: round(fairProb),
-    impliedProbability: round(bookProb),
-    fairProbabilityPercent: probabilityPercent(fairProb),
-    impliedProbabilityPercent: probabilityPercent(bookProb),
-    edge: round(edge),
-    edgePercentPoints: edge === null ? null : round(edge * 100, 2),
-    pricingMethod: row.pricing_method,
-    isModel: row.is_model === true,
-  };
-}
-
-function pickTopPicks(odds: OddsRow[]) {
-  return odds
-    .filter(isPreferredMarket)
-    .map(mapOddToPick)
-    .filter((pick): pick is ValuePick => {
-      return pick !== null && pick.edge !== null && pick.edge > 0;
-    })
-    .sort((a, b) => {
-      const edgeA = a.edge ?? -999;
-      const edgeB = b.edge ?? -999;
-
-      if (edgeA !== edgeB) return edgeB - edgeA;
-      return a.odds - b.odds;
-    })
-    .slice(0, 5);
-}
-
-function pickMarketSnapshot(odds: OddsRow[]) {
-  return odds
-    .filter(isPreferredMarket)
-    .map(mapOddToPick)
-    .filter((pick): pick is ValuePick => pick !== null)
-    .sort((a, b) => {
-      const marketDiff =
-        marketSortWeight(a.marketId) - marketSortWeight(b.marketId);
-
-      if (marketDiff !== 0) return marketDiff;
-
-      const edgeA = a.edge ?? -999;
-      const edgeB = b.edge ?? -999;
-
-      if (edgeA !== edgeB) return edgeB - edgeA;
-      return a.odds - b.odds;
-    })
-    .slice(0, 12);
-}
-
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const matchIdRaw = searchParams.get("matchId");
@@ -664,7 +635,7 @@ export async function GET(req: Request) {
   const { data: matchData, error: matchError } = await supabase
     .from("matches")
     .select(
-      "id,home_team,away_team,competition_id,competition_name,utc_date,status,home_score,away_score,source,source_event_id"
+      "id,home_team,away_team,competition_id,competition_name,utc_date,status,home_score,away_score,source,source_event_id,raw_bsd"
     )
     .eq("source", "bsd")
     .eq("id", matchId)
@@ -727,6 +698,28 @@ export async function GET(req: Request) {
   const prediction = (predictionData ?? null) as EventPredictionRow | null;
   const features = (featuresData ?? null) as BsdEventFeaturesRow | null;
   const odds = (oddsData ?? []) as OddsRow[];
+  const aiPreview = extractBsdAiPreview(match.raw_bsd);
+
+  if (!prediction && !aiPreview) {
+    return NextResponse.json({
+      ok: true,
+      source: "bsd",
+      matchId,
+      fetchedAt: new Date().toISOString(),
+      available: false,
+      prediction: null,
+      analysis: null,
+      features: null,
+      meta: {
+        hasEventPrediction: false,
+        hasBsdEventFeatures: features !== null,
+        hasBsdAiPreview: false,
+        oddsCount: odds.length,
+        note:
+          "No stored BSD AI preview or event prediction exists for this match.",
+      },
+    });
+  }
 
   const narrative = buildNarrative({
     match,
@@ -770,16 +763,10 @@ export async function GET(req: Request) {
     prediction?.confidence ?? null
   );
 
-  const topPicks = pickTopPicks(odds);
-  const marketSnapshot = pickMarketSnapshot(odds);
-
-  const analysisBullets = [...narrative.bullets];
-
-  if (odds.length > 0 && topPicks.length === 0) {
-    analysisBullets.push(
-      "Na obecnych kursach model nie znajduje dodatniej przewagi value bet w głównych rynkach."
-    );
-  }
+  const analysisBullets =
+    aiPreview?.bullets && aiPreview.bullets.length > 0
+      ? [...aiPreview.bullets]
+      : [...narrative.bullets];
 
   const response = {
     ok: true,
@@ -803,54 +790,56 @@ export async function GET(req: Request) {
       sourceEventId: match.source_event_id,
     },
 
-    available: prediction !== null || features !== null,
+    available: prediction !== null || aiPreview !== null,
 
-    prediction: {
-      predictedScore: narrative.scorePrediction.label,
-      predictedHomeScore:
-        narrative.scorePrediction.home ?? prediction?.predicted_home_score ?? null,
-      predictedAwayScore:
-        narrative.scorePrediction.away ?? prediction?.predicted_away_score ?? null,
-      predictedResult: prediction?.predicted_result ?? null,
-      predictedLabel: prediction?.predicted_label ?? null,
-      direction: narrative.direction,
-      winnerLabel: narrative.directionLabel,
-      scoreDirection: narrative.scorePrediction.outcome,
-      scoreSource: narrative.scorePrediction.source,
-      scoreProbability:
-        narrative.scorePrediction.probability === null
-          ? null
-          : probabilityPercent(narrative.scorePrediction.probability),
-      hasScoreDirectionConflict: narrative.hasScoreDirectionConflict,
-      expectedHomeGoals: round(expectedHomeGoals, 3),
-      expectedAwayGoals: round(expectedAwayGoals, 3),
-      probabilities: {
-        homeWin: probabilityPercent(homeWin),
-        draw: probabilityPercent(draw),
-        awayWin: probabilityPercent(awayWin),
-        over15: probabilityPercent(over15),
-        over25: probabilityPercent(over25),
-        over35: probabilityPercent(over35),
-        bttsYes: probabilityPercent(bttsYes),
-      },
-      probabilitiesDecimal: {
-        homeWin: round(homeWin),
-        draw: round(draw),
-        awayWin: round(awayWin),
-        over15: round(over15),
-        over25: round(over25),
-        over35: round(over35),
-        bttsYes: round(bttsYes),
-      },
-      confidence: probabilityPercent(confidenceDecimal),
-      confidenceDecimal: round(confidenceDecimal),
-      confidenceLabel: confidenceLabel(confidenceDecimal),
-      modelVersion: sourceLabel(prediction, features),
-      updatedAt: prediction?.updated_at ?? features?.updated_at ?? null,
-    },
+    prediction: prediction
+      ? {
+          predictedScore: narrative.scorePrediction.label,
+          predictedHomeScore:
+            narrative.scorePrediction.home ?? prediction.predicted_home_score ?? null,
+          predictedAwayScore:
+            narrative.scorePrediction.away ?? prediction.predicted_away_score ?? null,
+          predictedResult: prediction.predicted_result ?? null,
+          predictedLabel: prediction.predicted_label ?? null,
+          direction: narrative.direction,
+          winnerLabel: narrative.directionLabel,
+          scoreDirection: narrative.scorePrediction.outcome,
+          scoreSource: narrative.scorePrediction.source,
+          scoreProbability:
+            narrative.scorePrediction.probability === null
+              ? null
+              : probabilityPercent(narrative.scorePrediction.probability),
+          hasScoreDirectionConflict: narrative.hasScoreDirectionConflict,
+          expectedHomeGoals: round(expectedHomeGoals, 3),
+          expectedAwayGoals: round(expectedAwayGoals, 3),
+          probabilities: {
+            homeWin: probabilityPercent(homeWin),
+            draw: probabilityPercent(draw),
+            awayWin: probabilityPercent(awayWin),
+            over15: probabilityPercent(over15),
+            over25: probabilityPercent(over25),
+            over35: probabilityPercent(over35),
+            bttsYes: probabilityPercent(bttsYes),
+          },
+          probabilitiesDecimal: {
+            homeWin: round(homeWin),
+            draw: round(draw),
+            awayWin: round(awayWin),
+            over15: round(over15),
+            over25: round(over25),
+            over35: round(over35),
+            bttsYes: round(bttsYes),
+          },
+          confidence: probabilityPercent(confidenceDecimal),
+          confidenceDecimal: round(confidenceDecimal),
+          confidenceLabel: confidenceLabel(confidenceDecimal),
+          modelVersion: sourceLabel(prediction, features),
+          updatedAt: prediction.updated_at ?? features?.updated_at ?? null,
+        }
+      : null,
 
     analysis: {
-      title: narrative.title,
+      title: aiPreview?.title ?? narrative.title,
       bullets: analysisBullets,
     },
 
@@ -884,23 +873,11 @@ export async function GET(req: Request) {
         }
       : null,
 
-    topPicks,
-    marketSnapshot,
-
-    valueStatus: {
-      hasPositiveEdge: topPicks.length > 0,
-      message:
-        topPicks.length > 0
-          ? "Model znalazł dodatnią przewagę w wybranych rynkach."
-          : "Brak dodatniej przewagi value bet w głównych rynkach przy obecnych kursach.",
-    },
-
     meta: {
       hasEventPrediction: prediction !== null,
+      hasBsdAiPreview: aiPreview !== null,
       hasBsdEventFeatures: features !== null,
       oddsCount: odds.length,
-      topPicksCount: topPicks.length,
-      marketSnapshotCount: marketSnapshot.length,
       note:
         "Endpoint aggregates stored BSD event_predictions, bsd_event_features and odds for one match. It does not fetch BSD upstream and does not mutate data.",
     },

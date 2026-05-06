@@ -284,20 +284,6 @@ type MatchInfoResponse = {
   updatedAt: string | null;
 };
 
-type BsdInsightPick = {
-  marketId: string;
-  selection: string;
-  odds: number;
-  fairProbability: number | null;
-  impliedProbability: number | null;
-  fairProbabilityPercent: number | null;
-  impliedProbabilityPercent: number | null;
-  edge: number | null;
-  edgePercentPoints: number | null;
-  pricingMethod: string | null;
-  isModel: boolean;
-};
-
 type BsdMatchInsightsResponse = {
   ok: boolean;
   source: "bsd";
@@ -333,12 +319,12 @@ type BsdMatchInsightsResponse = {
     confidenceLabel: string;
     modelVersion: string | null;
     updatedAt: string | null;
-  };
+  } | null;
 
   analysis: {
     title: string;
     bullets: string[];
-  };
+  } | null;
 
   features: {
     homeXg: number | null;
@@ -368,20 +354,10 @@ type BsdMatchInsightsResponse = {
     updatedAt: string | null;
   } | null;
 
-  topPicks: BsdInsightPick[];
-  marketSnapshot: BsdInsightPick[];
-
-  valueStatus: {
-    hasPositiveEdge: boolean;
-    message: string;
-  };
-
   meta: {
     hasEventPrediction: boolean;
     hasBsdEventFeatures: boolean;
     oddsCount: number;
-    topPicksCount: number;
-    marketSnapshotCount: number;
     note: string;
   };
 };
@@ -1142,47 +1118,6 @@ function formatInsightPercent(value: number | null | undefined): string {
   return `${formatInsightNumber(value, 1)}%`;
 }
 
-function formatEdgePercentPoints(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return "—";
-  }
-
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${formatInsightNumber(value, 2)} pp`;
-}
-
-function marketLabel(marketId: string): string {
-  if (marketId === "1x2") return "1X2";
-  if (marketId === "ou_2_5") return "Over/Under 2.5";
-  if (marketId === "btts") return "BTTS";
-  if (marketId === "dc") return "Podwójna szansa";
-  if (marketId === "dnb") return "Draw No Bet";
-
-  return marketId;
-}
-
-function selectionLabel(
-  pick: BsdInsightPick,
-  homeTeam: string,
-  awayTeam: string
-): string {
-  if (pick.marketId === "1x2") {
-    if (pick.selection === "1") return homeTeam;
-    if (pick.selection === "X") return "Remis";
-    if (pick.selection === "2") return awayTeam;
-  }
-
-  if (pick.marketId === "btts") {
-    if (pick.selection === "yes") return "Tak";
-    if (pick.selection === "no") return "Nie";
-  }
-
-  if (pick.selection === "over") return "Powyżej";
-  if (pick.selection === "under") return "Poniżej";
-
-  return pick.selection;
-}
-
 function Surface({
   children,
   className,
@@ -1730,7 +1665,7 @@ export default function MatchInsightsSection({
   const searchParams = useSearchParams();
   const requestedTab = normalizeTabParam(searchParams.get("tab"));
 
-  const [activeTab, setActiveTab] = useState<TabKey>(requestedTab ?? "ai");
+  const [activeTab, setActiveTab] = useState<TabKey>(requestedTab ?? "info");
   const [refreshTick, setRefreshTick] = useState(0);
 
   const [lineupsWidgetMapped, setLineupsWidgetMapped] = useState<boolean | null>(
@@ -1779,6 +1714,8 @@ export default function MatchInsightsSection({
     return canRenderLiveWidgets(matchStatus, isLive, isFinished);
   }, [matchStatus, isLive, isFinished]);
 
+  const aiTabAvailable = aiInsightsLoading || aiInsights?.available === true;
+
   const championsLeague = useMemo(() => {
     return isChampionsLeagueCompetition(competitionCode);
   }, [competitionCode]);
@@ -1809,7 +1746,7 @@ export default function MatchInsightsSection({
 
     if (isPreMatch) {
       return withChampionsLeagueTabs([
-        { key: "ai" as const, label: "AI" },
+        ...(aiTabAvailable ? [{ key: "ai" as const, label: "AI" }] : []),
         { key: "info" as const, label: "Info" },
         { key: "lineups" as const, label: "Składy" },
         { key: "comparison" as const, label: "Porównanie" },
@@ -1820,7 +1757,7 @@ export default function MatchInsightsSection({
 
     if (isLive) {
       return withChampionsLeagueTabs([
-        { key: "ai" as const, label: "AI" },
+        ...(aiTabAvailable ? [{ key: "ai" as const, label: "AI" }] : []),
         { key: "info" as const, label: "Info" },
         { key: "lineups" as const, label: "Składy" },
         { key: "liveStats" as const, label: "Statystyki" },
@@ -1831,14 +1768,14 @@ export default function MatchInsightsSection({
     }
 
     return withChampionsLeagueTabs([
-      { key: "ai" as const, label: "AI" },
+      ...(aiTabAvailable ? [{ key: "ai" as const, label: "AI" }] : []),
       { key: "info" as const, label: "Info" },
       { key: "lineups" as const, label: "Składy" },
       { key: "liveStats" as const, label: "Statystyki" },
       { key: "table" as const, label: "Tabela" },
       { key: "timeline" as const, label: "Timeline" },
     ]);
-  }, [isPreMatch, isLive, championsLeague]);
+  }, [isPreMatch, isLive, championsLeague, aiTabAvailable]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -1856,17 +1793,13 @@ export default function MatchInsightsSection({
 
   useEffect(() => {
     setActiveTab((current) => {
-      if (requestedTab && visibleTabs.some((tab) => tab.key === requestedTab)) {
-        return requestedTab;
-      }
-
       if (!visibleTabs.some((tab) => tab.key === current)) {
-        return visibleTabs[0]?.key ?? "ai";
+        return visibleTabs[0]?.key ?? "info";
       }
 
       return current;
     });
-  }, [requestedTab, visibleTabs]);
+  }, [visibleTabs]);
 
   const selectTab = useCallback(
     (tabKey: TabKey) => {
@@ -2292,16 +2225,18 @@ export default function MatchInsightsSection({
       }
     };
 
-    void Promise.all([
-      loadAiInsights(),
-      loadMatchInfo(),
-      loadLineups(),
-      loadLiveStats(),
-      loadComparison(),
-      loadH2H(),
-      loadTable(),
-      loadTimeline(),
-    ]);
+    const tasks: Array<Promise<void>> = [];
+
+    if (!aiInsights || activeTab === "ai") tasks.push(loadAiInsights());
+    if (activeTab === "info") tasks.push(loadMatchInfo());
+    if (activeTab === "lineups") tasks.push(loadLineups());
+    if (activeTab === "liveStats") tasks.push(loadLiveStats());
+    if (activeTab === "comparison") tasks.push(loadComparison());
+    if (activeTab === "h2h") tasks.push(loadH2H());
+    if (activeTab === "table" || activeTab === "playoff") tasks.push(loadTable());
+    if (activeTab === "timeline") tasks.push(loadTimeline());
+
+    void Promise.all(tasks);
 
     return () => {
       controller.abort();
@@ -2317,6 +2252,7 @@ export default function MatchInsightsSection({
     isPreMatch,
     championsLeague,
     sofaScoreStandingsWidget,
+    activeTab,
   ]);
 
   const sortedTableRows = useMemo(() => {
@@ -2356,22 +2292,26 @@ export default function MatchInsightsSection({
     });
   }, [comparison]);
 
-  const renderInfoValue = (label: string, value: ReactNode) => (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-        {label}
+  const renderInfoValue = (label: string, value: ReactNode | null) => {
+    if (value === null || value === undefined || value === "") return null;
+
+    return (
+      <div className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+          {label}
+        </div>
+        <div className="mt-2 text-sm font-semibold text-white">{value}</div>
       </div>
-      <div className="mt-2 text-sm font-semibold text-white">{value}</div>
-    </div>
-  );
+    );
+  };
 
   const textOrDash = (value: string | number | null | undefined) => {
-    if (value === null || value === undefined || value === "") return "—";
+    if (value === null || value === undefined || value === "") return null;
     return String(value);
   };
 
   const boolOrDash = (value: boolean | null | undefined) => {
-    if (value === null || value === undefined) return "—";
+    if (value === null || value === undefined) return null;
     return value ? "Tak" : "Nie";
   };
 
@@ -2413,7 +2353,7 @@ export default function MatchInsightsSection({
             matchInfo.venue.longitude,
             4
           )}`
-        : "—";
+        : null;
 
     return (
       <div className="space-y-4">
@@ -2437,30 +2377,24 @@ export default function MatchInsightsSection({
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {renderInfoValue("Stadion", textOrDash(matchInfo.venue.name))}
-          {renderInfoValue("Lokalizacja", location || "—")}
+          {renderInfoValue("Lokalizacja", location || null)}
           {renderInfoValue(
             "Pojemność",
             matchInfo.venue.capacity !== null
               ? Math.trunc(matchInfo.venue.capacity).toLocaleString("pl-PL")
-              : "—"
+              : null
           )}
           {renderInfoValue("Współrzędne", coordinates)}
           {renderInfoValue("Sędzia", textOrDash(matchInfo.officials.referee))}
           {renderInfoValue(`${homeTeam} trener`, textOrDash(matchInfo.coaches.home))}
           {renderInfoValue(`${awayTeam} trener`, textOrDash(matchInfo.coaches.away))}
-          {renderInfoValue(
-            "Frekwencja",
-            matchInfo.context.attendance !== null
-              ? Math.trunc(matchInfo.context.attendance).toLocaleString("pl-PL")
-              : "—"
-          )}
           {renderInfoValue("Neutralny teren", boolOrDash(matchInfo.context.neutralGround))}
           {renderInfoValue("Derby lokalne", boolOrDash(matchInfo.context.localDerby))}
           {renderInfoValue(
             "Dystans podróży",
             matchInfo.context.travelDistanceKm !== null
               ? `${formatInsightNumber(matchInfo.context.travelDistanceKm, 0)} km`
-              : "—"
+              : null
           )}
           {renderInfoValue("Runda", textOrDash(matchInfo.competition.round))}
           {renderInfoValue("Kolejka", textOrDash(matchInfo.competition.matchday))}
@@ -2470,13 +2404,13 @@ export default function MatchInsightsSection({
             "Temperatura",
             matchInfo.conditions.temperatureC !== null
               ? `${formatInsightNumber(matchInfo.conditions.temperatureC, 1)}°C`
-              : "—"
+              : null
           )}
           {renderInfoValue(
             "Wiatr",
             matchInfo.conditions.windSpeed !== null
               ? `${formatInsightNumber(matchInfo.conditions.windSpeed, 1)} km/h`
-              : "—"
+              : null
           )}
           {renderInfoValue("Murawa", textOrDash(matchInfo.conditions.pitchCondition))}
           {renderInfoValue("BSD event id", textOrDash(matchInfo.source.eventId))}
@@ -2490,34 +2424,44 @@ export default function MatchInsightsSection({
     const hasData = aiInsights?.available === true;
     const prediction = aiInsights?.prediction ?? null;
     const features = aiInsights?.features ?? null;
-    const topPicks = aiInsights?.topPicks ?? [];
-    const marketSnapshot = aiInsights?.marketSnapshot ?? [];
+    const analysis = aiInsights?.analysis ?? null;
 
     if (aiInsightsLoading && !hasData) {
-      return (
-        <StateBox
-          title="Ładowanie analizy AI..."
-          description="Pobieramy zapisany snapshot BSD: predykcję, xG, prawdopodobieństwa, absencje i ocenę value."
-        />
-      );
+      return null;
     }
 
     if (!hasData && aiInsightsError) {
-      return (
-        <StateBox
-          title="Nie udało się załadować analizy AI"
-          description={aiInsightsError}
-          tone="error"
-        />
-      );
+      return null;
     }
 
-    if (!hasData || !prediction) {
+    if (!hasData || (!prediction && !analysis?.bullets?.length)) {
+      return null;
+    }
+
+    if (!prediction) {
       return (
-        <StateBox
-          title="Brak analizy AI dla tego meczu"
-          description="Dla tego spotkania nie ma jeszcze zapisanego snapshotu BSD ani predykcji w bazie."
-        />
+        <Surface className="overflow-hidden">
+          <div className="border-b border-sky-500/20 bg-sky-500/10 px-5 py-5">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-300">
+              AI Preview BSD
+            </div>
+            {analysis?.title ? (
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {analysis.title}
+              </div>
+            ) : null}
+          </div>
+          <div className="grid gap-3 p-5">
+            {(analysis?.bullets ?? []).map((bullet, index) => (
+              <div
+                key={`${index}-${bullet}`}
+                className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-neutral-300"
+              >
+                {bullet}
+              </div>
+            ))}
+          </div>
+        </Surface>
       );
     }
 
@@ -2728,8 +2672,8 @@ export default function MatchInsightsSection({
                 </div>
               </div>
 
-              <StatusChip tone={topPicks.length > 0 ? "green" : "neutral"}>
-                Value picks: {aiInsights?.meta?.topPicksCount ?? topPicks.length}
+              <StatusChip tone={(aiInsights?.meta?.oddsCount ?? 0) > 0 ? "blue" : "neutral"}>
+                Rynki w audycie: {aiInsights?.meta?.oddsCount ?? 0}
               </StatusChip>
             </div>
 
@@ -2794,121 +2738,6 @@ export default function MatchInsightsSection({
           </div>
         </Surface>
 
-        <Surface className="p-5">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="text-lg font-semibold text-white">
-                Value monitor
-              </div>
-              <div className="mt-1 text-sm text-neutral-400">
-                {aiInsights?.valueStatus?.message ??
-                  "Oceniamy przewagę modelu względem kursów."}
-              </div>
-            </div>
-
-            <StatusChip tone={topPicks.length > 0 ? "green" : "neutral"}>
-              {topPicks.length > 0
-                ? `${topPicks.length} value pick`
-                : "Brak dodatniego edge"}
-            </StatusChip>
-          </div>
-
-          {topPicks.length > 0 ? (
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {topPicks.map((pick) => (
-                <div
-                  key={`${pick.marketId}-${pick.selection}`}
-                  className="rounded-2xl border border-green-500/20 bg-green-500/10 px-4 py-4"
-                >
-                  <div className="text-xs uppercase tracking-[0.18em] text-green-300">
-                    {marketLabel(pick.marketId)}
-                  </div>
-                  <div className="mt-2 text-base font-semibold text-white">
-                    {selectionLabel(pick, homeTeam, awayTeam)}
-                  </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-                    <div>
-                      <div className="text-neutral-500">Kurs</div>
-                      <div className="mt-1 font-semibold text-white">
-                        {formatInsightNumber(pick.odds, 2)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-neutral-500">Fair</div>
-                      <div className="mt-1 font-semibold text-white">
-                        {formatInsightPercent(pick.fairProbabilityPercent)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-neutral-500">Edge</div>
-                      <div className="mt-1 font-semibold text-green-300">
-                        {formatEdgePercentPoints(pick.edgePercentPoints)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : marketSnapshot.length > 0 ? (
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-neutral-800">
-              <table className="min-w-full text-sm">
-                <thead className="border-b border-neutral-800 bg-neutral-950 text-neutral-400">
-                  <tr>
-                    <th className="px-3 py-3 text-left">Rynek</th>
-                    <th className="px-3 py-3 text-left">Typ</th>
-                    <th className="px-3 py-3 text-right">Kurs</th>
-                    <th className="px-3 py-3 text-right">Fair</th>
-                    <th className="px-3 py-3 text-right">Impl.</th>
-                    <th className="px-3 py-3 text-right">Edge</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {marketSnapshot.slice(0, 8).map((pick) => (
-                    <tr
-                      key={`${pick.marketId}-${pick.selection}`}
-                      className="border-b border-neutral-800/70"
-                    >
-                      <td className="px-3 py-3 text-neutral-300">
-                        {marketLabel(pick.marketId)}
-                        {pick.isModel ? (
-                          <span className="ml-2 rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold text-sky-300">
-                            Model
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="px-3 py-3 font-medium text-white">
-                        {selectionLabel(pick, homeTeam, awayTeam)}
-                      </td>
-                      <td className="px-3 py-3 text-right text-neutral-300">
-                        {formatInsightNumber(pick.odds, 2)}
-                      </td>
-                      <td className="px-3 py-3 text-right text-neutral-300">
-                        {formatInsightPercent(pick.fairProbabilityPercent)}
-                      </td>
-                      <td className="px-3 py-3 text-right text-neutral-300">
-                        {formatInsightPercent(pick.impliedProbabilityPercent)}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-3 py-3 text-right font-semibold",
-                          (pick.edgePercentPoints ?? 0) > 0
-                            ? "text-green-300"
-                            : "text-red-300"
-                        )}
-                      >
-                        {formatEdgePercentPoints(pick.edgePercentPoints)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="mt-4 rounded-2xl border border-dashed border-neutral-800 bg-neutral-950 px-4 py-4 text-sm text-neutral-500">
-              Brak kursów do audytu value.
-            </div>
-          )}
-        </Surface>
       </div>
     );
   };
