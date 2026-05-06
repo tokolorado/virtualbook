@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
 import { requireAdmin } from "@/lib/requireAdmin";
+import { todayWarsawYYYYMMDD } from "@/lib/date";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,10 +46,6 @@ function plusDaysISODate(dateYYYYMMDD: string, days: number) {
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + days);
   return dt.toISOString().slice(0, 10);
-}
-
-function utcTodayYYYYMMDD() {
-  return new Date().toISOString().slice(0, 10);
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -311,7 +308,7 @@ export async function POST(req: Request) {
       ? Math.max(1, Math.floor(Number(body.maxAheadDays)))
       : 30;
 
-    const today = utcTodayYYYYMMDD();
+    const today = todayWarsawYYYYMMDD();
     const lastAllowed = plusDaysISODate(today, maxAhead);
 
     if (cursorDate > lastAllowed) {
@@ -370,6 +367,26 @@ export async function POST(req: Request) {
     const warnings: string[] = [];
 
     try {
+      let todayBsdRefreshRes: Awaited<ReturnType<typeof callBsdMatchesSync>> | null =
+        null;
+      let todayFallbackOddsRes:
+        | Awaited<ReturnType<typeof callInternalFallbackOddsSync>>
+        | null = null;
+
+      if (cursorDate !== today) {
+        try {
+          todayBsdRefreshRes = await callBsdMatchesSync({ date: today });
+        } catch (e: unknown) {
+          warnings.push(`today_bsd_refresh: ${errorMessage(e, "failed")}`);
+        }
+
+        try {
+          todayFallbackOddsRes = await callInternalFallbackOddsSync(today);
+        } catch (e: unknown) {
+          warnings.push(`today_fallback_odds: ${errorMessage(e, "failed")}`);
+        }
+      }
+
       const bsdRes = await callBsdMatchesSync({ date: cursorDate });
       const teamStatsRes = await callTeamStatsBackfill({
         snapshotDate: today,
@@ -404,13 +421,27 @@ export async function POST(req: Request) {
       stepOk = true;
       message = warnings.length ? warnings.join(" | ") : null;
 
-      matchesUpserted = Number(bsdRes?.upsertedMatchesCount ?? 0) || 0;
-      oddsUpserted = Number(bsdRes?.upsertedOddsCount ?? 0) || 0;
-      bsdOddsApiAttempted = Number(bsdRes?.bsdOddsApi?.attempted ?? 0) || 0;
-      bsdOddsApiSucceeded = Number(bsdRes?.bsdOddsApi?.succeeded ?? 0) || 0;
-      bsdOddsApiFailed = Number(bsdRes?.bsdOddsApi?.failed ?? 0) || 0;
-      bsdOddsApiSourceRows = Number(bsdRes?.bsdOddsApi?.sourceRows ?? 0) || 0;
-      bsdOddsApiInputs = Number(bsdRes?.bsdOddsApi?.inputs ?? 0) || 0;
+      matchesUpserted =
+        (Number(todayBsdRefreshRes?.upsertedMatchesCount ?? 0) || 0) +
+        (Number(bsdRes?.upsertedMatchesCount ?? 0) || 0);
+      oddsUpserted =
+        (Number(todayBsdRefreshRes?.upsertedOddsCount ?? 0) || 0) +
+        (Number(bsdRes?.upsertedOddsCount ?? 0) || 0);
+      bsdOddsApiAttempted =
+        (Number(todayBsdRefreshRes?.bsdOddsApi?.attempted ?? 0) || 0) +
+        (Number(bsdRes?.bsdOddsApi?.attempted ?? 0) || 0);
+      bsdOddsApiSucceeded =
+        (Number(todayBsdRefreshRes?.bsdOddsApi?.succeeded ?? 0) || 0) +
+        (Number(bsdRes?.bsdOddsApi?.succeeded ?? 0) || 0);
+      bsdOddsApiFailed =
+        (Number(todayBsdRefreshRes?.bsdOddsApi?.failed ?? 0) || 0) +
+        (Number(bsdRes?.bsdOddsApi?.failed ?? 0) || 0);
+      bsdOddsApiSourceRows =
+        (Number(todayBsdRefreshRes?.bsdOddsApi?.sourceRows ?? 0) || 0) +
+        (Number(bsdRes?.bsdOddsApi?.sourceRows ?? 0) || 0);
+      bsdOddsApiInputs =
+        (Number(todayBsdRefreshRes?.bsdOddsApi?.inputs ?? 0) || 0) +
+        (Number(bsdRes?.bsdOddsApi?.inputs ?? 0) || 0);
 
       mappingEnqueued = Number(enqueueRes?.enqueued ?? 0) || 0;
       mappingClaimed = Number(processRes?.claimed ?? 0) || 0;
@@ -433,12 +464,24 @@ export async function POST(req: Request) {
         Number(teamStatsRes?.summary?.upsertedSnapshots ?? 0) || 0;
       teamStatTeams = Number(teamStatsRes?.summary?.teams ?? 0) || 0;
       fallbackPricedMatches =
-        Number(fallbackOddsRes?.summary?.pricedMatches ?? 0) || 0;
+        (Number(todayFallbackOddsRes?.summary?.pricedMatches ?? 0) || 0) +
+        (Number(fallbackOddsRes?.summary?.pricedMatches ?? 0) || 0);
       fallbackOddsRows =
-        Number(fallbackOddsRes?.summary?.upsertedOddsRows ?? 0) || 0;
-      fallbackSkipped = Number(fallbackOddsRes?.summary?.skipped ?? 0) || 0;
+        (Number(todayFallbackOddsRes?.summary?.upsertedOddsRows ?? 0) || 0) +
+        (Number(fallbackOddsRes?.summary?.upsertedOddsRows ?? 0) || 0);
+      fallbackSkipped =
+        (Number(todayFallbackOddsRes?.summary?.skipped ?? 0) || 0) +
+        (Number(fallbackOddsRes?.summary?.skipped ?? 0) || 0);
 
       extra = {
+        todayRefresh:
+          cursorDate !== today
+            ? {
+                date: today,
+                bsd: todayBsdRefreshRes,
+                internalFallbackOdds: todayFallbackOddsRes,
+              }
+            : null,
         bsd: bsdRes,
         bsdPredictions: predictionsRes,
         teamStats: teamStatsRes,
