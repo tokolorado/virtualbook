@@ -1353,6 +1353,41 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           )}
         </section>
 
+      <section className="rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4">
+        <button
+          type="button"
+          onClick={() => setMatchCenterOpen((open) => !open)}
+          className="flex w-full items-center justify-between gap-4 text-left"
+        >
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
+              Match Center
+            </div>
+            <div className="mt-1 text-sm text-neutral-300">
+              Info, składy, porównanie, H2H i tabela są ładowane dopiero po
+              rozwinięciu.
+            </div>
+          </div>
+          <span className="rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-200">
+            {matchCenterOpen ? "Zwiń" : "Rozwiń"}
+          </span>
+        </button>
+
+        {matchCenterOpen ? (
+          <div className="mt-4">
+            <MatchInsightsSection
+              matchId={matchId}
+              competitionCode={competitionCode || matchUI.leagueName}
+              homeTeam={matchUI.home}
+              awayTeam={matchUI.away}
+              matchStatus={effectiveMatchStatus}
+              isLive={effectiveIsLive}
+              isFinished={matchUI.isFinished}
+            />
+          </div>
+        ) : null}
+      </section>
+
       {err ? (
         <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-200">
           {err}
@@ -1483,46 +1518,11 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
             })}
           </div>
         ))
-      ) : (
+      ) : noOdds ? null : (
         <div className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-4 text-sm text-neutral-300">
           {NO_ODDS_MESSAGE}
         </div>
       )}
-
-      <section className="rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4">
-        <button
-          type="button"
-          onClick={() => setMatchCenterOpen((open) => !open)}
-          className="flex w-full items-center justify-between gap-4 text-left"
-        >
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
-              Match Center
-            </div>
-            <div className="mt-1 text-sm text-neutral-300">
-              Info, składy, porównanie, H2H i tabela są ładowane dopiero po
-              rozwinięciu.
-            </div>
-          </div>
-          <span className="rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-200">
-            {matchCenterOpen ? "Zwiń" : "Rozwiń"}
-          </span>
-        </button>
-
-        {matchCenterOpen ? (
-          <div className="mt-4">
-            <MatchInsightsSection
-              matchId={matchId}
-              competitionCode={competitionCode || matchUI.leagueName}
-              homeTeam={matchUI.home}
-              awayTeam={matchUI.away}
-              matchStatus={effectiveMatchStatus}
-              isLive={effectiveIsLive}
-              isFinished={matchUI.isFinished}
-            />
-          </div>
-        ) : null}
-      </section>
     </div>
   );
 }

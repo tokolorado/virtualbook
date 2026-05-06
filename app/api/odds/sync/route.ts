@@ -41,6 +41,18 @@ type BsdSyncPayload = {
   insertedMatchResultsCount?: number;
   updatedMatchResultsCount?: number;
   unchangedMatchResultsCount?: number;
+  bsdOddsApi?: {
+    attempted?: number;
+    succeeded?: number;
+    failed?: number;
+    sourceRows?: number;
+    inputs?: number;
+  };
+  bsdOddsApiWarnings?: Array<{
+    eventId?: string;
+    message?: string;
+    status?: number | null;
+  }>;
 
   error?: string;
   details?: unknown;
@@ -277,6 +289,13 @@ export async function POST(req: Request) {
     insertedMatchResultsCount: number;
     updatedMatchResultsCount: number;
     unchangedMatchResultsCount: number;
+    bsdOddsApi: {
+      attempted: number;
+      succeeded: number;
+      failed: number;
+      sourceRows: number;
+      inputs: number;
+    };
 
     error: string | null;
   }> = [];
@@ -323,6 +342,13 @@ export async function POST(req: Request) {
       insertedMatchResultsCount: toNumber(payload.insertedMatchResultsCount),
       updatedMatchResultsCount: toNumber(payload.updatedMatchResultsCount),
       unchangedMatchResultsCount: toNumber(payload.unchangedMatchResultsCount),
+      bsdOddsApi: {
+        attempted: toNumber(payload.bsdOddsApi?.attempted),
+        succeeded: toNumber(payload.bsdOddsApi?.succeeded),
+        failed: toNumber(payload.bsdOddsApi?.failed),
+        sourceRows: toNumber(payload.bsdOddsApi?.sourceRows),
+        inputs: toNumber(payload.bsdOddsApi?.inputs),
+      },
 
       error: payload.error ?? null,
     });
@@ -358,6 +384,11 @@ export async function POST(req: Request) {
       acc.insertedMatchResultsCount += row.insertedMatchResultsCount;
       acc.updatedMatchResultsCount += row.updatedMatchResultsCount;
       acc.unchangedMatchResultsCount += row.unchangedMatchResultsCount;
+      acc.bsdOddsApi.attempted += row.bsdOddsApi.attempted;
+      acc.bsdOddsApi.succeeded += row.bsdOddsApi.succeeded;
+      acc.bsdOddsApi.failed += row.bsdOddsApi.failed;
+      acc.bsdOddsApi.sourceRows += row.bsdOddsApi.sourceRows;
+      acc.bsdOddsApi.inputs += row.bsdOddsApi.inputs;
 
       return acc;
     },
@@ -379,6 +410,13 @@ export async function POST(req: Request) {
       insertedMatchResultsCount: 0,
       updatedMatchResultsCount: 0,
       unchangedMatchResultsCount: 0,
+      bsdOddsApi: {
+        attempted: 0,
+        succeeded: 0,
+        failed: 0,
+        sourceRows: 0,
+        inputs: 0,
+      },
     }
   );
 

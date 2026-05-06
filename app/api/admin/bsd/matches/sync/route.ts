@@ -2,7 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
-import { bsdFetchPaginated, normalizeBsdText } from "@/lib/bsd/client";
+import { bsdFetchJson, bsdFetchPaginated, normalizeBsdText } from "@/lib/bsd/client";
 import {
   buildBsdEventFeaturesSnapshot,
   buildPricingFeatureSnapshot,
@@ -15,6 +15,8 @@ export const dynamic = "force-dynamic";
 const SYNTHETIC_ID_OFFSET = 900_000_000;
 const DEFAULT_TIMEZONE = "Europe/Warsaw";
 const NON_EXCLUSIVE_MARKET_IDS = new Set(["dc", "ht_dc"]);
+const BSD_CONSENSUS_BOOKMAKER_CODE = "oddssafari-consensus";
+const BSD_CONSENSUS_BOOKMAKER_KEY = normalizeBsdText(BSD_CONSENSUS_BOOKMAKER_CODE);
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -114,6 +116,37 @@ type OddsInput = {
   bookOdds: number;
   fairProbability?: number;
   pricingMargin?: number;
+  rawSource?: UnknownRecord;
+};
+
+type BsdOddsRow = {
+  id?: number | string | null;
+  market?: string | null;
+  outcome?: string | null;
+  outcome_name?: string | null;
+  bookmaker?: string | null;
+  bookmaker_code?: string | null;
+  decimal_odds?: number | string | null;
+  previous_decimal_odds?: number | string | null;
+  is_max_quote?: boolean | null;
+  implied_probability?: number | string | null;
+  movement?: string | null;
+  updated_at?: string | null;
+};
+
+type BsdEventOddsPayload = {
+  event?: UnknownRecord | null;
+  count?: number | null;
+  odds?: BsdOddsRow[] | null;
+  results?: BsdOddsRow[] | null;
+};
+
+type BsdOddsFetchStats = {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  sourceRows: number;
+  inputs: number;
 };
 
 type OddsUpsertRow = {
@@ -761,10 +794,242 @@ function collectOddsInputs(event: UnknownRecord): OddsInput[] {
     inputs.push({
       ...spec,
       bookOdds,
+      rawSource: {
+        source: "events_direct_field",
+        field: spec.field,
+        book_odds: bookOdds,
+      },
     });
   }
 
   return inputs;
+}
+
+function normalizeMarketToken(value: unknown): string {
+  return normalizeBsdText(value)
+    .replace(/\bft\b/g, "")
+    .replace(/\bfull time\b/g, "")
+    .trim()
+    .replace(/\s+/g, "_");
+}
+
+function normalizeOutcomeToken(value: unknown): string {
+  return normalizeBsdText(value)
+    .replace(/\s+/g, "_")
+    .replace(/^home_win$/, "home")
+    .replace(/^away_win$/, "away");
+}
+
+function mapBsdMarket(value: unknown): string | null {
+  const market = normalizeMarketToken(value);
+
+  const directMap: Record<string, string> = {
+    "1x2": "1x2",
+    match_winner: "1x2",
+    full_time_result: "1x2",
+    result: "1x2",
+    double_chance: "dc",
+    draw_no_bet: "dnb",
+    both_teams_to_score: "btts",
+    btts: "btts",
+    over_under_1_5: "ou_1_5",
+    over_under_15: "ou_1_5",
+    total_goals_1_5: "ou_1_5",
+    over_under_2_5: "ou_2_5",
+    over_under_25: "ou_2_5",
+    total_goals_2_5: "ou_2_5",
+    over_under_3_5: "ou_3_5",
+    over_under_35: "ou_3_5",
+    total_goals_3_5: "ou_3_5",
+  };
+
+  if (directMap[market]) return directMap[market];
+
+  const totalMatch = market.match(/(?:over_under|total_goals)_(\d+)_(\d+)/);
+  if (totalMatch) return `ou_${totalMatch[1]}_${totalMatch[2]}`;
+
+  return null;
+}
+
+function mapBsdSelection(marketId: string, outcomeValue: unknown): string | null {
+  const outcome = normalizeOutcomeToken(outcomeValue);
+
+  if (marketId === "1x2") {
+    if (["home", "1", "home_team"].includes(outcome)) return "1";
+    if (["draw", "x"].includes(outcome)) return "X";
+    if (["away", "2", "away_team"].includes(outcome)) return "2";
+  }
+
+  if (marketId === "dc" || marketId === "ht_dc") {
+    if (["home_or_draw", "1x", "home_draw"].includes(outcome)) return "1X";
+    if (["home_or_away", "12", "home_away"].includes(outcome)) return "12";
+    if (["draw_or_away", "x2", "draw_away"].includes(outcome)) return "X2";
+  }
+
+  if (marketId === "dnb") {
+    if (["home", "1", "home_team"].includes(outcome)) return "1";
+    if (["away", "2", "away_team"].includes(outcome)) return "2";
+  }
+
+  if (marketId === "btts" || marketId === "ht_btts" || marketId === "st_btts") {
+    if (["yes", "tak"].includes(outcome)) return "yes";
+    if (["no", "nie"].includes(outcome)) return "no";
+  }
+
+  if (marketId.includes("_ou_") || marketId.startsWith("ou_")) {
+    if (["over", "powyzej"].includes(outcome)) return "over";
+    if (["under", "ponizej"].includes(outcome)) return "under";
+  }
+
+  return null;
+}
+
+function expectedSelectionsForMarket(marketId: string): Set<string> | null {
+  if (marketId === "1x2" || marketId === "ht_1x2" || marketId === "st_1x2") {
+    return new Set(["1", "X", "2"]);
+  }
+
+  if (marketId === "dc" || marketId === "ht_dc") {
+    return new Set(["1X", "12", "X2"]);
+  }
+
+  if (marketId === "dnb") return new Set(["1", "2"]);
+
+  if (marketId === "btts" || marketId === "ht_btts" || marketId === "st_btts") {
+    return new Set(["yes", "no"]);
+  }
+
+  if (marketId.includes("_ou_") || marketId.startsWith("ou_")) {
+    return new Set(["over", "under"]);
+  }
+
+  return null;
+}
+
+function selectPreferredBsdOdd(rows: BsdOddsRow[]): BsdOddsRow | null {
+  const withOdds = rows.filter(
+    (row) => readPositiveOdd(row as UnknownRecord, "decimal_odds") !== null
+  );
+  if (!withOdds.length) return null;
+
+  const consensus = withOdds.filter(
+    (row) => normalizeBsdText(row.bookmaker_code) === BSD_CONSENSUS_BOOKMAKER_KEY
+  );
+
+  const candidates = consensus.length ? consensus : withOdds;
+
+  return candidates
+    .slice()
+    .sort((a, b) => {
+      const aUpdated = Date.parse(String(a.updated_at ?? ""));
+      const bUpdated = Date.parse(String(b.updated_at ?? ""));
+      const aTs = Number.isFinite(aUpdated) ? aUpdated : 0;
+      const bTs = Number.isFinite(bUpdated) ? bUpdated : 0;
+      if (aTs !== bTs) return bTs - aTs;
+      return String(a.bookmaker_code ?? "").localeCompare(
+        String(b.bookmaker_code ?? "")
+      );
+    })[0] ?? null;
+}
+
+function oddsPayloadRows(payload: BsdEventOddsPayload): BsdOddsRow[] {
+  if (Array.isArray(payload.odds)) return payload.odds;
+  if (Array.isArray(payload.results)) return payload.results;
+  return [];
+}
+
+function collectOddsInputsFromBsdOddsPayload(
+  eventId: string,
+  payload: BsdEventOddsPayload
+): OddsInput[] {
+  const rows = oddsPayloadRows(payload);
+  const groups = new Map<string, BsdOddsRow[]>();
+
+  for (const row of rows) {
+    const marketId = mapBsdMarket(row.market);
+    if (!marketId) continue;
+
+    const selection = mapBsdSelection(
+      marketId,
+      row.outcome ?? row.outcome_name
+    );
+    if (!selection) continue;
+
+    const bookOdds = readPositiveOdd(row as UnknownRecord, "decimal_odds");
+    if (bookOdds === null) continue;
+
+    const key = `${marketId}__${selection}`;
+    const current = groups.get(key) ?? [];
+    current.push(row);
+    groups.set(key, current);
+  }
+
+  const inputs: OddsInput[] = [];
+
+  for (const [key, candidates] of groups.entries()) {
+    const [marketId, selection] = key.split("__");
+    const row = selectPreferredBsdOdd(candidates);
+    if (!row) continue;
+
+    const bookOdds = readPositiveOdd(row as UnknownRecord, "decimal_odds");
+    if (bookOdds === null) continue;
+
+    inputs.push({
+      marketId,
+      selection,
+      field: `bsd_odds_api:${row.market ?? marketId}:${row.outcome ?? row.outcome_name ?? selection}`,
+      bookOdds,
+      rawSource: {
+        source: "bsd_odds_api",
+        endpoint: "/api/odds/",
+        event_id: eventId,
+        market: row.market ?? null,
+        outcome: row.outcome ?? row.outcome_name ?? null,
+        bookmaker: row.bookmaker ?? null,
+        bookmaker_code: row.bookmaker_code ?? null,
+        is_consensus:
+          normalizeBsdText(row.bookmaker_code) === BSD_CONSENSUS_BOOKMAKER_KEY,
+        decimal_odds: bookOdds,
+        previous_decimal_odds: row.previous_decimal_odds ?? null,
+        is_max_quote: row.is_max_quote ?? null,
+        movement: row.movement ?? null,
+        source_rows_for_selection: candidates.length,
+        updated_at: row.updated_at ?? null,
+      },
+    });
+  }
+
+  return inputs;
+}
+
+async function fetchBsdEventOddsInputs(eventId: string): Promise<{
+  inputs: OddsInput[];
+  sourceRows: number;
+}> {
+  const payload = await bsdFetchJson<BsdEventOddsPayload>("/odds/", {
+    event: eventId,
+    market: "all",
+    page_size: 500,
+  });
+
+  return {
+    inputs: collectOddsInputsFromBsdOddsPayload(eventId, payload),
+    sourceRows: oddsPayloadRows(payload).length,
+  };
+}
+
+function mergeOddsInputs(direct: OddsInput[], detailed: OddsInput[]): OddsInput[] {
+  const byKey = new Map<string, OddsInput>();
+
+  for (const input of direct) {
+    byKey.set(`${input.marketId}__${input.selection}`, input);
+  }
+
+  for (const input of detailed) {
+    byKey.set(`${input.marketId}__${input.selection}`, input);
+  }
+
+  return Array.from(byKey.values());
 }
 
 function buildOddsRows(args: {
@@ -773,12 +1038,13 @@ function buildOddsRows(args: {
   homeTeam: string | null;
   awayTeam: string | null;
   fetchedAt: string;
+  oddsInputs?: OddsInput[];
 }): OddsUpsertRow[] {
   const eventIdNumber = readInt(args.event, "id");
   if (eventIdNumber === null) return [];
 
   const sourceEventId = String(eventIdNumber);
-  const inputs = collectOddsInputs(args.event);
+  const inputs = args.oddsInputs ?? collectOddsInputs(args.event);
 
   const groups = new Map<string, OddsInput[]>();
 
@@ -792,6 +1058,16 @@ function buildOddsRows(args: {
 
   for (const [marketId, marketInputs] of groups.entries()) {
     if (marketInputs.length < 2) continue;
+
+    const expectedSelections = expectedSelectionsForMarket(marketId);
+    if (expectedSelections) {
+      const actualSelections = new Set(marketInputs.map((input) => input.selection));
+      const hasCompleteMarket = Array.from(expectedSelections).every((selection) =>
+        actualSelections.has(selection)
+      );
+
+      if (!hasCompleteMarket) continue;
+    }
 
     const isNonExclusiveMarket = NON_EXCLUSIVE_MARKET_IDS.has(marketId);
 
@@ -874,6 +1150,7 @@ function buildOddsRows(args: {
           selection: input.selection,
           field: input.field,
           book_odds: input.bookOdds,
+          bsd_market_source: input.rawSource ?? null,
           fair_probability_source: input.fairProbability ?? null,
           fair_probability_strategy:
             modelFairProbability !== null
@@ -1153,6 +1430,18 @@ export async function GET(req: Request): Promise<Response> {
     const matchRows: MatchUpsertRow[] = [];
     const oddsRows: OddsUpsertRow[] = [];
     const skipped: Array<{ eventId: unknown; reason: string }> = [];
+    const oddsFetchStats: BsdOddsFetchStats = {
+      attempted: 0,
+      succeeded: 0,
+      failed: 0,
+      sourceRows: 0,
+      inputs: 0,
+    };
+    const oddsFetchWarnings: Array<{
+      eventId: string;
+      message: string;
+      status?: number | null;
+    }> = [];
 
     const previewRows: Array<{
       id: number;
@@ -1230,12 +1519,35 @@ export async function GET(req: Request): Promise<Response> {
         continue;
       }
 
+      const directOddsInputs = collectOddsInputs(event);
+      let detailedOddsInputs: OddsInput[] = [];
+
+      oddsFetchStats.attempted += 1;
+      try {
+        const detailedOdds = await fetchBsdEventOddsInputs(sourceEventId);
+        detailedOddsInputs = detailedOdds.inputs;
+        oddsFetchStats.succeeded += 1;
+        oddsFetchStats.sourceRows += detailedOdds.sourceRows;
+        oddsFetchStats.inputs += detailedOdds.inputs.length;
+      } catch (error) {
+        const err = error as { message?: string; status?: number };
+        oddsFetchStats.failed += 1;
+        oddsFetchWarnings.push({
+          eventId: sourceEventId,
+          message: err.message ?? "BSD odds API fetch failed",
+          status: typeof err.status === "number" ? err.status : null,
+        });
+      }
+
+      const oddsInputs = mergeOddsInputs(directOddsInputs, detailedOddsInputs);
+
       const eventOddsRows = buildOddsRows({
         event,
         matchId: matchRow.id,
         homeTeam: matchRow.home_team,
         awayTeam: matchRow.away_team,
         fetchedAt,
+        oddsInputs,
       });
 
       matchRows.push(matchRow);
@@ -1481,6 +1793,8 @@ export async function GET(req: Request): Promise<Response> {
       uniqueMatchRowsCount: uniqueMatchRows.length,
       builtOddsRowsCount: oddsRows.length,
       uniqueOddsRowsCount: uniqueOddsRows.length,
+      bsdOddsApi: oddsFetchStats,
+      bsdOddsApiWarnings: oddsFetchWarnings.slice(0, 20),
       builtPricingFeatureRowsCount: pricingFeatureRows.length,
       upsertedPricingFeaturesCount,
       builtBsdEventFeatureRowsCount: bsdEventFeatureRows.length,

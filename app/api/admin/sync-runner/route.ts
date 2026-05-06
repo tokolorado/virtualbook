@@ -360,6 +360,11 @@ export async function POST(req: Request) {
     let fallbackPricedMatches = 0;
     let fallbackOddsRows = 0;
     let fallbackSkipped = 0;
+    let bsdOddsApiAttempted = 0;
+    let bsdOddsApiSucceeded = 0;
+    let bsdOddsApiFailed = 0;
+    let bsdOddsApiSourceRows = 0;
+    let bsdOddsApiInputs = 0;
     let message: string | null = null;
     let extra: Record<string, unknown> | null = null;
     const warnings: string[] = [];
@@ -401,6 +406,11 @@ export async function POST(req: Request) {
 
       matchesUpserted = Number(bsdRes?.upsertedMatchesCount ?? 0) || 0;
       oddsUpserted = Number(bsdRes?.upsertedOddsCount ?? 0) || 0;
+      bsdOddsApiAttempted = Number(bsdRes?.bsdOddsApi?.attempted ?? 0) || 0;
+      bsdOddsApiSucceeded = Number(bsdRes?.bsdOddsApi?.succeeded ?? 0) || 0;
+      bsdOddsApiFailed = Number(bsdRes?.bsdOddsApi?.failed ?? 0) || 0;
+      bsdOddsApiSourceRows = Number(bsdRes?.bsdOddsApi?.sourceRows ?? 0) || 0;
+      bsdOddsApiInputs = Number(bsdRes?.bsdOddsApi?.inputs ?? 0) || 0;
 
       mappingEnqueued = Number(enqueueRes?.enqueued ?? 0) || 0;
       mappingClaimed = Number(processRes?.claimed ?? 0) || 0;
@@ -522,6 +532,13 @@ export async function POST(req: Request) {
         pricedMatches: fallbackPricedMatches,
         oddsRows: fallbackOddsRows,
         skipped: fallbackSkipped,
+      },
+      bsdOddsApi: {
+        attempted: bsdOddsApiAttempted,
+        succeeded: bsdOddsApiSucceeded,
+        failed: bsdOddsApiFailed,
+        sourceRows: bsdOddsApiSourceRows,
+        inputs: bsdOddsApiInputs,
       },
       bettingClosedUpdated: closeRes.closed,
       bettingCloseCutoffIso: closeRes.cutoffIso,

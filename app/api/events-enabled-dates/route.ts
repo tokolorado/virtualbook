@@ -1,7 +1,7 @@
 // app/api/events-enabled-dates/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import { addDaysLocal, todayLocalYYYYMMDD } from "@/lib/date";
+import { supabaseAdmin } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,13 +38,7 @@ type DbMatchRow = {
 };
 
 export async function GET(req: Request) {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl) return jsonError("Missing SUPABASE_URL in env", 500);
-  if (!serviceKey) return jsonError("Missing SUPABASE_SERVICE_ROLE_KEY in env", 500);
-
-  const supabase = createClient(supabaseUrl, serviceKey);
+  const supabase = supabaseAdmin();
 
   const { searchParams } = new URL(req.url);
   const from = searchParams.get("from") || todayLocalYYYYMMDD();

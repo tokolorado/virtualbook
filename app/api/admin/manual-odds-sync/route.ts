@@ -10,6 +10,14 @@ type ManualOddsSyncBody = {
   dryRun?: boolean;
 };
 
+type BsdOddsApiSummary = {
+  attempted?: number;
+  succeeded?: number;
+  failed?: number;
+  sourceRows?: number;
+  inputs?: number;
+};
+
 function isYYYYMMDD(s: unknown): s is string {
   return typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
@@ -98,6 +106,8 @@ export async function POST(req: Request) {
       upstream: data,
       matchesUpserted: Number(data?.upsertedMatchesCount ?? 0) || 0,
       oddsUpserted: Number(data?.upsertedOddsCount ?? 0) || 0,
+      bsdOddsApi: (data?.bsdOddsApi ?? null) as BsdOddsApiSummary | null,
+      bsdOddsApiWarnings: data?.bsdOddsApiWarnings ?? [],
     });
   } catch (e: unknown) {
     return NextResponse.json(

@@ -128,6 +128,39 @@ function safeNullableString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeTeamName(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function matchContainsTeamName(match: MatchRow, teamName: string) {
+  const normalizedTeam = normalizeTeamName(teamName);
+  if (!normalizedTeam) return false;
+
+  return (
+    normalizeTeamName(match.home_team) === normalizedTeam ||
+    normalizeTeamName(match.away_team) === normalizedTeam
+  );
+}
+
+function dedupeRecentMatches(matches: MatchRow[]) {
+  const deduped = new Map<number, MatchRow>();
+
+  for (const match of matches.sort(byUtcDateDesc)) {
+    if (!deduped.has(match.id)) {
+      deduped.set(match.id, match);
+    }
+  }
+
+  return Array.from(deduped.values()).slice(0, 5);
+}
+
 function normalizeMatchRow(input: unknown): MatchRow {
   const row =
     typeof input === "object" && input !== null
@@ -163,6 +196,7 @@ function byUtcDateDesc(a: MatchRow, b: MatchRow) {
 async function loadRecentTeamMatchesById(
   supabase: SupabaseAdminClient,
   teamId: number,
+  teamName: string,
   currentMatchId: number,
   beforeUtcDate: string | null
 ): Promise<MatchRow[]> {
@@ -187,7 +221,9 @@ async function loadRecentTeamMatchesById(
     throw new Error(`Nie udało się pobrać formy drużyny: ${error.message}`);
   }
 
-  return ((data ?? []) as unknown[]).map(normalizeMatchRow);
+  return ((data ?? []) as unknown[])
+    .map(normalizeMatchRow)
+    .filter((match) => matchContainsTeamName(match, teamName));
 }
 
 async function loadRecentTeamMatchesByName(
@@ -236,19 +272,9 @@ async function loadRecentTeamMatchesByName(
     throw new Error(`Nie udało się pobrać formy drużyny (away): ${awayError.message}`);
   }
 
-  const merged = [...(homeData ?? []), ...(awayData ?? [])]
-    .map(normalizeMatchRow)
-    .sort(byUtcDateDesc);
-
-  const deduped = new Map<number, MatchRow>();
-
-  for (const match of merged) {
-    if (!deduped.has(match.id)) {
-      deduped.set(match.id, match);
-    }
-  }
-
-  return Array.from(deduped.values()).slice(0, 5);
+  return dedupeRecentMatches(
+    [...(homeData ?? []), ...(awayData ?? [])].map(normalizeMatchRow)
+  );
 }
 
 async function loadRecentTeamMatches(
@@ -258,17 +284,28 @@ async function loadRecentTeamMatches(
   currentMatchId: number,
   beforeUtcDate: string | null
 ): Promise<MatchRow[]> {
+  const normalizedTeamName = normalizeTeamName(teamName);
+  if (!normalizedTeamName) return [];
+
   if (teamId !== null) {
-    return loadRecentTeamMatchesById(
+    const byId = await loadRecentTeamMatchesById(
       supabase,
       teamId,
+      teamName,
       currentMatchId,
       beforeUtcDate
     );
-  }
 
-  if (!teamName.trim()) {
-    return [];
+    if (byId.length >= 5) return byId;
+
+    const byName = await loadRecentTeamMatchesByName(
+      supabase,
+      teamName,
+      currentMatchId,
+      beforeUtcDate
+    );
+
+    return dedupeRecentMatches([...byId, ...byName]);
   }
 
   return loadRecentTeamMatchesByName(
