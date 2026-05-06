@@ -102,6 +102,8 @@ const MARGIN_2WAY = 1.06;
 const MIN_BOOK_ODDS = 1.01;
 const MAX_BOOK_ODDS = 100;
 const MARKET_PROBABILITY_SUM_TOLERANCE = 0.015;
+const KNOWN_BAD_1X2_BOOK_ODDS_TUPLES = [[2.35, 4.18, 3.71]] as const;
+const KNOWN_BAD_TUPLE_TOLERANCE = 0.01;
 
 function validRate(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -133,6 +135,31 @@ function validProbability(value: number | null | undefined): value is number {
     Number.isFinite(value) &&
     value > 0 &&
     value < 1
+  );
+}
+
+function hasFullOneXTwoProbabilities(input: {
+  homeWinProb?: number | null;
+  drawProb?: number | null;
+  awayWinProb?: number | null;
+}) {
+  return (
+    validProbability(input.homeWinProb) &&
+    validProbability(input.drawProb) &&
+    validProbability(input.awayWinProb)
+  );
+}
+
+function oddsTupleAlmostEquals(
+  actual: number[],
+  expected: readonly number[]
+) {
+  return (
+    actual.length === expected.length &&
+    actual.every(
+      (odds, index) =>
+        Math.abs(odds - expected[index]) <= KNOWN_BAD_TUPLE_TOLERANCE
+    )
   );
 }
 
@@ -440,6 +467,20 @@ function validateInternalFallbackRows(rows: InternalFallbackOddsRow[]) {
     };
   }
 
+  for (const knownBadTuple of KNOWN_BAD_1X2_BOOK_ODDS_TUPLES) {
+    if (oddsTupleAlmostEquals(oneXTwoOdds, knownBadTuple)) {
+      return {
+        ok: false as const,
+        reason: "invalid_odds_output" as const,
+        diagnostics: {
+          issue: "known_placeholder_like_1x2_odds",
+          oneXTwoOdds,
+          knownBadTuple,
+        },
+      };
+    }
+  }
+
   return { ok: true as const };
 }
 
@@ -641,19 +682,22 @@ export function buildInternalFallbackOddsFromFeatures(
     ? clamp(input.awayXg, 0.2, 4)
     : null;
 
+  const hasOneXTwoProbabilities = hasFullOneXTwoProbabilities(input);
+
   let quality = 0;
   if (lambdaHome !== null && lambdaAway !== null) quality += 0.45;
-  if (
-    validProbability(input.homeWinProb) &&
-    validProbability(input.drawProb) &&
-    validProbability(input.awayWinProb)
-  ) {
+  if (hasOneXTwoProbabilities) {
     quality += 0.35;
   }
   if (validProbability(input.over25Prob)) quality += 0.1;
   if (validProbability(input.bttsProb)) quality += 0.1;
 
-  if (lambdaHome === null || lambdaAway === null || quality < 0.55) {
+  if (
+    lambdaHome === null ||
+    lambdaAway === null ||
+    !hasOneXTwoProbabilities ||
+    quality < 0.8
+  ) {
     return {
       ok: false,
       reason: "insufficient_team_stats",
@@ -661,6 +705,7 @@ export function buildInternalFallbackOddsFromFeatures(
         mode: "bsd_event_features",
         homeXg: input.homeXg,
         awayXg: input.awayXg,
+        hasOneXTwoProbabilities,
         quality,
       },
     };
@@ -671,12 +716,13 @@ export function buildInternalFallbackOddsFromFeatures(
   const totalDist = totalGoalsDist(matrix);
   const rows: InternalFallbackOddsRow[] = [];
 
-  const oneXTwo =
-    validProbability(input.homeWinProb) &&
-    validProbability(input.drawProb) &&
-    validProbability(input.awayWinProb)
-      ? normalize3way(input.homeWinProb, input.drawProb, input.awayWinProb)
-      : poisson1x2;
+  const oneXTwo = hasOneXTwoProbabilities
+    ? normalize3way(
+        Number(input.homeWinProb),
+        Number(input.drawProb),
+        Number(input.awayWinProb)
+      )
+    : poisson1x2;
 
   rows.push(...build1x2Rows(oneXTwo));
 

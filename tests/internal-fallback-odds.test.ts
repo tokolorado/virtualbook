@@ -121,6 +121,46 @@ test("internal fallback odds can price from BSD event features", () => {
   }
 });
 
+test("internal fallback odds reject feature-only xG without 1X2 probabilities", () => {
+  const result = buildInternalFallbackOddsFromFeatures({
+    homeTeamName: "Home",
+    awayTeamName: "Away",
+    homeXg: 1.42,
+    awayXg: 1.13,
+    over25Prob: 0.51,
+    bttsProb: 0.49,
+  });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.reason, "insufficient_team_stats");
+    assert.equal(result.diagnostics.hasOneXTwoProbabilities, false);
+  }
+});
+
+test("internal fallback odds reject known placeholder-like 1X2 output", () => {
+  const result = buildInternalFallbackOddsFromFeatures({
+    homeTeamName: "Home",
+    awayTeamName: "Away",
+    homeXg: 1.45,
+    awayXg: 1.1,
+    homeWinProb: 0.3977137961945819,
+    drawProb: 0.2239368932038835,
+    awayWinProb: 0.2522670716592134,
+    over25Prob: 0.55,
+    bttsProb: 0.5,
+  });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.equal(result.reason, "invalid_odds_output");
+    assert.equal(
+      (result.diagnostics.validation as { issue?: string } | undefined)?.issue,
+      "known_placeholder_like_1x2_odds"
+    );
+  }
+});
+
 test("internal fallback odds blends team snapshot market trends", () => {
   const lowTrend = buildInternalFallbackOdds({
     home: {

@@ -58,6 +58,12 @@ type OddsAvailabilityRow = {
   match_id: number | string;
 };
 
+type FallbackOneXTwoRow = {
+  match_id: number | string;
+  selection: string | null;
+  book_odds: number | string | null;
+};
+
 type BsdEventFeaturesRow = {
   match_id: number | string;
   home_xg: number | string | null;
@@ -71,6 +77,9 @@ type BsdEventFeaturesRow = {
   updated_at: string | null;
 };
 
+const KNOWN_BAD_1X2_BOOK_ODDS_TUPLES = [[2.35, 4.18, 3.71]] as const;
+const KNOWN_BAD_TUPLE_TOLERANCE = 0.01;
+
 function isYYYYMMDD(value: unknown): value is string {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
@@ -78,6 +87,19 @@ function isYYYYMMDD(value: unknown): value is string {
 function toNumber(value: unknown): number | null {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function oddsTupleAlmostEquals(
+  actual: number[],
+  expected: readonly number[]
+) {
+  return (
+    actual.length === expected.length &&
+    actual.every(
+      (odds, index) =>
+        Math.abs(odds - expected[index]) <= KNOWN_BAD_TUPLE_TOLERANCE
+    )
+  );
 }
 
 function isoStartOfUtcDay(dateYYYYMMDD: string) {
@@ -232,6 +254,80 @@ async function readInternalFallbackMatchIds(
   );
 }
 
+async function deleteKnownBadFallbackOdds(
+  supabase: ReturnType<typeof supabaseAdmin>,
+  matchIds: number[],
+  dryRun: boolean
+) {
+  if (!matchIds.length) {
+    return {
+      matchedKnownBadMatches: [] as number[],
+      deletedRows: 0,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("odds")
+    .select("match_id, selection, book_odds")
+    .in("match_id", matchIds)
+    .eq("source", INTERNAL_FALLBACK_SOURCE)
+    .eq("pricing_method", INTERNAL_FALLBACK_PRICING_METHOD)
+    .eq("market_id", "1x2");
+
+  if (error) {
+    throw new Error(`fallback placeholder audit failed: ${error.message}`);
+  }
+
+  const byMatch = new Map<number, Map<string, number>>();
+  for (const row of (data ?? []) as FallbackOneXTwoRow[]) {
+    const matchId = toNumber(row.match_id);
+    const selection = String(row.selection ?? "");
+    const odds = toNumber(row.book_odds);
+    if (matchId === null || odds === null || !selection) continue;
+
+    const current = byMatch.get(matchId) ?? new Map<string, number>();
+    current.set(selection, odds);
+    byMatch.set(matchId, current);
+  }
+
+  const knownBadMatchIds = [...byMatch.entries()]
+    .filter(([, selections]) => {
+      const tuple = [
+        selections.get("1"),
+        selections.get("X"),
+        selections.get("2"),
+      ].filter((value): value is number => typeof value === "number");
+
+      return KNOWN_BAD_1X2_BOOK_ODDS_TUPLES.some((knownBadTuple) =>
+        oddsTupleAlmostEquals(tuple, knownBadTuple)
+      );
+    })
+    .map(([matchId]) => matchId);
+
+  if (dryRun || !knownBadMatchIds.length) {
+    return {
+      matchedKnownBadMatches: knownBadMatchIds,
+      deletedRows: 0,
+    };
+  }
+
+  const { count, error: deleteError } = await supabase
+    .from("odds")
+    .delete({ count: "exact" })
+    .in("match_id", knownBadMatchIds)
+    .eq("source", INTERNAL_FALLBACK_SOURCE)
+    .eq("pricing_method", INTERNAL_FALLBACK_PRICING_METHOD);
+
+  if (deleteError) {
+    throw new Error(`fallback placeholder delete failed: ${deleteError.message}`);
+  }
+
+  return {
+    matchedKnownBadMatches: knownBadMatchIds,
+    deletedRows: count ?? 0,
+  };
+}
+
 async function readBsdFeaturesMap(
   supabase: ReturnType<typeof supabaseAdmin>,
   matchIds: number[]
@@ -300,6 +396,11 @@ export async function GET(req: Request) {
       .filter((id) => Number.isFinite(id));
 
     const realBsdOddsMatchIds = await readRealBsdOddsMatchIds(supabase, matchIds);
+    const placeholderCleanup = await deleteKnownBadFallbackOdds(
+      supabase,
+      matchIds,
+      dryRun
+    );
     const existingFallbackMatchIds = await readInternalFallbackMatchIds(
       supabase,
       matchIds
@@ -494,7 +595,11 @@ export async function GET(req: Request) {
         pricedMatches: runs.length,
         upsertedOddsRows: dryRun ? 0 : oddsRows.length,
         skipped: skipped.length,
+        placeholderCleanupMatches:
+          placeholderCleanup.matchedKnownBadMatches.length,
+        placeholderCleanupDeletedRows: placeholderCleanup.deletedRows,
       },
+      placeholderCleanup,
       skipped,
       priced: runs.map((run) => ({
         matchId: run.match_id,
