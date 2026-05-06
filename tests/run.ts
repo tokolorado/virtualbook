@@ -7,4 +7,5 @@ import "./odds-labels.test";
 import "./results-sync.test";
 import "./sql-hardening.test";
 import "./slip-pricing.test";
+import "./team-stat-snapshots.test";
 import "./weekly-grant-migration.test";

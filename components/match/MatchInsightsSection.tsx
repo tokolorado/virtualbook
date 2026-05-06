@@ -3,8 +3,8 @@
 
 import SofaScoreEventWidget from "@/components/sofascore/SofaScoreEventWidget";
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   getTableLegendZones,
   getTableZone,
@@ -1725,6 +1725,8 @@ export default function MatchInsightsSection({
   isLive,
   isFinished,
 }: MatchInsightsSectionProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const requestedTab = normalizeTabParam(searchParams.get("tab"));
 
@@ -1853,15 +1855,33 @@ export default function MatchInsightsSection({
   }, [matchId]);
 
   useEffect(() => {
-    if (requestedTab && visibleTabs.some((tab) => tab.key === requestedTab)) {
-      setActiveTab(requestedTab);
-      return;
-    }
+    setActiveTab((current) => {
+      if (requestedTab && visibleTabs.some((tab) => tab.key === requestedTab)) {
+        return requestedTab;
+      }
 
-    if (!visibleTabs.some((tab) => tab.key === activeTab)) {
-      setActiveTab(visibleTabs[0].key);
-    }
-  }, [activeTab, requestedTab, visibleTabs]);
+      if (!visibleTabs.some((tab) => tab.key === current)) {
+        return visibleTabs[0]?.key ?? "ai";
+      }
+
+      return current;
+    });
+  }, [requestedTab, visibleTabs]);
+
+  const selectTab = useCallback(
+    (tabKey: TabKey) => {
+      setActiveTab(tabKey);
+
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tab", tabKey);
+      const query = params.toString();
+
+      router.replace(query ? `${pathname}?${query}` : pathname, {
+        scroll: false,
+      });
+    },
+    [pathname, router, searchParams]
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -3692,7 +3712,7 @@ export default function MatchInsightsSection({
               key={tab.key}
               label={tab.label}
               active={activeTab === tab.key}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => selectTab(tab.key)}
             />
           ))}
         </div>

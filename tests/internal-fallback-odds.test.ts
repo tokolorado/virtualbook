@@ -85,3 +85,104 @@ test("internal fallback odds can price from BSD event features", () => {
     assert.ok(result.rows.every((row) => row.bookOdds > 1));
   }
 });
+
+test("internal fallback odds blends team snapshot market trends", () => {
+  const lowTrend = buildInternalFallbackOdds({
+    home: {
+      teamId: 1,
+      teamName: "Home",
+      matchesCount: 12,
+      homeMatchesCount: 6,
+      awayMatchesCount: 6,
+      goalsForPerGame: null,
+      goalsAgainstPerGame: null,
+      xgForPerGame: 1.4,
+      xgAgainstPerGame: 1.2,
+      attackStrength: 1,
+      defenseStrength: 1,
+      bttsRate: 0.22,
+      over25Rate: 0.24,
+      cleanSheetRate: 0.45,
+      failedToScoreRate: 0.34,
+    },
+    away: {
+      teamId: 2,
+      teamName: "Away",
+      matchesCount: 12,
+      homeMatchesCount: 6,
+      awayMatchesCount: 6,
+      goalsForPerGame: null,
+      goalsAgainstPerGame: null,
+      xgForPerGame: 1.4,
+      xgAgainstPerGame: 1.2,
+      attackStrength: 1,
+      defenseStrength: 1,
+      bttsRate: 0.24,
+      over25Rate: 0.26,
+      cleanSheetRate: 0.42,
+      failedToScoreRate: 0.32,
+    },
+  });
+
+  const highTrend = buildInternalFallbackOdds({
+    home: {
+      teamId: 1,
+      teamName: "Home",
+      matchesCount: 12,
+      homeMatchesCount: 6,
+      awayMatchesCount: 6,
+      goalsForPerGame: null,
+      goalsAgainstPerGame: null,
+      xgForPerGame: 1.4,
+      xgAgainstPerGame: 1.2,
+      attackStrength: 1,
+      defenseStrength: 1,
+      bttsRate: 0.74,
+      over25Rate: 0.76,
+      cleanSheetRate: 0.12,
+      failedToScoreRate: 0.14,
+    },
+    away: {
+      teamId: 2,
+      teamName: "Away",
+      matchesCount: 12,
+      homeMatchesCount: 6,
+      awayMatchesCount: 6,
+      goalsForPerGame: null,
+      goalsAgainstPerGame: null,
+      xgForPerGame: 1.4,
+      xgAgainstPerGame: 1.2,
+      attackStrength: 1,
+      defenseStrength: 1,
+      bttsRate: 0.72,
+      over25Rate: 0.78,
+      cleanSheetRate: 0.1,
+      failedToScoreRate: 0.12,
+    },
+  });
+
+  assert.equal(lowTrend.ok, true);
+  assert.equal(highTrend.ok, true);
+
+  if (lowTrend.ok && highTrend.ok) {
+    const lowOver25 = lowTrend.rows.find(
+      (row) => row.marketId === "ou_2_5" && row.selection === "over"
+    );
+    const highOver25 = highTrend.rows.find(
+      (row) => row.marketId === "ou_2_5" && row.selection === "over"
+    );
+    const lowBtts = lowTrend.rows.find(
+      (row) => row.marketId === "btts" && row.selection === "over"
+    );
+    const highBtts = highTrend.rows.find(
+      (row) => row.marketId === "btts" && row.selection === "over"
+    );
+
+    assert.ok(lowOver25);
+    assert.ok(highOver25);
+    assert.ok(lowBtts);
+    assert.ok(highBtts);
+    assert.ok(highOver25.fairProbability > lowOver25.fairProbability);
+    assert.ok(highBtts.fairProbability > lowBtts.fairProbability);
+  }
+});

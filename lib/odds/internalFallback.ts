@@ -20,13 +20,24 @@ export type TeamModelSnapshot = {
   teamId: number | null;
   teamName: string;
   matchesCount: number;
+  homeMatchesCount?: number | null;
+  awayMatchesCount?: number | null;
   goalsForPerGame: number | null;
   goalsAgainstPerGame: number | null;
   xgForPerGame?: number | null;
   xgAgainstPerGame?: number | null;
   attackStrength?: number | null;
   defenseStrength?: number | null;
+  homeAdvantage?: number | null;
   restDays?: number | null;
+  fatigueIndex?: number | null;
+  travelDistanceKm?: number | null;
+  bttsRate?: number | null;
+  over15Rate?: number | null;
+  over25Rate?: number | null;
+  over35Rate?: number | null;
+  cleanSheetRate?: number | null;
+  failedToScoreRate?: number | null;
 };
 
 export type InternalFallbackInput = {
@@ -118,6 +129,35 @@ function validProbability(value: number | null | undefined): value is number {
   );
 }
 
+function validProbabilityRate(value: number | null | undefined): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 1
+  );
+}
+
+function avgProbabilities(values: Array<number | null | undefined>) {
+  const valid = values.filter(validProbabilityRate);
+  if (!valid.length) return null;
+
+  return valid.reduce((sum, value) => sum + value, 0) / valid.length;
+}
+
+function blendProbability(
+  modelProbability: number,
+  trendProbability: number | null | undefined,
+  trendWeight: number
+) {
+  if (!validProbabilityRate(trendProbability)) return modelProbability;
+  return clamp(
+    modelProbability * (1 - trendWeight) + trendProbability * trendWeight,
+    0.001,
+    0.999
+  );
+}
+
 function fatigueMultiplier(restDays: number | null | undefined) {
   if (restDays === null || restDays === undefined || !Number.isFinite(restDays)) {
     return 1;
@@ -130,17 +170,51 @@ function fatigueMultiplier(restDays: number | null | undefined) {
   return 1;
 }
 
+function fatigueIndexMultiplier(value: number | null | undefined) {
+  if (!validProbabilityRate(value)) return 1;
+  return clamp(1.03 - value * 0.11, 0.92, 1.03);
+}
+
+function awayTravelMultiplier(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return 1;
+  if (value >= 2500) return 0.94;
+  if (value >= 1500) return 0.96;
+  if (value >= 750) return 0.98;
+  return 1;
+}
+
+function homeAdvantageFromSnapshot(
+  value: number | null | undefined,
+  fallback: number
+) {
+  if (!validRate(value)) return fallback;
+  return clamp(value, 0.82, 1.28);
+}
+
 function qualityForTeam(team: TeamModelSnapshot) {
   let quality = 0;
-  if (team.matchesCount >= MIN_MATCHES_PER_TEAM) quality += 0.45;
+  if (team.matchesCount >= MIN_MATCHES_PER_TEAM) quality += 0.35;
+  if (team.homeMatchesCount || team.awayMatchesCount) quality += 0.05;
   if (validRate(team.goalsForPerGame) && validRate(team.goalsAgainstPerGame)) {
-    quality += 0.25;
+    quality += 0.2;
   }
   if (validRate(team.xgForPerGame) && validRate(team.xgAgainstPerGame)) {
     quality += 0.2;
   }
   if (validRate(team.attackStrength) || validRate(team.defenseStrength)) {
     quality += 0.1;
+  }
+  if (
+    validProbabilityRate(team.bttsRate) ||
+    validProbabilityRate(team.over25Rate)
+  ) {
+    quality += 0.07;
+  }
+  if (
+    validProbabilityRate(team.cleanSheetRate) ||
+    validProbabilityRate(team.failedToScoreRate)
+  ) {
+    quality += 0.03;
   }
 
   return clamp(quality, 0, 1);
@@ -215,6 +289,32 @@ function build2WayRows(
   ];
 }
 
+function overTrendForLine(
+  line: 1.5 | 2.5 | 3.5,
+  home: TeamModelSnapshot,
+  away: TeamModelSnapshot
+) {
+  if (line === 1.5) return avgProbabilities([home.over15Rate, away.over15Rate]);
+  if (line === 2.5) return avgProbabilities([home.over25Rate, away.over25Rate]);
+  return avgProbabilities([home.over35Rate, away.over35Rate]);
+}
+
+function bttsTrend(home: TeamModelSnapshot, away: TeamModelSnapshot) {
+  const directTrend = avgProbabilities([home.bttsRate, away.bttsRate]);
+  const scoringTrend =
+    validProbabilityRate(home.failedToScoreRate) &&
+    validProbabilityRate(away.failedToScoreRate)
+      ? (1 - home.failedToScoreRate) * (1 - away.failedToScoreRate)
+      : null;
+  const concessionTrend =
+    validProbabilityRate(home.cleanSheetRate) &&
+    validProbabilityRate(away.cleanSheetRate)
+      ? (1 - home.cleanSheetRate) * (1 - away.cleanSheetRate)
+      : null;
+
+  return avgProbabilities([directTrend, scoringTrend, concessionTrend]);
+}
+
 export function buildInternalFallbackOdds(
   input: InternalFallbackInput
 ): InternalFallbackResult {
@@ -275,8 +375,15 @@ export function buildInternalFallbackOdds(
     ? 1
     : validRate(homeAdvantageInput)
       ? homeAdvantageInput
-      : 1.08;
+      : homeAdvantageFromSnapshot(input.home.homeAdvantage, 1.08);
   const derbyCompression = input.localDerby ? 0.96 : 1;
+  const homeFitness =
+    fatigueMultiplier(input.home.restDays) *
+    fatigueIndexMultiplier(input.home.fatigueIndex);
+  const awayFitness =
+    fatigueMultiplier(input.away.restDays) *
+    fatigueIndexMultiplier(input.away.fatigueIndex) *
+    awayTravelMultiplier(input.away.travelDistanceKm);
 
   const lambdaHome = clamp(
     leagueHome *
@@ -285,7 +392,7 @@ export function buildInternalFallbackOdds(
       strengthRatio(input.home.attackStrength) *
       strengthRatio(input.away.defenseStrength) *
       homeAdvantage *
-      fatigueMultiplier(input.home.restDays) *
+      homeFitness *
       derbyCompression,
     0.25,
     4.2
@@ -297,7 +404,7 @@ export function buildInternalFallbackOdds(
       (homeDefenseAllowed / leagueAway) *
       strengthRatio(input.away.attackStrength) *
       strengthRatio(input.home.defenseStrength) *
-      fatigueMultiplier(input.away.restDays) *
+      awayFitness *
       derbyCompression,
     0.2,
     4
@@ -324,11 +431,18 @@ export function buildInternalFallbackOdds(
     ["ou_3_5", 3.5],
   ] as const) {
     const probabilities = probOverAsian(totalDist, line);
+    const trendProbability = overTrendForLine(line, input.home, input.away);
+    const trendWeight = line === 2.5 ? 0.35 : 0.28;
+    const overProbability = blendProbability(
+      probabilities.pOver,
+      trendProbability,
+      trendWeight
+    );
     rows.push(
       ...build2WayRows(
         marketId,
-        probabilities.pOver,
-        probabilities.pUnder,
+        overProbability,
+        1 - overProbability,
         MARGIN_2WAY
       )
     );
@@ -336,7 +450,12 @@ export function buildInternalFallbackOdds(
 
   const pHomeScores = 1 - Math.exp(-lambdaHome);
   const pAwayScores = 1 - Math.exp(-lambdaAway);
-  const pBttsYes = clamp(pHomeScores * pAwayScores, 0.001, 0.999);
+  const poissonBttsYes = clamp(pHomeScores * pAwayScores, 0.001, 0.999);
+  const pBttsYes = blendProbability(
+    poissonBttsYes,
+    bttsTrend(input.home, input.away),
+    0.4
+  );
   rows.push(...build2WayRows("btts", pBttsYes, 1 - pBttsYes, MARGIN_2WAY));
 
   return {
@@ -355,6 +474,15 @@ export function buildInternalFallbackOdds(
       awayAttack,
       homeDefenseAllowed,
       awayDefenseAllowed,
+      homeAdvantage,
+      homeFitness,
+      awayFitness,
+      marketTrends: {
+        over15: overTrendForLine(1.5, input.home, input.away),
+        over25: overTrendForLine(2.5, input.home, input.away),
+        over35: overTrendForLine(3.5, input.home, input.away),
+        btts: bttsTrend(input.home, input.away),
+      },
       neutralGround: input.neutralGround ?? null,
       localDerby: input.localDerby ?? null,
     },

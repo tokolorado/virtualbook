@@ -30,14 +30,28 @@ type MatchRow = {
 type TeamSnapshotRow = {
   team_id: number | string | null;
   team_name: string | null;
+  competition_id: string | null;
+  season: string | null;
+  snapshot_date: string | null;
   matches_count: number | string | null;
+  home_matches_count: number | string | null;
+  away_matches_count: number | string | null;
   goals_for_per_game: number | string | null;
   goals_against_per_game: number | string | null;
   xg_for_per_game: number | string | null;
   xg_against_per_game: number | string | null;
   attack_strength: number | string | null;
   defense_strength: number | string | null;
+  home_advantage: number | string | null;
   rest_days: number | string | null;
+  fatigue_index: number | string | null;
+  travel_distance_km: number | string | null;
+  btts_rate: number | string | null;
+  over15_rate: number | string | null;
+  over25_rate: number | string | null;
+  over35_rate: number | string | null;
+  clean_sheet_rate: number | string | null;
+  failed_to_score_rate: number | string | null;
 };
 
 type OddsAvailabilityRow = {
@@ -106,13 +120,24 @@ function toTeamModelSnapshot(
     teamId: toNumber(row.team_id) ?? fallbackTeamId,
     teamName: row.team_name ?? fallbackTeamName,
     matchesCount: Math.trunc(toNumber(row.matches_count) ?? 0),
+    homeMatchesCount: toNumber(row.home_matches_count),
+    awayMatchesCount: toNumber(row.away_matches_count),
     goalsForPerGame: toNumber(row.goals_for_per_game),
     goalsAgainstPerGame: toNumber(row.goals_against_per_game),
     xgForPerGame: toNumber(row.xg_for_per_game),
     xgAgainstPerGame: toNumber(row.xg_against_per_game),
     attackStrength: toNumber(row.attack_strength),
     defenseStrength: toNumber(row.defense_strength),
+    homeAdvantage: toNumber(row.home_advantage),
     restDays: toNumber(row.rest_days),
+    fatigueIndex: toNumber(row.fatigue_index),
+    travelDistanceKm: toNumber(row.travel_distance_km),
+    bttsRate: toNumber(row.btts_rate),
+    over15Rate: toNumber(row.over15_rate),
+    over25Rate: toNumber(row.over25_rate),
+    over35Rate: toNumber(row.over35_rate),
+    cleanSheetRate: toNumber(row.clean_sheet_rate),
+    failedToScoreRate: toNumber(row.failed_to_score_rate),
   };
 }
 
@@ -120,24 +145,44 @@ async function loadLatestTeamSnapshot(
   supabase: ReturnType<typeof supabaseAdmin>,
   teamId: number | null,
   teamName: string,
-  beforeDate: string
+  beforeDate: string,
+  competitionId: string | null
 ) {
   if (teamId === null) return null;
 
   const { data, error } = await supabase
     .from("team_stat_snapshots")
     .select(
-      "team_id, team_name, matches_count, goals_for_per_game, goals_against_per_game, xg_for_per_game, xg_against_per_game, attack_strength, defense_strength, rest_days"
+      "team_id, team_name, competition_id, season, snapshot_date, matches_count, home_matches_count, away_matches_count, goals_for_per_game, goals_against_per_game, xg_for_per_game, xg_against_per_game, attack_strength, defense_strength, home_advantage, rest_days, fatigue_index, travel_distance_km, btts_rate, over15_rate, over25_rate, over35_rate, clean_sheet_rate, failed_to_score_rate"
     )
     .eq("team_id", teamId)
     .lte("snapshot_date", beforeDate)
     .order("snapshot_date", { ascending: false })
-    .limit(1);
+    .limit(30);
 
   if (error) throw new Error(`team_stat_snapshots read failed: ${error.message}`);
 
+  const rows = ((data ?? []) as TeamSnapshotRow[]).filter(
+    (row) => toNumber(row.team_id) !== null
+  );
+  const exactCompetitionId = String(competitionId ?? "").trim();
+  const matchesCount = (row: TeamSnapshotRow) =>
+    Math.trunc(toNumber(row.matches_count) ?? 0);
+  const usableRows =
+    rows.filter((row) => matchesCount(row) >= 5).length > 0
+      ? rows.filter((row) => matchesCount(row) >= 5)
+      : rows;
+  const exact =
+    exactCompetitionId.length > 0
+      ? usableRows.find((row) => row.competition_id === exactCompetitionId)
+      : null;
+  const allCompetitions = usableRows.find(
+    (row) => row.competition_id === "ALL"
+  );
+  const bestRow = exact ?? allCompetitions ?? usableRows[0] ?? null;
+
   return toTeamModelSnapshot(
-    Array.isArray(data) ? ((data[0] ?? null) as TeamSnapshotRow | null) : null,
+    bestRow,
     teamId,
     teamName
   );
@@ -278,13 +323,15 @@ export async function GET(req: Request) {
           supabase,
           match.home_team_id,
           match.home_team,
-          date
+          date,
+          match.competition_id
         ),
         loadLatestTeamSnapshot(
           supabase,
           match.away_team_id,
           match.away_team,
-          date
+          date,
+          match.competition_id
         ),
       ]);
 

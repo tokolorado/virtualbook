@@ -193,6 +193,18 @@ export async function POST(req: Request) {
     return await getInternal(`/api/predictions/bsd/sync?${qs.toString()}`);
   };
 
+  const callTeamStatsBackfill = async (args: {
+    snapshotDate: string;
+    throughDate: string;
+  }) => {
+    const qs = new URLSearchParams();
+    qs.set("snapshotDate", args.snapshotDate);
+    qs.set("throughDate", args.throughDate);
+    qs.set("lookbackDays", "365");
+
+    return await getInternal(`/api/admin/team-stats/backfill?${qs.toString()}`);
+  };
+
   const callInternalFallbackOddsSync = async (date: string) => {
     const qs = new URLSearchParams();
     qs.set("date", date);
@@ -340,6 +352,9 @@ export async function POST(req: Request) {
     let predictionsUpserted = 0;
     let predictionsMatched = 0;
     let predictionsRealOddsMatches = 0;
+    let teamStatSnapshotsBuilt = 0;
+    let teamStatSnapshotsUpserted = 0;
+    let teamStatTeams = 0;
     let fallbackPricedMatches = 0;
     let fallbackOddsRows = 0;
     let fallbackSkipped = 0;
@@ -349,6 +364,10 @@ export async function POST(req: Request) {
     try {
       const bsdRes = await callBsdMatchesSync({ date: cursorDate });
       const predictionsRes = await callBsdPredictionsSync(cursorDate);
+      const teamStatsRes = await callTeamStatsBackfill({
+        snapshotDate: today,
+        throughDate: lastAllowed,
+      });
       const fallbackOddsRes = await callInternalFallbackOddsSync(cursorDate);
       const enqueueRes = await callEnqueueMatchMapping(cursorDate);
       const processRes = await callProcessMatchMapping();
@@ -369,6 +388,11 @@ export async function POST(req: Request) {
         Number(predictionsRes?.summary?.matchedCount ?? 0) || 0;
       predictionsRealOddsMatches =
         Number(predictionsRes?.db?.matchesWithRealBsdOddsCount ?? 0) || 0;
+      teamStatSnapshotsBuilt =
+        Number(teamStatsRes?.summary?.snapshotsBuilt ?? 0) || 0;
+      teamStatSnapshotsUpserted =
+        Number(teamStatsRes?.summary?.upsertedSnapshots ?? 0) || 0;
+      teamStatTeams = Number(teamStatsRes?.summary?.teams ?? 0) || 0;
       fallbackPricedMatches =
         Number(fallbackOddsRes?.summary?.pricedMatches ?? 0) || 0;
       fallbackOddsRows =
@@ -378,6 +402,7 @@ export async function POST(req: Request) {
       extra = {
         bsd: bsdRes,
         bsdPredictions: predictionsRes,
+        teamStats: teamStatsRes,
         internalFallbackOdds: fallbackOddsRes,
         matchMapping: {
           enqueue: enqueueRes,
@@ -454,6 +479,11 @@ export async function POST(req: Request) {
         upserted: predictionsUpserted,
         matched: predictionsMatched,
         matchesWithRealOdds: predictionsRealOddsMatches,
+      },
+      teamStats: {
+        snapshotsBuilt: teamStatSnapshotsBuilt,
+        upsertedSnapshots: teamStatSnapshotsUpserted,
+        teams: teamStatTeams,
       },
       internalFallbackOdds: {
         pricedMatches: fallbackPricedMatches,

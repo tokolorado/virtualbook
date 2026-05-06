@@ -1349,6 +1349,52 @@ function PredictionPanel({
   );
 }
 
+function PredictionInlineStrip({
+  prediction,
+  homeTeam,
+  awayTeam,
+}: {
+  prediction: MatchPrediction | null;
+  homeTeam: string;
+  awayTeam: string;
+}) {
+  if (!prediction) return null;
+
+  const direction = predictionDirection(prediction);
+  const pick = predictionDirectionLabel(direction, homeTeam, awayTeam);
+  const pickCode = predictionPickCode(direction);
+  const sourceLabel =
+    prediction.scoreSource === "model_snapshot"
+      ? "Model xG"
+      : prediction.scoreSource === "bsd_prediction"
+        ? "Predykcja BSD"
+        : prediction.source?.toUpperCase() ?? "AI";
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-500/15 bg-sky-500/[0.06] px-3 py-2 text-[11px] text-neutral-300">
+      <span className="font-semibold uppercase tracking-[0.16em] text-sky-300">
+        AI
+      </span>
+      <span className="font-semibold text-white">
+        {prediction.predictedScore ?? "—"}
+      </span>
+      <span className="text-neutral-500">{sourceLabel}</span>
+      <span className="text-neutral-500">
+        Kierunek {pickCode}: <span className="text-neutral-200">{pick}</span>
+      </span>
+      <span className="text-neutral-500">
+        1 {formatPredictionPercent(prediction.probabilities.homeWin)}
+      </span>
+      <span className="text-neutral-500">
+        X {formatPredictionPercent(prediction.probabilities.draw)}
+      </span>
+      <span className="text-neutral-500">
+        2 {formatPredictionPercent(prediction.probabilities.awayWin)}
+      </span>
+    </div>
+  );
+}
+
 function LeagueButton({
   active,
   label,
@@ -2132,29 +2178,8 @@ export default function EventsPage() {
   const openSectionTitle =
     selectedDate === todayLocalYYYYMMDD() ? "Dziś" : "Zaplanowane";
 
-  const featuredMatches = useMemo(() => {
-    const source = [...liveMatches, ...openMatches];
-    const seen = new Set<string>();
-
-    return source
-      .filter((m) => {
-        if (seen.has(m.id)) return false;
-        seen.add(m.id);
-        return true;
-      })
-      .slice(0, 3);
-  }, [liveMatches, openMatches]);
-
-  const featuredMatchIds = useMemo(
-  () => new Set(featuredMatches.map((m) => m.id)),
-  [featuredMatches]
-);
-
-  const regularOpenMatches = useMemo(
-    () => openMatches.filter((m) => !featuredMatchIds.has(m.id)),
-    [openMatches, featuredMatchIds]
-  );
-
+  const featuredMatches: Match[] = [];
+  const regularOpenMatches = openMatches;
 
   const leagueCounts = useMemo(() => {
     const map: Record<string, number> = { ALL: matches.length };
@@ -2395,7 +2420,7 @@ export default function EventsPage() {
         }}
         className="group cursor-pointer rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:border-neutral-700 hover:bg-neutral-900/70"
       >
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <SmallPill>{m.competitionName}</SmallPill>
@@ -2417,7 +2442,7 @@ export default function EventsPage() {
               <TeamNameLine name={m.away} score={m.awayScore} />
             </div>
 
-            <PredictionPanel
+            <PredictionInlineStrip
               prediction={m.prediction}
               homeTeam={m.home}
               awayTeam={m.away}
@@ -2430,7 +2455,7 @@ export default function EventsPage() {
             </div>
           </div>
 
-          <div className="w-full lg:w-[360px]">{renderMarketButtons(m)}</div>
+          <div className="w-full xl:w-[360px]">{renderMarketButtons(m)}</div>
         </div>
       </div>
     );

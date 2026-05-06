@@ -16,6 +16,7 @@
     "tests/**/*.ts",
     "lib/odds/labels.ts",
     "lib/odds/poisson.ts",
+    "lib/teamStats/snapshots.ts",
     "lib/bets/slipPricing.ts",
     "lib/bets/betBuilderPricing.ts",
     "lib/missions.ts",
