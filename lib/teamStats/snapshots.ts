@@ -7,6 +7,7 @@ type JsonObject = Record<string, unknown>;
 
 export type MatchPricingFeatureInputRow = {
   match_id: Numberish;
+  source?: string | null;
   source_event_id?: string | null;
   competition_id: string | null;
   competition_name: string | null;

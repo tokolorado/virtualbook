@@ -352,6 +352,8 @@ export async function POST(req: Request) {
     let predictionsUpserted = 0;
     let predictionsMatched = 0;
     let predictionsRealOddsMatches = 0;
+    let teamStatSourceRows = 0;
+    let teamStatAppearances = 0;
     let teamStatSnapshotsBuilt = 0;
     let teamStatSnapshotsUpserted = 0;
     let teamStatTeams = 0;
@@ -360,19 +362,42 @@ export async function POST(req: Request) {
     let fallbackSkipped = 0;
     let message: string | null = null;
     let extra: Record<string, unknown> | null = null;
+    const warnings: string[] = [];
 
     try {
       const bsdRes = await callBsdMatchesSync({ date: cursorDate });
-      const predictionsRes = await callBsdPredictionsSync(cursorDate);
       const teamStatsRes = await callTeamStatsBackfill({
         snapshotDate: today,
         throughDate: lastAllowed,
       });
       const fallbackOddsRes = await callInternalFallbackOddsSync(cursorDate);
-      const enqueueRes = await callEnqueueMatchMapping(cursorDate);
-      const processRes = await callProcessMatchMapping();
+      let predictionsRes: Awaited<ReturnType<typeof callBsdPredictionsSync>> | null =
+        null;
+      let enqueueRes: Awaited<ReturnType<typeof callEnqueueMatchMapping>> | null =
+        null;
+      let processRes: Awaited<ReturnType<typeof callProcessMatchMapping>> | null =
+        null;
+
+      try {
+        predictionsRes = await callBsdPredictionsSync(cursorDate);
+      } catch (e: unknown) {
+        warnings.push(`bsd_predictions: ${errorMessage(e, "failed")}`);
+      }
+
+      try {
+        enqueueRes = await callEnqueueMatchMapping(cursorDate);
+      } catch (e: unknown) {
+        warnings.push(`match_mapping_enqueue: ${errorMessage(e, "failed")}`);
+      }
+
+      try {
+        processRes = await callProcessMatchMapping();
+      } catch (e: unknown) {
+        warnings.push(`match_mapping_process: ${errorMessage(e, "failed")}`);
+      }
 
       stepOk = true;
+      message = warnings.length ? warnings.join(" | ") : null;
 
       matchesUpserted = Number(bsdRes?.upsertedMatchesCount ?? 0) || 0;
       oddsUpserted = Number(bsdRes?.upsertedOddsCount ?? 0) || 0;
@@ -388,6 +413,10 @@ export async function POST(req: Request) {
         Number(predictionsRes?.summary?.matchedCount ?? 0) || 0;
       predictionsRealOddsMatches =
         Number(predictionsRes?.db?.matchesWithRealBsdOddsCount ?? 0) || 0;
+      teamStatSourceRows =
+        Number(teamStatsRes?.summary?.sourceRows ?? 0) || 0;
+      teamStatAppearances =
+        Number(teamStatsRes?.summary?.appearances ?? 0) || 0;
       teamStatSnapshotsBuilt =
         Number(teamStatsRes?.summary?.snapshotsBuilt ?? 0) || 0;
       teamStatSnapshotsUpserted =
@@ -404,6 +433,7 @@ export async function POST(req: Request) {
         bsdPredictions: predictionsRes,
         teamStats: teamStatsRes,
         internalFallbackOdds: fallbackOddsRes,
+        warnings,
         matchMapping: {
           enqueue: enqueueRes,
           process: processRes,
@@ -481,10 +511,13 @@ export async function POST(req: Request) {
         matchesWithRealOdds: predictionsRealOddsMatches,
       },
       teamStats: {
+        sourceRows: teamStatSourceRows,
+        appearances: teamStatAppearances,
         snapshotsBuilt: teamStatSnapshotsBuilt,
         upsertedSnapshots: teamStatSnapshotsUpserted,
         teams: teamStatTeams,
       },
+      warnings,
       internalFallbackOdds: {
         pricedMatches: fallbackPricedMatches,
         oddsRows: fallbackOddsRows,

@@ -60,6 +60,14 @@ function cronSecretMatches(req: Request) {
   return provided === expected;
 }
 
+function sourceCounts(rows: MatchPricingFeatureInputRow[]) {
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    const key = String(row.source ?? "null").trim() || "blank";
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
 async function authorize(req: Request) {
   if (cronSecretMatches(req)) return null;
   const admin = await requireAdmin(req);
@@ -94,6 +102,7 @@ export async function GET(req: Request) {
     ? rawThroughDate
     : addDaysYYYYMMDD(snapshotDate, DEFAULT_AHEAD_DAYS);
   const dryRun = url.searchParams.get("dryRun") === "1";
+  const includeLegacySource = url.searchParams.get("includeLegacySource") !== "0";
 
   if (daysBetween(fromDate, throughDate) < 0) {
     return NextResponse.json(
@@ -115,11 +124,12 @@ export async function GET(req: Request) {
   try {
     const sb = supabaseAdmin();
     const generatedAt = new Date().toISOString();
-    const { data, error } = await sb
+    let query = sb
       .from("match_pricing_features")
       .select(
         [
           "match_id",
+          "source",
           "source_event_id",
           "competition_id",
           "competition_name",
@@ -141,11 +151,16 @@ export async function GET(req: Request) {
           "raw_features",
         ].join(",")
       )
-      .eq("source", "bsd")
       .gte("utc_date", isoStartOfUtcDay(fromDate))
       .lt("utc_date", isoStartOfNextUtcDay(throughDate))
       .order("utc_date", { ascending: true })
       .limit(MAX_SOURCE_ROWS);
+
+    query = includeLegacySource
+      ? query.or("source.eq.bsd,source.is.null")
+      : query.eq("source", "bsd");
+
+    const { data, error } = await query;
 
     if (error) {
       return NextResponse.json(
@@ -186,6 +201,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       dryRun,
+      includeLegacySource,
       snapshotDate,
       fromDate,
       throughDate,
@@ -195,6 +211,7 @@ export async function GET(req: Request) {
         ...built.summary,
         upsertedSnapshots: dryRun ? 0 : built.rows.length,
         limited: rows.length >= MAX_SOURCE_ROWS,
+        sourceCounts: sourceCounts(rows),
       },
       sample: built.rows.slice(0, 8).map((row) => ({
         teamId: row.team_id,
