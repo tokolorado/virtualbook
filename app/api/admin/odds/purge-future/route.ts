@@ -253,6 +253,7 @@ export async function POST(req: Request) {
   }
 
   let deletedRows = 0;
+  let modelRunsMarkedPurged = 0;
 
   if (!dryRun && matchIds.length) {
     for (const chunk of chunks(matchIds, DELETE_CHUNK_SIZE)) {
@@ -279,6 +280,30 @@ export async function POST(req: Request) {
 
       deletedRows += chunkCount ?? 0;
     }
+
+    if (
+      deletedRows > 0 &&
+      (source === "internal_model" || source === "all") &&
+      (pricingMethod === DEFAULT_PRICING_METHOD || pricingMethod === "all")
+    ) {
+      for (const chunk of chunks(matchIds, DELETE_CHUNK_SIZE)) {
+        const { count: runCount, error: runError } = await supabase
+          .from("internal_odds_model_runs")
+          .update({ status: "purged_by_odds_cleanup" }, { count: "exact" })
+          .in("match_id", chunk)
+          .eq("status", "priced");
+
+        if (runError) {
+          return jsonError(
+            `model run status update failed: ${runError.message}`,
+            500,
+            { deletedRows, modelRunsMarkedPurged }
+          );
+        }
+
+        modelRunsMarkedPurged += runCount ?? 0;
+      }
+    }
   }
 
   return NextResponse.json({
@@ -295,6 +320,7 @@ export async function POST(req: Request) {
     candidateOddsRowsKnownFromPreview:
       typeof count === "number" ? count : undefined,
     deletedRows,
+    modelRunsMarkedPurged,
     requiredConfirm: DELETE_CONFIRMATION,
     requiredConfirmRealBsd:
       source === "internal_model" ? undefined : REAL_BSD_CONFIRMATION,

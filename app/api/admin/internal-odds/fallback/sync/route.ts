@@ -263,6 +263,7 @@ async function deleteKnownBadFallbackOdds(
     return {
       matchedKnownBadMatches: [] as number[],
       deletedRows: 0,
+      modelRunsMarkedPurged: 0,
     };
   }
 
@@ -308,6 +309,7 @@ async function deleteKnownBadFallbackOdds(
     return {
       matchedKnownBadMatches: knownBadMatchIds,
       deletedRows: 0,
+      modelRunsMarkedPurged: 0,
     };
   }
 
@@ -322,9 +324,20 @@ async function deleteKnownBadFallbackOdds(
     throw new Error(`fallback placeholder delete failed: ${deleteError.message}`);
   }
 
+  const { count: runCount, error: runError } = await supabase
+    .from("internal_odds_model_runs")
+    .update({ status: "purged_placeholder_output" }, { count: "exact" })
+    .in("match_id", knownBadMatchIds)
+    .eq("status", "priced");
+
+  if (runError) {
+    throw new Error(`fallback run status update failed: ${runError.message}`);
+  }
+
   return {
     matchedKnownBadMatches: knownBadMatchIds,
     deletedRows: count ?? 0,
+    modelRunsMarkedPurged: runCount ?? 0,
   };
 }
 
@@ -572,7 +585,40 @@ export async function GET(req: Request) {
       }
     }
 
+    let supersededPreviousRuns = 0;
+
     if (!dryRun && runs.length > 0) {
+      const pricedMatchIds = Array.from(
+        new Set(
+          runs
+            .map((run) => Number(run.match_id))
+            .filter((id) => Number.isFinite(id))
+        )
+      );
+
+      if (pricedMatchIds.length > 0) {
+        const { count: supersededCount, error: supersedeError } = await supabase
+          .from("internal_odds_model_runs")
+          .update(
+            { status: "superseded_by_new_fallback_run" },
+            { count: "exact" }
+          )
+          .in("match_id", pricedMatchIds)
+          .eq("status", "priced");
+
+        if (supersedeError) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `fallback run supersede failed: ${supersedeError.message}`,
+            },
+            { status: 500 }
+          );
+        }
+
+        supersededPreviousRuns = supersededCount ?? 0;
+      }
+
       await supabase.from("internal_odds_model_runs").insert(runs);
     }
 
@@ -598,6 +644,9 @@ export async function GET(req: Request) {
         placeholderCleanupMatches:
           placeholderCleanup.matchedKnownBadMatches.length,
         placeholderCleanupDeletedRows: placeholderCleanup.deletedRows,
+        placeholderCleanupModelRunsMarkedPurged:
+          placeholderCleanup.modelRunsMarkedPurged,
+        supersededPreviousRuns,
       },
       placeholderCleanup,
       skipped,
