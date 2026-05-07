@@ -145,13 +145,16 @@ export default function DayBar({
 
   useEffect(() => {
     const node = buttonRefs.current[value];
+    const container = scrollRef.current;
 
-    if (!node) return;
+    if (!node || !container) return;
 
-    node.scrollIntoView({
+    const targetLeft =
+      node.offsetLeft - container.clientWidth / 2 + node.offsetWidth / 2;
+
+    container.scrollTo({
+      left: Math.max(0, targetLeft),
       behavior: "smooth",
-      inline: "center",
-      block: "nearest",
     });
   }, [value]);
 
@@ -170,7 +173,7 @@ export default function DayBar({
           ref={scrollRef}
           className="no-scrollbar h-full min-w-0 overflow-x-auto overflow-y-hidden"
         >
-          <div className="flex h-full min-w-full justify-center px-2 sm:px-3">
+          <div className="flex h-full w-max min-w-full justify-start px-2 sm:px-3">
             {visibleDates.map((item) => {
               const active = item.ymd === value;
               const disabledLook = !item.hasMatches && !active;
@@ -407,8 +410,10 @@ export default function DayBar({
         .vb-date-item {
           position: relative;
           display: flex;
-          flex: 1 0 62px;
-          min-width: 62px;
+          flex: 0 0 92px;
+          width: 92px;
+          min-width: 92px;
+          max-width: 92px;
           align-items: center;
           justify-content: center;
           border-bottom-color: transparent;
@@ -536,15 +541,19 @@ export default function DayBar({
 
         @media (min-width: 640px) {
           .vb-date-item {
-            flex-basis: 66px;
-            min-width: 66px;
+            flex-basis: 96px;
+            width: 96px;
+            min-width: 96px;
+            max-width: 96px;
           }
         }
 
         @media (min-width: 1280px) {
           .vb-date-item {
-            flex-basis: 68px;
-            min-width: 68px;
+            flex-basis: 104px;
+            width: 104px;
+            min-width: 104px;
+            max-width: 104px;
           }
         }
 
