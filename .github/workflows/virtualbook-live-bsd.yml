@@ -26,4 +26,4 @@ jobs:
           LIVE_BSD_INTERVAL_SECONDS: "15"
           LIVE_BSD_MAX_RUNTIME_SECONDS: "285"
           LIVE_BSD_TICK_TIMEOUT_SECONDS: "28"
-        run: bash scripts/cron/live-bsd-sync.sh
+        run: bash cron/live-bsd-sync.sh
