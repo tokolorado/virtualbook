@@ -2185,12 +2185,6 @@ export default function EventsPage() {
     [filteredMatches]
   );
 
-  const openSectionTitle = searchActive
-    ? `Wyniki: „${searchQuery.trim()}”`
-    : selectedDate === todayLocalYYYYMMDD()
-      ? "Dziś"
-      : "Zaplanowane";
-
   const regularOpenMatches = openMatches;
 
   const leagueCounts = useMemo(() => {
@@ -2560,29 +2554,12 @@ export default function EventsPage() {
   );
 
   const renderCalendarPanel = () => (
-    <SurfaceCard className="p-4">
-      <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-        Kalendarz
-      </div>
-
-      <div className="mt-3 text-2xl font-semibold text-white">
-        Wybierz dzień
-      </div>
-
-      <p className="mt-3 text-sm leading-6 text-neutral-400">
-        Przełącz dzień i sprawdź dostępne mecze.
-      </p>
-
-      <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-2">
-        <DayBar
-          value={selectedDate}
-          onChange={setSelectedDate}
-          enabledDates={enabledDates}
-          enabledDatesLoaded={enabledDatesLoaded}
-          showCalendarInline
-        />
-      </div>
-    </SurfaceCard>
+    <DayBar
+      value={selectedDate}
+      onChange={setSelectedDate}
+      enabledDates={enabledDates}
+      enabledDatesLoaded={enabledDatesLoaded}
+    />
   );
 
   const renderStandingsPanel = () => {
@@ -2798,8 +2775,6 @@ export default function EventsPage() {
       <div className="grid gap-5 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="hidden xl:block min-w-0">
           <div className="sticky top-24 space-y-4">
-            {renderCalendarPanel()}
-
             <SurfaceCard className="p-4">
               <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
                 Ligi i filtry
@@ -2871,7 +2846,6 @@ export default function EventsPage() {
                 <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
                   VirtualBook Football
                 </div>
-                <ResultsTicker />
                 <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
                   Mecze, kursy i typy
                 </h1>
@@ -3043,10 +3017,6 @@ export default function EventsPage() {
             </div>
           </SurfaceCard>
 
-          <div className="xl:hidden">
-            {renderCalendarPanel()}
-          </div>
-
           <div className="overflow-x-auto pb-1 xl:hidden">
             <div className="flex w-max gap-2">
               <button
@@ -3132,6 +3102,10 @@ export default function EventsPage() {
             </div>
           </div>
 
+          <div>
+            {renderCalendarPanel()}
+          </div>
+
           {activeRightTab === "matches" ? (
             visibleLoading ? (
               <LoadingMatchesSkeleton />
@@ -3214,10 +3188,6 @@ export default function EventsPage() {
 
                 {regularOpenMatches.length > 0 ? (
                   <div className="space-y-3">
-                    <SectionHeader
-                      title={openSectionTitle}
-                      count={regularOpenMatches.length}
-                    />
                     <div className="space-y-3">
                       {regularOpenMatches.map((m) => renderMatchCard(m))}
                     </div>
