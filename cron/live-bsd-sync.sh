@@ -4,16 +4,22 @@ set -euo pipefail
 : "${CRON_BASE_URL:?Missing CRON_BASE_URL}"
 : "${CRON_SECRET:?Missing CRON_SECRET}"
 
-TICKS="${LIVE_SYNC_TICKS:-10}"
-SLEEP_SECONDS="${LIVE_SYNC_SLEEP_SECONDS:-30}"
+TICKS="${TICKS:-10}"
+SLEEP_SECONDS="${SLEEP_SECONDS:-30}"
+ENDPOINT="${ENDPOINT:-/api/cron/live-bsd-sync}"
+
+BASE_URL="${CRON_BASE_URL%/}"
 
 for i in $(seq 1 "$TICKS"); do
-  echo "LIVE BSD sync tick ${i}/${TICKS}"
+  echo "LIVE BSD sync tick ${i}/${TICKS} at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-  curl -fsS -X POST "${CRON_BASE_URL}/api/cron/live-bsd-sync" \
+  curl --fail-with-body --show-error --silent --location --max-time 25 \
+    -X POST "${BASE_URL}${ENDPOINT}" \
     -H "content-type: application/json" \
     -H "x-cron-secret: ${CRON_SECRET}" \
-    --data '{}'
+    --data '{"windowHours":6,"source":"github-actions"}'
+
+  echo
 
   if [ "$i" -lt "$TICKS" ]; then
     sleep "$SLEEP_SECONDS"
