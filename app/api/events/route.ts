@@ -16,6 +16,9 @@ type DbMatchRow = {
   id: number;
   utc_date: string;
   status: string | null;
+  source_status: string | null;
+  period: string | null;
+  source_period: string | null;
   matchday: number | null;
   season: string | null;
   home_team: string | null;
@@ -542,9 +545,26 @@ export async function GET(req: Request) {
 
   const { data: matchesData, error: matchesError } = await sb
     .from("matches")
-    .select(
-      "id, utc_date, status, matchday, season, home_team, away_team, home_score, away_score, minute, injury_time, competition_id, competition_name, home_team_id, away_team_id"
-    )
+    .select(`
+      id,
+      competition_id,
+      competition_name,
+      utc_date,
+      status,
+      source_status,
+      period,
+      source_period,
+      matchday,
+      season,
+      home_team,
+      away_team,
+      home_score,
+      away_score,
+      minute,
+      injury_time,
+      home_team_id,
+      away_team_id
+    `)
     .eq("source", "bsd")
     .gte("utc_date", rangeStart)
     .lt("utc_date", rangeEnd)
@@ -675,6 +695,9 @@ export async function GET(req: Request) {
               id: m.id,
               utcDate: m.utc_date,
               status,
+              sourceStatus: m.source_status ?? null,
+              period: m.period ?? null,
+              sourcePeriod: m.source_period ?? null,
               live: {
                 isLive,
                 isFinished,

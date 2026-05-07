@@ -30,6 +30,9 @@ type MatchUI = {
   leagueEmblem: string | null;
   kickoffLocal: string;
   status: string;
+  sourceStatus: string | null;
+  period: string | null;
+  sourcePeriod: string | null;
   isLive: boolean;
   isFinished: boolean;
   homeScore: number | null;
@@ -792,12 +795,59 @@ function hasVisibleScore(match: MatchUI) {
   return match.homeScore !== null || match.awayScore !== null;
 }
 
-function formatMatchMinute(match: MatchUI) {
+function shouldBoostLiveMinute(match: MatchUI) {
+  const status = String(match.status || "").toUpperCase();
+
+  if (status === "PAUSED") return false;
+  if (status === "FINISHED") return false;
+
+  const phases = [
+    match.sourceStatus,
+    match.period,
+    match.sourcePeriod,
+  ].map((value) => String(value ?? "").toLowerCase());
+
+  const isPausedLike = phases.some((value) => {
+    return (
+      value === "paused" ||
+      value === "pause" ||
+      value === "ht" ||
+      value === "halftime" ||
+      value === "half_time" ||
+      value === "half-time" ||
+      value === "break" ||
+      value === "finished" ||
+      value === "full_time" ||
+      value === "full-time" ||
+      value === "ended"
+    );
+  });
+
+  if (isPausedLike) return false;
+
+  return match.isLive || isLiveStatus(status);
+}
+
+function getDisplayMinute(match: MatchUI) {
   if (match.minute === null) return null;
+
+  // Przy doliczonym czasie nie robimy 91+2, tylko zostawiamy poprawny zapis 90+2.
   if (match.injuryTime !== null && match.injuryTime > 0) {
-    return `${match.minute}+${match.injuryTime}'`;
+    return match.minute;
   }
-  return `${match.minute}'`;
+
+  return shouldBoostLiveMinute(match) ? match.minute + 1 : match.minute;
+}
+
+function formatMatchMinute(match: MatchUI) {
+  const minute = getDisplayMinute(match);
+  if (minute === null) return null;
+
+  if (match.injuryTime !== null && match.injuryTime > 0) {
+    return `${minute}+${match.injuryTime}'`;
+  }
+
+  return `${minute}'`;
 }
 
 function liveStatusCopy(match: MatchUI, effectiveLive: boolean) {
@@ -928,6 +978,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     leagueEmblem: null,
     kickoffLocal: kickoffUtcQS ? formatPolishDateTime(kickoffUtcQS) : "",
     status: "SCHEDULED",
+    sourceStatus: null,
+    period: null,
+    sourcePeriod: null,
     isLive: false,
     isFinished: false,
     homeScore: null,
@@ -1047,7 +1100,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           supabase
             .from("matches")
             .select(
-              "home_team, away_team, home_team_id, away_team_id, competition_id, competition_name, utc_date, status, home_score, away_score, minute, injury_time"
+              "home_team, away_team, home_team_id, away_team_id, competition_id, competition_name, utc_date, status, source_status, period, source_period, home_score, away_score, minute, injury_time"
             )
             .eq("source", "bsd")
             .eq("id", matchIdNum)
@@ -1111,6 +1164,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
               competition_name?: string | null;
               utc_date?: string | null;
               status?: string | null;
+              source_status?: string | null;
+              period?: string | null;
+              source_period?: string | null;
               home_score?: number | null;
               away_score?: number | null;
               minute?: number | null;
@@ -1249,6 +1305,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
             leagueEmblem,
             kickoffLocal,
             status,
+            sourceStatus: row?.source_status ?? null,
+            period: row?.period ?? null,
+            sourcePeriod: row?.source_period ?? null,
             isLive,
             isFinished,
             homeScore:

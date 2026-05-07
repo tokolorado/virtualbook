@@ -72,6 +72,9 @@ type Match = {
   time: string;
   kickoffUtc: string;
   status: string;
+  sourceStatus: string | null;
+  period: string | null;
+  sourcePeriod: string | null;
   isLive: boolean;
   isFinished: boolean;
   homeScore: number | null;
@@ -553,13 +556,117 @@ function estimateLiveMinute(kickoffUtc: string, nowMs: number): number | null {
   return 90;
 }
 
+
+function normalizeLivePhase(value?: string | null) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function getLivePhase(m: Match) {
+  const candidates = [
+    m.sourcePeriod,
+    m.period,
+    m.sourceStatus,
+    m.status,
+  ];
+
+  for (const value of candidates) {
+    const normalized = normalizeLivePhase(value);
+    if (normalized) return normalized;
+  }
+
+  return "";
+}
+
+function isBreakOrPausedPhase(phase: string) {
+  return (
+    phase === "paused" ||
+    phase === "pause" ||
+    phase === "halftime" ||
+    phase === "half_time" ||
+    phase === "ht" ||
+    phase.includes("break")
+  );
+}
+
+function isTerminalPhase(phase: string) {
+  return (
+    phase === "finished" ||
+    phase === "ft" ||
+    phase === "full_time" ||
+    phase === "cancelled" ||
+    phase === "canceled" ||
+    phase === "postponed" ||
+    phase === "suspended" ||
+    phase === "awarded"
+  );
+}
+
+function liveMinuteCapByPhase(phase: string) {
+  if (
+    phase.includes("extra") ||
+    phase === "extra_time" ||
+    phase === "et"
+  ) {
+    return 120;
+  }
+
+  if (
+    phase === "1st_half" ||
+    phase === "first_half" ||
+    phase === "1h"
+  ) {
+    return 45;
+  }
+
+  if (
+    phase === "2nd_half" ||
+    phase === "second_half" ||
+    phase === "2h"
+  ) {
+    return 90;
+  }
+
+  return 90;
+}
+
+function getDisplayLiveMinute(rawMinute: number | null, match: Match) {
+  if (rawMinute === null) return null;
+
+  const phase = getLivePhase(match);
+  const injuryTime =
+    typeof match.injuryTime === "number" &&
+    Number.isFinite(match.injuryTime) &&
+    match.injuryTime > 0;
+
+  if (isTerminalPhase(phase) || isBreakOrPausedPhase(phase)) {
+    return rawMinute;
+  }
+
+  if (injuryTime) {
+    return rawMinute;
+  }
+
+  const cap = liveMinuteCapByPhase(phase);
+
+  return Math.min(rawMinute + 1, cap);
+}
+
+
+
 function formatLiveClock(m: Match, nowMs: number) {
   if (!isEffectivelyLiveMatch(m, nowMs)) return null;
 
-  const minute =
+  const rawMinute =
     typeof m.minute === "number" && Number.isFinite(m.minute) && m.minute >= 0
       ? m.minute
       : estimateLiveMinute(m.kickoffUtc, nowMs);
+
+  if (rawMinute === null) return null;
+
+  const minute = getDisplayLiveMinute(rawMinute, m);
 
   if (minute === null) return null;
 
@@ -860,7 +967,10 @@ function buildMatchesFromPayload(
         away: awayName,
         time,
         kickoffUtc: utc,
-        status: String(m?.status ?? "SCHEDULED"),
+        status: String(m?.status ?? m?.sourceStatus ?? m?.source_status ?? "SCHEDULED"),
+        sourceStatus: safeString(m?.sourceStatus ?? m?.source_status),
+        period: safeString(m?.period),
+        sourcePeriod: safeString(m?.sourcePeriod ?? m?.source_period),
         isLive: live?.isLive === true,
         isFinished: live?.isFinished === true,
         homeScore: displayHomeScore ?? canonicalHomeScore,
