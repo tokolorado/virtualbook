@@ -59,12 +59,12 @@ export default function ClientProviders({
       ) : (
         <>
           <main className="w-full min-w-0 px-4 py-6 sm:px-5 lg:px-6 2xl:px-8">
-            <div className="w-full min-w-0 lg:pr-[392px] xl:pr-[412px]">
+            <div className="w-full min-w-0 lg:pr-[376px] xl:pr-[396px]">
               {children}
             </div>
           </main>
 
-          <aside className="fixed bottom-6 right-4 top-[100px] z-40 hidden w-[360px] xl:w-[380px] lg:block">
+          <aside className="fixed bottom-6 right-6 top-[100px] z-40 hidden w-[360px] xl:w-[380px] 2xl:right-8 lg:block">
             <div className="h-full min-h-0">
               <BetSlip variant="desktop" />
             </div>
