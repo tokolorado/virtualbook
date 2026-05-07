@@ -801,12 +801,31 @@ export default function BetSlip({ variant }: { variant?: string }) {
   ) : null;
 
   const slipContent = (
-    <div
-      className={cx(
-        "flex flex-col",
-        isDesktop ? "h-full min-h-0" : "space-y-4"
-      )}
-    >
+  <div
+    className={cx(
+      "flex flex-col",
+      isDesktop ? "h-full min-h-0" : "space-y-4"
+    )}
+  >
+    {isMobile ? (
+      <div className="sticky top-0 z-20 -mx-1 mb-2 flex items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-950/95 px-3 py-2 shadow-[0_12px_36px_rgba(0,0,0,0.35)] backdrop-blur">
+        <div>
+          <div className="text-sm font-semibold text-white">Kupon</div>
+          <div className="text-xs text-neutral-500">
+            {slip.length} zdarzeń
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="Zamknij kupon"
+          className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition active:scale-[0.98]"
+        >
+          Zamknij
+        </button>
+      </div>
+    ) : null}
       <style jsx global>{`
         @keyframes vb-shake {
           0% {
