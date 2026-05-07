@@ -917,15 +917,18 @@ async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
     const selection = String(row.selection) as Pick;
 
     if (selection !== "1" && selection !== "X" && selection !== "2") continue;
+
     const isBsd =
       row.source === "bsd" && row.pricing_method === "bsd_market_normalized";
     const isModel =
       row.source === "internal_model" &&
       row.pricing_method === "internal_model_fallback";
+
     if (!isBsd && !isModel) continue;
 
     const odd = safeNum(row.book_odds);
     if (odd === null || odd <= 0) continue;
+
     const existingMeta = metaByMatch.get(matchId);
     if (existingMeta?.source === "bsd" && !isBsd) continue;
 
@@ -1139,12 +1142,31 @@ function getCountdownParts(kickoffUtc: string, nowMs: number) {
 
   const pad = (value: number) => String(value).padStart(2, "0");
 
-  return [
-    { label: "DNI", value: pad(days) },
-    { label: "GODZ", value: pad(hours) },
-    { label: "MIN", value: pad(minutes) },
-    { label: "SEK", value: pad(seconds) },
-  ];
+  if (days > 0) {
+    return [
+      { label: "DNI", value: pad(days) },
+      { label: "GODZ", value: pad(hours) },
+      { label: "MIN", value: pad(minutes) },
+      { label: "SEK", value: pad(seconds) },
+    ];
+  }
+
+  if (hours > 0) {
+    return [
+      { label: "GODZ", value: pad(hours) },
+      { label: "MIN", value: pad(minutes) },
+      { label: "SEK", value: pad(seconds) },
+    ];
+  }
+
+  if (minutes > 0) {
+    return [
+      { label: "MIN", value: pad(minutes) },
+      { label: "SEK", value: pad(seconds) },
+    ];
+  }
+
+  return [{ label: "SEK", value: pad(seconds) }];
 }
 
 function PosterTeam({
@@ -1162,27 +1184,38 @@ function PosterTeam({
 }) {
   return (
     <div className="flex min-w-0 flex-col items-center text-center">
-      <div className="relative">
-        <div className="absolute inset-0 rounded-full bg-white/15 blur-xl" />
+      <div className="relative sm:hidden">
+        <div className="absolute inset-0 rounded-full bg-white/20 blur-xl" />
         <LeagueIcon
           src={crest}
           alt={name}
-          size={72}
+          size={46}
           fallback={name.slice(0, 1)}
-          className="relative rounded-full border-white/15 bg-white p-2.5 shadow-[0_12px_30px_rgba(0,0,0,0.35)] sm:p-3"
+          className="relative rounded-2xl border-white/15 bg-white p-2 shadow-[0_12px_35px_rgba(0,0,0,0.35)]"
         />
       </div>
 
-      <div className="mt-2 max-w-full truncate text-sm font-semibold tracking-tight text-white sm:mt-3 sm:text-lg lg:text-xl">
+      <div className="relative hidden sm:block">
+        <div className="absolute inset-0 rounded-full bg-white/20 blur-2xl" />
+        <LeagueIcon
+          src={crest}
+          alt={name}
+          size={92}
+          fallback={name.slice(0, 1)}
+          className="relative rounded-full border-white/15 bg-white p-3 shadow-[0_18px_48px_rgba(0,0,0,0.42)]"
+        />
+      </div>
+
+      <div className="mt-2 max-w-full truncate text-sm font-semibold tracking-tight text-white sm:mt-4 sm:text-xl xl:text-2xl">
         {name}
       </div>
 
-      <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.22em] text-neutral-500 sm:text-[10px]">
+      <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.22em] text-neutral-500 sm:text-[11px]">
         {side === "home" ? "HOME" : "AWAY"}
       </div>
 
       {showScore ? (
-        <div className="mt-2 min-w-10 rounded-xl border border-white/10 bg-white/[0.06] px-2.5 py-1 text-lg font-semibold text-white shadow-inner sm:mt-3 sm:min-w-12 sm:px-3 sm:py-1.5 sm:text-xl">
+        <div className="mt-2 min-w-10 rounded-xl border border-white/10 bg-white/[0.06] px-2.5 py-1 text-center text-base font-semibold text-white shadow-inner sm:mt-3 sm:min-w-14 sm:rounded-2xl sm:px-4 sm:py-2 sm:text-2xl">
           {score ?? 0}
         </div>
       ) : null}
@@ -1243,12 +1276,10 @@ function MatchDataQualityStrip({
   const missing = quality?.missing.slice(0, compact ? 1 : 2) ?? [];
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px]">
-      {quality ? (
-        <SmallPill tone={dataQualityTone(quality.label)}>
-          Data BSD {dataQualityLabel(quality.label)} · {quality.score}/100
-        </SmallPill>
-      ) : null}
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+      <SmallPill tone={dataQualityTone(quality.label)}>
+        Data BSD {dataQualityLabel(quality.label)} · {quality.score}/100
+      </SmallPill>
 
       {badges.map((badge) => (
         <span
@@ -1259,7 +1290,7 @@ function MatchDataQualityStrip({
         </span>
       ))}
 
-      {!quality?.hasRealBsdOdds && missing.length > 0 ? (
+      {!quality.hasRealBsdOdds && missing.length > 0 ? (
         <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2.5 py-1 font-semibold text-yellow-300">
           Brakuje: {missing.join(", ")}
         </span>
@@ -1290,7 +1321,7 @@ function PredictionInlineStrip({
         : prediction.source?.toUpperCase() ?? "AI";
 
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-500/15 bg-sky-500/[0.06] px-3 py-2 text-[11px] text-neutral-300">
+    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-2xl border border-sky-500/15 bg-sky-500/[0.06] px-3 py-2 text-[11px] text-neutral-300">
       <span className="font-semibold uppercase tracking-[0.16em] text-sky-300">
         AI
       </span>
@@ -1424,7 +1455,7 @@ export default function EventsPage() {
   const beyondCacheRef = useRef<Record<string, boolean>>({});
 
   useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 10_000);
+    const id = window.setInterval(() => setNowMs(Date.now()), 1_000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -1615,11 +1646,7 @@ export default function EventsPage() {
         setEnabledDates(arr);
         setEnabledDatesLoaded(true);
 
-        if (
-          preferredDate &&
-          arr.length > 0 &&
-          !arr.includes(preferredDate)
-        ) {
+        if (preferredDate && arr.length > 0 && !arr.includes(preferredDate)) {
           setSelectedDate(arr[0]);
         }
 
@@ -2208,7 +2235,7 @@ export default function EventsPage() {
           </div>
         ) : null}
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
           {(["1", "X", "2"] as Pick[]).map((pick) => {
             const active = isActivePick(m.id, MARKET_ID_1X2, pick);
 
@@ -2251,7 +2278,7 @@ export default function EventsPage() {
                   });
                 }}
                 className={cn(
-                  "group rounded-2xl border px-2.5 py-2.5 text-center transition sm:px-3 sm:py-3",
+                  "group rounded-2xl border px-2 py-2 text-center transition sm:px-3 sm:py-3",
                   disabled
                     ? "cursor-not-allowed border-neutral-800 bg-neutral-950/70 text-neutral-600"
                     : active
@@ -2267,11 +2294,9 @@ export default function EventsPage() {
                 <div className="text-xs font-semibold leading-none sm:text-sm">
                   {shortPickLabel(pick)}
                 </div>
-
-                <div className="mt-1 hidden text-[10px] opacity-70 sm:block">
+                <div className="mt-1 text-[10px] opacity-70 sm:text-[11px]">
                   {pickLabel(pick)}
                 </div>
-
                 <div className="mt-1 text-xs font-semibold sm:text-sm">
                   {hasOdd ? formatOdd(odd) : "—"}
                 </div>
@@ -2294,13 +2319,13 @@ export default function EventsPage() {
     const liveClock = formatLiveClock(m, nowMs);
     const countdown = getCountdownParts(m.kickoffUtc, nowMs);
     const showScore = hasVisibleScore(m);
-    const isLive = isEffectivelyLiveMatch(m, nowMs);
+    const isLive = m.isLive || isLiveStatus(m.status);
 
     return (
       <article
         key={m.id}
         className={cn(
-          "group overflow-hidden rounded-[24px] border shadow-[0_20px_70px_rgba(0,0,0,0.42)] transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/35 hover:shadow-[0_28px_95px_rgba(6,182,212,0.16)]",
+          "group overflow-hidden rounded-[24px] border shadow-[0_22px_70px_rgba(0,0,0,0.40)] transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/35 hover:shadow-[0_28px_90px_rgba(6,182,212,0.15)] sm:rounded-[28px]",
           isLive
             ? "border-red-400/30 bg-red-950/10"
             : m.oddsMeta?.isModel
@@ -2308,12 +2333,12 @@ export default function EventsPage() {
               : "border-white/10 bg-[#07090f]"
         )}
       >
-        <div className="relative overflow-hidden bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px),radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.24),transparent_36%),linear-gradient(120deg,#050810,#0a1020_48%,#05070c)] bg-[size:84px_84px,84px_84px,100%_100%,100%_100%] px-4 py-4 sm:px-6 sm:py-6 lg:px-8 lg:py-7">
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/50 to-transparent" />
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-[radial-gradient(circle_at_30%_50%,rgba(20,184,166,0.14),transparent_52%)]" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-[radial-gradient(circle_at_70%_50%,rgba(59,130,246,0.16),transparent_52%)]" />
+        <div className="relative min-h-[215px] overflow-hidden bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.30),transparent_38%),linear-gradient(120deg,#050810,#0a1020_48%,#05070c)] bg-[size:64px_64px,64px_64px,100%_100%,100%_100%] px-3 py-4 sm:min-h-[300px] sm:bg-[size:84px_84px,84px_84px,100%_100%,100%_100%] sm:px-8 sm:py-7 xl:px-9 xl:py-8">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/55 to-transparent sm:h-28" />
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-[radial-gradient(circle_at_30%_50%,rgba(20,184,166,0.18),transparent_52%)]" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-[radial-gradient(circle_at_70%_50%,rgba(59,130,246,0.20),transparent_52%)]" />
 
-          <div className="relative z-10 grid min-h-[190px] grid-cols-[1fr_auto_1fr] items-center gap-3 sm:min-h-[220px] sm:gap-6 lg:min-h-[245px] lg:gap-8">
+          <div className="relative z-10 grid min-h-[185px] grid-cols-[minmax(0,1fr)_minmax(112px,1.1fr)_minmax(0,1fr)] items-center gap-2 sm:min-h-[250px] sm:gap-6 lg:grid-cols-[1fr_1.08fr_1fr]">
             <PosterTeam
               name={m.home}
               crest={m.homeCrest}
@@ -2323,56 +2348,60 @@ export default function EventsPage() {
             />
 
             <div className="flex min-w-0 flex-col items-center text-center">
-              <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/12 bg-white/[0.07] px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.16em] text-neutral-200 shadow-[0_8px_30px_rgba(0,0,0,0.24)] backdrop-blur sm:px-4 sm:py-2 sm:text-[10px]">
+              <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.07] px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-neutral-200 shadow-[0_10px_30px_rgba(0,0,0,0.24)] backdrop-blur sm:gap-2 sm:px-4 sm:py-2 sm:text-[11px] sm:tracking-[0.18em]">
                 <span
                   className={cn(
-                    "h-1.5 w-1.5 rounded-full",
+                    "h-1.5 w-1.5 rounded-full sm:h-2 sm:w-2",
                     isLive ? "animate-pulse bg-red-400" : "bg-emerald-400"
                   )}
                 />
                 <span>{isLive ? "LIVE" : "Featured"}</span>
-                <span className="text-neutral-500">/</span>
-                <span className="truncate">{distance}</span>
+                {distance ? (
+                  <>
+                    <span className="text-neutral-500">/</span>
+                    <span className="truncate">{distance}</span>
+                  </>
+                ) : null}
               </div>
 
-              <div className="mt-4 flex max-w-full items-center justify-center gap-2 text-base font-semibold tracking-tight text-white sm:mt-5 sm:text-xl lg:text-2xl">
+              <div className="mt-3 flex max-w-full items-center justify-center gap-1.5 text-sm font-semibold tracking-tight text-white sm:mt-5 sm:gap-3 sm:text-2xl xl:text-3xl">
                 <LeagueIcon
                   src={competitionMetaByCode[m.competitionCode]?.emblem ?? null}
                   alt={m.competitionName}
                   size={18}
                   fallback={m.competitionCode.slice(0, 2)}
-                  className="rounded-full bg-white/8"
+                  className="rounded-full bg-white/8 sm:h-[22px] sm:w-[22px]"
                 />
                 <span className="truncate">{m.competitionName}</span>
               </div>
 
-              <div className="mt-2 text-3xl font-black tracking-tight text-white/10 sm:mt-3 sm:text-5xl lg:text-6xl">
+              <div className="mt-1 text-3xl font-black tracking-tight text-white/10 sm:mt-3 sm:text-6xl xl:text-7xl">
                 VS
               </div>
 
-              <div className="mt-2 text-xs font-semibold text-neutral-300 sm:text-sm">
+              <div className="mt-1 text-[11px] font-semibold text-neutral-300 sm:mt-3 sm:text-sm">
                 {formatLocalDateTime(m.kickoffUtc)}
               </div>
 
-              <div className="mt-2 flex justify-center">
+              <div className="mt-1.5 flex justify-center sm:mt-3">
                 <MatchStatusPill match={m} nowMs={nowMs} />
               </div>
 
               {isLive ? (
-                <div className="mt-3 rounded-2xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-100 shadow-[0_0_30px_rgba(248,113,113,0.14)] sm:mt-4 sm:px-5 sm:py-3 sm:text-sm">
+                <div className="mt-2 rounded-xl border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-100 shadow-[0_0_30px_rgba(248,113,113,0.14)] sm:mt-4 sm:rounded-2xl sm:px-5 sm:py-3 sm:text-sm">
                   Na żywo {liveClock ? `- ${liveClock}` : ""}
                 </div>
               ) : countdown ? (
-                <div className="mt-3 grid grid-cols-4 gap-1.5 sm:mt-4 sm:gap-2">
+                <div className="mt-2 grid auto-cols-fr grid-flow-col gap-1.5 sm:mt-4 sm:gap-2">
                   {countdown.map((part) => (
                     <div
                       key={part.label}
-                      className="min-w-11 rounded-xl border border-white/10 bg-white/[0.07] px-2 py-2 text-center shadow-inner backdrop-blur sm:min-w-14 sm:rounded-2xl sm:px-3 sm:py-3"
+                      className="min-w-9 rounded-xl border border-white/10 bg-white/[0.07] px-2 py-2 text-center shadow-inner backdrop-blur sm:min-w-14 sm:rounded-2xl sm:px-3 sm:py-3"
                     >
-                      <div className="text-lg font-black leading-none text-white sm:text-2xl">
+                      <div className="text-base font-black leading-none text-white sm:text-2xl">
                         {part.value}
                       </div>
-                      <div className="mt-1 text-[8px] font-bold uppercase tracking-[0.18em] text-neutral-500 sm:text-[9px]">
+                      <div className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.16em] text-neutral-500 sm:mt-1 sm:text-[9px] sm:tracking-[0.2em]">
                         {part.label}
                       </div>
                     </div>
@@ -2383,9 +2412,9 @@ export default function EventsPage() {
               <button
                 type="button"
                 onClick={() => goMatch(m)}
-                className="mt-4 rounded-full bg-white px-4 py-2 text-xs font-bold text-neutral-950 shadow-[0_12px_30px_rgba(255,255,255,0.14)] transition hover:scale-[1.02] hover:bg-cyan-50 sm:mt-5 sm:px-6 sm:py-3 sm:text-sm"
+                className="mt-3 rounded-full bg-white px-4 py-2 text-xs font-bold text-neutral-950 shadow-[0_12px_35px_rgba(255,255,255,0.15)] transition hover:scale-[1.02] hover:bg-cyan-50 sm:mt-5 sm:px-6 sm:py-3 sm:text-sm"
               >
-                Otwórz mecz &rarr;
+                Otwórz mecz →
               </button>
             </div>
 
@@ -2399,12 +2428,12 @@ export default function EventsPage() {
           </div>
         </div>
 
-        <div className="border-t border-white/10 bg-black/28 px-4 py-4 sm:px-6 sm:py-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <div className="border-t border-white/10 bg-black/28 px-3 py-3 sm:px-6 sm:py-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               {!checkingAdmin && isAdmin ? (
                 <>
-                  <MatchDataQualityStrip match={m} />
+                  <MatchDataQualityStrip match={m} compact />
                   <PredictionInlineStrip
                     prediction={m.prediction}
                     homeTeam={m.home}
@@ -2414,12 +2443,12 @@ export default function EventsPage() {
               ) : null}
             </div>
 
-            <div className="hidden text-[11px] font-semibold text-neutral-500 sm:block">
+            <div className="text-[10px] font-semibold text-neutral-500 sm:text-[11px]">
               Kliknij kurs, żeby dodać typ do kuponu.
             </div>
           </div>
 
-          <div className="mt-3 sm:mt-4">{renderMarketButtons(m)}</div>
+          <div className="mt-3">{renderMarketButtons(m)}</div>
         </div>
       </article>
     );
@@ -2503,6 +2532,67 @@ export default function EventsPage() {
           enabledDatesLoaded={enabledDatesLoaded}
           showCalendarInline
         />
+      </div>
+    </SurfaceCard>
+  );
+
+  const renderOfferPanel = () => (
+    <SurfaceCard className="p-4">
+      <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+        Ligi i filtry
+      </div>
+
+      <div className="mt-3 text-2xl font-semibold text-white">
+        Oferta dnia
+      </div>
+
+      <p className="mt-3 text-sm leading-6 text-neutral-400">
+        Wybierz ligę, sprawdź liczbę spotkań i szybko przejdź do kursów 1X2.
+      </p>
+
+      <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
+        <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+          Wybrany dzień
+        </div>
+        <div className="mt-2 text-2xl font-semibold text-white">
+          {selectedDate}
+        </div>
+
+        {!checkingAdmin && isAdmin ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <SmallPill tone="red">LIVE {liveMatches.length}</SmallPill>
+            <SmallPill tone="green">Open {openMatches.length}</SmallPill>
+            <SmallPill>Finished {finishedMatches.length}</SmallPill>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="mt-5 space-y-2">
+        <LeagueButton
+          active={selectedLeague === "ALL"}
+          label="Wszystkie ligi"
+          count={leagueCounts.ALL ?? 0}
+          emblem={null}
+          onClick={() => {
+            setSelectedLeague("ALL");
+            setActiveRightTab("matches");
+          }}
+        />
+
+        {availableLeagues.map((lg) => (
+          <LeagueButton
+            key={lg.code}
+            active={selectedLeague === lg.code}
+            label={lg.name}
+            count={leagueCounts[lg.code] ?? 0}
+            emblem={competitionMetaByCode[lg.code]?.emblem ?? null}
+            fallback={lg.code}
+            onClick={() => {
+              setSelectedLeague(lg.code);
+              setActiveRightTab("matches");
+            }}
+          />
+        ))}
       </div>
     </SurfaceCard>
   );
@@ -2713,71 +2803,11 @@ export default function EventsPage() {
   };
 
   return (
-    <div className="grid gap-5 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
+    <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[320px_minmax(0,1fr)]">
       <aside className="hidden min-w-0 xl:block">
         <div className="sticky top-24 space-y-4">
           {renderCalendarPanel()}
-
-          <SurfaceCard className="p-4">
-            <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-              Ligi i filtry
-            </div>
-
-            <div className="mt-3 text-2xl font-semibold text-white">
-              Oferta dnia
-            </div>
-
-            <p className="mt-3 text-sm leading-6 text-neutral-400">
-              Wybierz ligę, sprawdź liczbę spotkań i szybko przejdź do kursów
-              1X2.
-            </p>
-
-            <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
-              <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                Wybrany dzień
-              </div>
-
-              <div className="mt-2 text-2xl font-semibold text-white">
-                {selectedDate}
-              </div>
-
-              {!checkingAdmin && isAdmin ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <SmallPill tone="red">LIVE {liveMatches.length}</SmallPill>
-                  <SmallPill tone="green">Open {openMatches.length}</SmallPill>
-                  <SmallPill>Finished {finishedMatches.length}</SmallPill>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="mt-5 space-y-2">
-              <LeagueButton
-                active={selectedLeague === "ALL"}
-                label="Wszystkie ligi"
-                count={leagueCounts.ALL ?? 0}
-                emblem={null}
-                onClick={() => {
-                  setSelectedLeague("ALL");
-                  setActiveRightTab("matches");
-                }}
-              />
-
-              {availableLeagues.map((lg) => (
-                <LeagueButton
-                  key={lg.code}
-                  active={selectedLeague === lg.code}
-                  label={lg.name}
-                  count={leagueCounts[lg.code] ?? 0}
-                  emblem={competitionMetaByCode[lg.code]?.emblem ?? null}
-                  fallback={lg.code}
-                  onClick={() => {
-                    setSelectedLeague(lg.code);
-                    setActiveRightTab("matches");
-                  }}
-                />
-              ))}
-            </div>
-          </SurfaceCard>
+          {renderOfferPanel()}
         </div>
       </aside>
 
@@ -2837,9 +2867,7 @@ export default function EventsPage() {
                       </SmallPill>
                     ) : null}
 
-                    <SmallPill
-                      tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}
-                    >
+                    <SmallPill tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}>
                       AI predictions:{" "}
                       <span className="ml-1 font-semibold text-white">
                         {matchesWithPredictionsCount}
@@ -2928,9 +2956,7 @@ export default function EventsPage() {
             ) : beyondHorizon ? (
               <span className="text-neutral-400">
                 Jeszcze brak meczów, wkrótce się pojawią. Horyzont danych:{" "}
-                <span className="font-semibold text-white">
-                  {horizonYmd ?? "—"}
-                </span>
+                <span className="font-semibold text-white">{horizonYmd ?? "—"}</span>
               </span>
             ) : (
               <span className="text-neutral-500">
@@ -3095,7 +3121,7 @@ export default function EventsPage() {
               }
             />
           ) : (
-            <div className="space-y-5">
+            <div className="space-y-4 sm:space-y-5">
               {liveMatches.length > 0 ? (
                 <div className="space-y-3">
                   <SectionHeader

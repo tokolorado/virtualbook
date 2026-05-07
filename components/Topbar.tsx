@@ -249,6 +249,7 @@ export default function Topbar() {
   };
 
   const isLoggedIn = !!session;
+  const accountActive = isPathActive(pathname, "/account");
 
   const visibleNav = useMemo(() => {
     return BASE_NAV.filter((item) => {
@@ -316,18 +317,26 @@ export default function Topbar() {
                   <Link
                     href="/account"
                     className={cx(
-                      "rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
-                      isPathActive(pathname, "/account")
+                      "flex min-w-[88px] flex-col items-center justify-center rounded-2xl border px-3 py-2 text-center text-sm font-medium leading-tight transition sm:px-4 sm:py-2.5",
+                      accountActive
                         ? "border-white/15 bg-white text-black"
                         : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
                     )}
                   >
-                    Moje konto
+                    <span>Moje konto</span>
+                    <span
+                      className={cx(
+                        "mt-0.5 block text-[10px] font-semibold leading-none md:hidden",
+                        accountActive ? "text-black/65" : "text-neutral-400"
+                      )}
+                    >
+                      {balanceVb === null ? "..." : `${formatVB(balanceVb)} VB`}
+                    </span>
                   </Link>
 
                   <button
                     onClick={logout}
-                    className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-medium text-neutral-200 transition hover:bg-neutral-800"
+                    className="rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm font-medium text-neutral-200 transition hover:bg-neutral-800 sm:px-4 sm:py-2.5"
                   >
                     Wyloguj
                   </button>
@@ -372,17 +381,6 @@ export default function Topbar() {
                     compact
                   />
                 ))}
-
-                {isLoggedIn ? (
-                  <div className="ml-1 shrink-0 rounded-2xl border border-neutral-800 bg-neutral-900/40 px-3 py-2 text-xs text-neutral-300 md:hidden">
-                    Saldo:{" "}
-                    <span className="font-semibold text-white">
-                      {balanceVb === null
-                        ? "..."
-                        : `${formatVB(balanceVb)} VB`}
-                    </span>
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>
