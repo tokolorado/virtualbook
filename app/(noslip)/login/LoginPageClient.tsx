@@ -1,8 +1,13 @@
-//app/(noslip)/login/LoginPageClient.tsx
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -28,17 +33,21 @@ function noticeClasses(tone: NoticeTone) {
   if (tone === "success") {
     return "border-green-500/30 bg-green-500/10 text-green-200";
   }
+
   if (tone === "error") {
     return "border-red-500/30 bg-red-500/10 text-red-200";
   }
+
   if (tone === "warning") {
     return "border-yellow-500/30 bg-yellow-500/10 text-yellow-200";
   }
+
   return "border-sky-500/30 bg-sky-500/10 text-sky-200";
 }
 
 function messageFromUnknown(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message;
+
   if (
     typeof error === "object" &&
     error !== null &&
@@ -93,12 +102,16 @@ function InputField({
         />
 
         {rightSlot ? (
-          <div className="absolute inset-y-0 right-3 flex items-center">{rightSlot}</div>
+          <div className="absolute inset-y-0 right-3 flex items-center">
+            {rightSlot}
+          </div>
         ) : null}
       </div>
 
       {error ? <div className="text-xs text-red-300">{error}</div> : null}
-      {!error && help ? <div className="text-xs text-neutral-500">{help}</div> : null}
+      {!error && help ? (
+        <div className="text-xs text-neutral-500">{help}</div>
+      ) : null}
     </div>
   );
 }
@@ -122,16 +135,27 @@ export default function LoginPageClient() {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
 
-  const [notice, setNotice] = useState<{ tone: NoticeTone; text: string } | null>(null);
+  const [notice, setNotice] = useState<{
+    tone: NoticeTone;
+    text: string;
+  } | null>(null);
+
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [canResend, setCanResend] = useState(false);
   const [hasSession, setHasSession] = useState(false);
 
   const cleanEmail = useMemo(() => normalizeEmail(email), [email]);
-  const cleanForgotEmail = useMemo(() => normalizeEmail(forgotEmail), [forgotEmail]);
+  const cleanForgotEmail = useMemo(
+    () => normalizeEmail(forgotEmail),
+    [forgotEmail]
+  );
 
   const emailError =
-    email.length === 0 ? null : isValidEmail(cleanEmail) ? null : "Podaj poprawny adres e-mail.";
+    email.length === 0
+      ? null
+      : isValidEmail(cleanEmail)
+        ? null
+        : "Podaj poprawny adres e-mail.";
 
   const forgotEmailError =
     forgotEmail.length === 0
@@ -152,10 +176,12 @@ export default function LoginPageClient() {
     }
 
     let hashType = "";
+
     if (typeof window !== "undefined") {
       const hash = window.location.hash.startsWith("#")
         ? window.location.hash.slice(1)
         : window.location.hash;
+
       const hashParams = new URLSearchParams(hash);
       hashType = hashParams.get("type") || "";
     }
@@ -185,6 +211,7 @@ export default function LoginPageClient() {
 
       if (!cancelled) {
         const loggedIn = !!data.session;
+
         setHasSession(loggedIn);
 
         const registered = searchParams.get("registered") === "1";
@@ -196,7 +223,7 @@ export default function LoginPageClient() {
       }
     };
 
-    loadSession();
+    void loadSession();
 
     return () => {
       cancelled = true;
@@ -265,6 +292,7 @@ export default function LoginPageClient() {
       );
 
       let checkData: AccountCheckResponse | null = null;
+
       try {
         checkData = await checkRes.json();
       } catch {
@@ -302,6 +330,7 @@ export default function LoginPageClient() {
         } else {
           setFieldError("Nie udało się zalogować. Spróbuj ponownie.");
         }
+
         return;
       }
 
@@ -348,6 +377,7 @@ export default function LoginPageClient() {
       );
 
       let checkData: AccountCheckResponse | null = null;
+
       try {
         checkData = await checkRes.json();
       } catch {
@@ -355,36 +385,41 @@ export default function LoginPageClient() {
       }
 
       if (!checkRes.ok || !checkData) {
-        setForgotError("Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę.");
+        setForgotError(
+          "Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę."
+        );
         return;
       }
 
       if (checkData.exists) {
-        const { error } = await supabase.auth.resetPasswordForEmail(cleanForgotEmail, {
-          redirectTo: `${window.location.origin}/reset-password`,
-        });
+        const { error } = await supabase.auth.resetPasswordForEmail(
+          cleanForgotEmail,
+          {
+            redirectTo: `${window.location.origin}/reset-password`,
+          }
+        );
 
         if (error) {
-            console.error("[forgot-password] resetPasswordForEmail error:", error);
+          console.error("[forgot-password] resetPasswordForEmail error:", error);
 
-            const msg = String(error.message || "").toLowerCase();
+          const msg = String(error.message || "").toLowerCase();
 
-            if (
-              msg.includes("rate") ||
-              msg.includes("too many") ||
-              msg.includes("security purposes")
-            ) {
-              setForgotError(
-                "Link resetujący był wysyłany zbyt często. Odczekaj chwilę i spróbuj ponownie."
-              );
-              return;
-            }
-
+          if (
+            msg.includes("rate") ||
+            msg.includes("too many") ||
+            msg.includes("security purposes")
+          ) {
             setForgotError(
-              "Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę."
+              "Link resetujący był wysyłany zbyt często. Odczekaj chwilę i spróbuj ponownie."
             );
             return;
           }
+
+          setForgotError(
+            "Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę."
+          );
+          return;
+        }
       }
 
       setForgotSent(true);
@@ -398,278 +433,238 @@ export default function LoginPageClient() {
   };
 
   return (
-    <div className="mx-auto mt-10 max-w-5xl px-4 pb-10">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="rounded-3xl border border-neutral-800 bg-gradient-to-br from-neutral-900 via-neutral-900 to-sky-950/20 p-6">
-          <div className="inline-flex items-center rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300">
-            {view === "forgot-password" ? "Reset hasła" : "Logowanie"}
+    <div className="vb-login-page mx-auto flex w-full max-w-2xl items-center px-4 py-4">
+      <div className="w-full overflow-hidden rounded-[2rem] border border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.14),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.96),rgba(5,5,5,0.99))] shadow-[0_24px_90px_rgba(0,0,0,0.45)]">
+        <div className="border-b border-neutral-800/80 p-4 sm:p-6">
+          <div className="inline-flex w-fit items-center rounded-full border border-sky-500/20 bg-sky-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-sky-300">
+            VirtualBook
           </div>
 
-          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-white">
-            {view === "forgot-password"
-              ? "Odzyskaj dostęp do konta"
-              : "Wróć do gry w VirtualBook"}
-          </h1>
+          <div className="mt-4 rounded-3xl border border-sky-400/25 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.24),transparent_34%),linear-gradient(135deg,rgba(14,165,233,0.13),rgba(10,10,10,0.94))] px-4 py-4 shadow-[0_18px_80px_rgba(14,165,233,0.12)]">
+            <h1 className="text-[clamp(1.65rem,7vw,3.2rem)] font-black uppercase leading-[0.95] tracking-tight text-white">
+              {view === "forgot-password"
+                ? "ODZYSKAJ DOSTĘP"
+                : "WRÓĆ DO GRY ZE ZNAJOMYMI!"}
+            </h1>
 
-          {view === "login" ? (
-            <div className="mt-5 rounded-3xl border border-sky-400/25 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.24),transparent_34%),linear-gradient(135deg,rgba(14,165,233,0.14),rgba(10,10,10,0.94))] px-5 py-5 shadow-[0_18px_80px_rgba(14,165,233,0.12)]">
-              <div className="text-[clamp(2rem,5vw,4.8rem)] font-black uppercase leading-[0.95] tracking-normal text-white">
-                WRÓĆ DO GRY ZE ZNAJOMYMI!
-              </div>
-              <div className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-sky-200">
-                VB balance, kupony i rywalizacja czekają
-              </div>
-            </div>
-          ) : null}
-
-          <p className="mt-3 max-w-xl text-sm leading-6 text-neutral-400">
-            {view === "forgot-password"
-              ? "Wpisz adres e-mail przypisany do konta. Jeśli konto istnieje, wyślemy bezpieczny link do ustawienia nowego hasła."
-              : "Zaloguj się, aby przejść do wydarzeń, obstawiać kupony, śledzić saldo VB oraz sprawdzać historię swoich zakładów."}
-          </p>
-
-          <div className="mt-6 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4">
-              <div className="text-xs text-neutral-400">
-                {view === "forgot-password" ? "Krok 1" : "Po zalogowaniu"}
-              </div>
-              <div className="mt-2 text-sm font-medium text-white">
-                {view === "forgot-password" ? "Link resetujący" : "Kupony i wallet"}
-              </div>
-              <div className="mt-1 text-sm text-neutral-500">
-                {view === "forgot-password"
-                  ? "Wyślemy wiadomość z linkiem do formularza zmiany hasła."
-                  : "Dostęp do salda, historii VB, kuponów i konta."}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4">
-              <div className="text-xs text-neutral-400">
-                {view === "forgot-password" ? "Krok 2" : "Bezpieczeństwo"}
-              </div>
-              <div className="mt-2 text-sm font-medium text-white">
-                {view === "forgot-password" ? "Nowe hasło" : "Potwierdzony e-mail"}
-              </div>
-              <div className="mt-1 text-sm text-neutral-500">
-                {view === "forgot-password"
-                  ? "Po kliknięciu linku ustawisz nowe hasło bez podawania starego."
-                  : "Jeśli konto nie jest potwierdzone, pokażemy jasny komunikat i opcję ponownego wysłania linku."}
-              </div>
+            <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-200 sm:text-xs">
+              {view === "forgot-password"
+                ? "Ustaw nowe hasło i wróć do gry"
+                : "VB balance, kupony i rywalizacja czekają"}
             </div>
           </div>
+        </div>
 
-          <div className="mt-6 rounded-2xl border border-neutral-800 bg-neutral-950/60 p-4 text-sm text-neutral-400">
-            {view === "forgot-password" ? (
+        <section className="p-4 sm:p-6">
+          <div className="mx-auto w-full max-w-md">
+            {view === "login" ? (
               <>
-                Pamiętasz hasło?{" "}
-                <button
-                  type="button"
-                  onClick={backToLogin}
-                  className="font-medium text-white underline underline-offset-2"
-                >
-                  Wróć do logowania
-                </button>
+                <div className="mb-4 text-center">
+                  <h2 className="text-2xl font-semibold tracking-tight text-white">
+                    Zaloguj się
+                  </h2>
+                  <p className="mt-1 text-sm text-neutral-400">
+                    Wpisz e-mail i hasło, aby wejść do aplikacji.
+                  </p>
+                </div>
+
+                {notice ? (
+                  <div
+                    className={[
+                      "mb-4 rounded-2xl border p-3 text-sm sm:p-4",
+                      noticeClasses(notice.tone),
+                    ].join(" ")}
+                  >
+                    {notice.text}
+                  </div>
+                ) : null}
+
+                {hasSession ? (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-200">
+                      Jesteś już zalogowany. Możesz przejść od razu do wydarzeń.
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => router.replace("/events")}
+                      className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95"
+                    >
+                      Przejdź do wydarzeń
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSignIn} className="space-y-4">
+                    <InputField
+                      label="E-mail"
+                      type="email"
+                      value={email}
+                      onChange={setEmail}
+                      placeholder="twoj@email.com"
+                      autoComplete="email"
+                      error={emailError}
+                    />
+
+                    <InputField
+                      label="Hasło"
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={setPassword}
+                      placeholder="Wpisz hasło"
+                      autoComplete="current-password"
+                      rightSlot={
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-neutral-800"
+                        >
+                          {showPassword ? "Ukryj" : "Pokaż"}
+                        </button>
+                      }
+                    />
+
+                    <div className="-mt-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={openForgotPassword}
+                        className="text-sm text-neutral-300 underline underline-offset-2 transition hover:text-white"
+                      >
+                        Nie pamiętasz hasła?
+                      </button>
+                    </div>
+
+                    {fieldError ? (
+                      <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 sm:p-4">
+                        {fieldError}
+                      </div>
+                    ) : null}
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95 disabled:opacity-60"
+                    >
+                      {loading ? "Logowanie..." : "Zaloguj"}
+                    </button>
+
+                    {canResend ? (
+                      <button
+                        type="button"
+                        onClick={handleResendConfirmation}
+                        disabled={resending}
+                        className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900 disabled:opacity-60"
+                      >
+                        {resending
+                          ? "Wysyłam link..."
+                          : "Wyślij link potwierdzający ponownie"}
+                      </button>
+                    ) : null}
+
+                    <div className="pt-1 text-center text-sm text-neutral-400">
+                      Nie masz konta?{" "}
+                      <Link
+                        href="/register"
+                        className="font-medium text-white underline underline-offset-2"
+                      >
+                        Zarejestruj się
+                      </Link>
+                    </div>
+                  </form>
+                )}
               </>
             ) : (
               <>
-                Nie masz jeszcze konta?{" "}
-                <Link href="/register" className="font-medium text-white underline underline-offset-2">
-                  Zarejestruj się
-                </Link>
+                <div className="mb-4 text-center">
+                  <h2 className="text-2xl font-semibold tracking-tight text-white">
+                    Nie pamiętasz hasła?
+                  </h2>
+                  <p className="mt-1 text-sm text-neutral-400">
+                    Wpisz e-mail konta. Wyślemy link do ustawienia nowego hasła.
+                  </p>
+                </div>
+
+                {forgotSent ? (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-200">
+                      Jeśli konto z tym adresem istnieje, wysłaliśmy link
+                      resetujący hasło. Sprawdź skrzynkę odbiorczą oraz folder
+                      spam.
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={backToLogin}
+                      className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95"
+                    >
+                      Wróć do logowania
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setForgotSent(false);
+                        setForgotError(null);
+                      }}
+                      className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900"
+                    >
+                      Wyślij ponownie
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleForgotPassword} className="space-y-4">
+                    <InputField
+                      label="E-mail"
+                      type="email"
+                      value={forgotEmail}
+                      onChange={setForgotEmail}
+                      placeholder="twoj@email.com"
+                      autoComplete="email"
+                      error={forgotEmailError}
+                      help="Użyj adresu e-mail przypisanego do konta VirtualBook."
+                    />
+
+                    {forgotError ? (
+                      <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 sm:p-4">
+                        {forgotError}
+                      </div>
+                    ) : null}
+
+                    <button
+                      type="submit"
+                      disabled={forgotLoading}
+                      className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95 disabled:opacity-60"
+                    >
+                      {forgotLoading
+                        ? "Wysyłam link..."
+                        : "Wyślij link resetujący"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={backToLogin}
+                      className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900"
+                    >
+                      Wróć do logowania
+                    </button>
+                  </form>
+                )}
               </>
             )}
           </div>
         </section>
-
-        <section className="rounded-3xl border border-neutral-800 bg-neutral-900/40 p-6">
-          {view === "login" ? (
-            <>
-              <div className="mb-4">
-                <h2 className="text-xl font-semibold text-white">Zaloguj się</h2>
-                <p className="mt-1 text-sm text-neutral-400">
-                  Wpisz e-mail i hasło, aby wejść do aplikacji.
-                </p>
-              </div>
-
-              {notice ? (
-                <div
-                  className={[
-                    "mb-4 rounded-2xl border p-4 text-sm",
-                    noticeClasses(notice.tone),
-                  ].join(" ")}
-                >
-                  {notice.text}
-                </div>
-              ) : null}
-
-              {hasSession ? (
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-200">
-                    Jesteś już zalogowany. Możesz przejść od razu do wydarzeń.
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => router.replace("/events")}
-                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95"
-                  >
-                    Przejdź do wydarzeń
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleSignIn} className="space-y-4">
-                  <InputField
-                    label="E-mail"
-                    type="email"
-                    value={email}
-                    onChange={setEmail}
-                    placeholder="twoj@email.com"
-                    autoComplete="email"
-                    error={emailError}
-                  />
-
-                  <InputField
-                    label="Hasło"
-                    type={showPassword ? "text" : "password"}
-                    value={password}
-                    onChange={setPassword}
-                    placeholder="Wpisz hasło"
-                    autoComplete="current-password"
-                    rightSlot={
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword((v) => !v)}
-                        className="rounded-lg border border-neutral-800 bg-neutral-900 px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-neutral-800"
-                      >
-                        {showPassword ? "Ukryj" : "Pokaż"}
-                      </button>
-                    }
-                  />
-
-                  <div className="-mt-1 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={openForgotPassword}
-                      className="text-sm text-neutral-300 underline underline-offset-2 transition hover:text-white"
-                    >
-                      Nie pamiętasz hasła?
-                    </button>
-                  </div>
-
-                  {fieldError ? (
-                    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-                      {fieldError}
-                    </div>
-                  ) : null}
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95 disabled:opacity-60"
-                  >
-                    {loading ? "Logowanie..." : "Zaloguj"}
-                  </button>
-
-                  {canResend ? (
-                    <button
-                      type="button"
-                      onClick={handleResendConfirmation}
-                      disabled={resending}
-                      className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900 disabled:opacity-60"
-                    >
-                      {resending ? "Wysyłam link..." : "Wyślij link potwierdzający ponownie"}
-                    </button>
-                  ) : null}
-
-                  <div className="pt-2 text-sm text-neutral-400">
-                    Nie masz konta?{" "}
-                    <Link href="/register" className="text-white underline underline-offset-2">
-                      Zarejestruj się
-                    </Link>
-                  </div>
-                </form>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="mb-4">
-                <h2 className="text-xl font-semibold text-white">Nie pamiętasz hasła?</h2>
-                <p className="mt-1 text-sm text-neutral-400">
-                  Wpisz e-mail konta. Wyślemy link do ustawienia nowego hasła.
-                </p>
-              </div>
-
-              {forgotSent ? (
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-200">
-                    Jeśli konto z tym adresem istnieje, wysłaliśmy link resetujący hasło.
-                    Sprawdź skrzynkę odbiorczą oraz folder spam.
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={backToLogin}
-                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95"
-                  >
-                    Wróć do logowania
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForgotSent(false);
-                      setForgotError(null);
-                    }}
-                    className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900"
-                  >
-                    Wyślij ponownie
-                  </button>
-                </div>
-              ) : (
-                <form onSubmit={handleForgotPassword} className="space-y-4">
-                  <InputField
-                    label="E-mail"
-                    type="email"
-                    value={forgotEmail}
-                    onChange={setForgotEmail}
-                    placeholder="twoj@email.com"
-                    autoComplete="email"
-                    error={forgotEmailError}
-                    help="Użyj adresu e-mail przypisanego do konta VirtualBook."
-                  />
-
-                  {forgotError ? (
-                    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-                      {forgotError}
-                    </div>
-                  ) : null}
-
-                  <button
-                    type="submit"
-                    disabled={forgotLoading}
-                    className="w-full rounded-2xl bg-white py-3 text-sm font-semibold text-black transition hover:opacity-95 disabled:opacity-60"
-                  >
-                    {forgotLoading ? "Wysyłam link..." : "Wyślij link resetujący"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={backToLogin}
-                    className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 py-3 text-sm font-medium text-neutral-200 transition hover:bg-neutral-900"
-                  >
-                    Wróć do logowania
-                  </button>
-
-                  <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4 text-xs leading-5 text-sky-200">
-                    Dla bezpieczeństwa nie pokazujemy publicznie, czy dany adres e-mail istnieje w bazie.
-                    Jeśli konto istnieje, link resetujący zostanie wysłany.
-                  </div>
-                </form>
-              )}
-            </>
-          )}
-        </section>
       </div>
+
+      <style jsx>{`
+        .vb-login-page {
+          min-height: calc(100svh - 60px);
+        }
+
+        @media (min-width: 640px) {
+          .vb-login-page {
+            min-height: calc(100svh - 68px);
+          }
+        }
+      `}</style>
     </div>
   );
 }

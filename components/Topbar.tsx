@@ -288,12 +288,16 @@ export default function Topbar() {
   const accountActive = isPathActive(pathname, "/account");
 
   const visibleNav = useMemo(() => {
+    if (!isLoggedIn) return [];
+
     return BASE_NAV.filter((item) => {
       if (item.requiresAuth && !isLoggedIn) return false;
       if (item.adminOnly) return !checkingAdmin && isAdmin;
       return true;
     });
   }, [isLoggedIn, checkingAdmin, isAdmin]);
+
+  const showMobileNav = isLoggedIn && visibleNav.length > 0;
 
   return (
     <>
@@ -398,27 +402,36 @@ export default function Topbar() {
             </div>
           </div>
 
-          <nav
-            className="mt-2 grid gap-2 lg:hidden"
-            style={{
-              gridTemplateColumns: `repeat(${visibleNav.length}, minmax(0, 1fr))`,
-            }}
-          >
-            {visibleNav.map((item) => (
-              <MobileNavIcon
-                key={item.href}
-                href={item.href}
-                label={item.label}
-                icon={item.icon}
-                active={isPathActive(pathname, item.href)}
-                hasAttention={item.href === "/admin" && mappingReviewCount > 0}
-              />
-            ))}
-          </nav>
+          {showMobileNav ? (
+            <nav
+              className="mt-2 grid gap-2 lg:hidden"
+              style={{
+                gridTemplateColumns: `repeat(${visibleNav.length}, minmax(0, 1fr))`,
+              }}
+            >
+              {visibleNav.map((item) => (
+                <MobileNavIcon
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                  active={isPathActive(pathname, item.href)}
+                  hasAttention={item.href === "/admin" && mappingReviewCount > 0}
+                />
+              ))}
+            </nav>
+          ) : null}
         </div>
       </header>
 
-      <div className="h-[124px] sm:h-[128px] lg:h-[76px]" aria-hidden="true" />
+      <div
+        className={
+          showMobileNav
+            ? "h-[126px] sm:h-[130px] lg:h-[68px]"
+            : "h-[60px] sm:h-[68px]"
+        }
+        aria-hidden="true"
+      />
     </>
   );
 }
