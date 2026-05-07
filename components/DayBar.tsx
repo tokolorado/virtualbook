@@ -1,4 +1,3 @@
-// components/DayBar.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -112,6 +111,7 @@ export default function DayBar({
     isYYYYMMDD(value) ? value : today
   );
 
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
   const enabledSet = useMemo(() => new Set(enabledDates), [enabledDates]);
@@ -164,12 +164,15 @@ export default function DayBar({
 
   return (
     <div className="vb-daybar-shell overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/75">
-      <div className="relative h-[92x] min-w-0 overflow-hidden">
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-20 w-8 bg-gradient-to-r from-neutral-950 via-neutral-950/70 to-transparent sm:w-12" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-20 w-8 bg-gradient-to-l from-neutral-950 via-neutral-950/70 to-transparent sm:w-12" />
+      <div className="relative h-[92px] min-w-0 overflow-hidden">
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-20 w-8 bg-gradient-to-r from-neutral-950 via-neutral-950/70 to-transparent sm:w-10" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-20 w-8 bg-gradient-to-l from-neutral-950 via-neutral-950/70 to-transparent sm:w-10" />
 
-        <div className="no-scrollbar h-full min-w-0 overflow-x-auto overflow-y-hidden">
-          <div className="flex h-full w-max min-w-full justify-center px-1">
+        <div
+          ref={scrollRef}
+          className="no-scrollbar h-full min-w-0 overflow-x-auto overflow-y-hidden"
+        >
+          <div className="flex h-full min-w-full items-stretch px-2">
             {visibleDates.map((item) => {
               const active = item.ymd === value;
               const disabledLook = !item.hasMatches && !active;
@@ -183,7 +186,7 @@ export default function DayBar({
                   type="button"
                   onClick={() => onChange(item.ymd)}
                   className={cn(
-                    "vb-date-item relative h-full border-b-[3px] px-2 text-center outline-none transition duration-200 active:scale-[0.98]",
+                    "vb-date-item relative shrink-0 border-b-[3px] text-center outline-none transition duration-200 active:scale-[0.985]",
                     active ? "vb-date-active" : "vb-date-idle",
                     disabledLook && "vb-date-muted"
                   )}
@@ -209,7 +212,7 @@ export default function DayBar({
 
                     <span
                       className={cn(
-                        "mt-1 block text-lg font-black leading-none tracking-tight sm:text-xl",
+                        "block text-lg font-black leading-none tracking-tight sm:text-xl",
                         active
                           ? "text-white"
                           : disabledLook
@@ -222,7 +225,7 @@ export default function DayBar({
                   </span>
 
                   {disabledLook ? (
-                    <span className="pointer-events-none absolute bottom-2 left-1/2 z-10 h-1 w-5 -translate-x-1/2 rounded-full bg-neutral-800/90" />
+                    <span className="pointer-events-none absolute bottom-3 left-1/2 z-10 h-1 w-5 -translate-x-1/2 rounded-full bg-neutral-800/90" />
                   ) : null}
                 </button>
               );
@@ -398,10 +401,11 @@ export default function DayBar({
         .vb-date-item {
           position: relative;
           display: flex;
-          flex: 0 0 86px;
-          width: 86px;
-          min-width: 86px;
-          max-width: 86px;
+          flex: 1 0 calc(100% / 14);
+          width: calc(100% / 14);
+          min-width: 64px;
+          max-width: none;
+          height: 92px;
           align-items: center;
           justify-content: center;
           border-bottom-color: transparent;
@@ -414,7 +418,7 @@ export default function DayBar({
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 3px;
+          gap: 8px;
           pointer-events: none;
           transform: none;
         }
@@ -422,7 +426,7 @@ export default function DayBar({
         .vb-date-item::before {
           content: "";
           position: absolute;
-          inset: 8px 5px;
+          inset: 10px 7px;
           border-radius: 18px;
           opacity: 0;
           background:
@@ -482,8 +486,8 @@ export default function DayBar({
         .vb-date-active::after {
           content: "";
           position: absolute;
-          left: 15px;
-          right: 15px;
+          left: 16px;
+          right: 16px;
           bottom: 0;
           height: 3px;
           border-radius: 999px;
@@ -520,10 +524,10 @@ export default function DayBar({
 
         @media (min-width: 640px) {
           .vb-date-item {
-            flex-basis: 90px;
-            width: 90px;
-            min-width: 90px;
-            max-width: 90px;
+            width: 108px;
+            min-width: 108px;
+            max-width: 108px;
+            height: 108px;
           }
         }
 
