@@ -22,10 +22,12 @@ export function LeagueIcon({
   fallback,
   className,
 }: LeagueIconProps) {
-  const [failed, setFailed] = useState(false);
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
 
   const cleanSrc =
     typeof src === "string" && src.trim().length > 0 ? src.trim() : null;
+  const failed = cleanSrc !== null && failedSrc === cleanSrc;
+
   const fallbackText =
     typeof fallback === "string"
       ? fallback.trim().slice(0, 4).toUpperCase()
@@ -71,7 +73,7 @@ export function LeagueIcon({
         loading="lazy"
         decoding="async"
         referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
+        onError={() => setFailedSrc(cleanSrc)}
         className="h-full w-full object-contain"
       />
     </span>

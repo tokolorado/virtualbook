@@ -245,11 +245,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
   const standardPricing = useMemo(() => priceAccumulatorSlip(slip), [slip]);
   const builderLocalError = useMemo(() => {
     if (mode !== "bet_builder" || slip.length === 0) return null;
-    if (slip.length < 2) return "Bet Builder wymaga minimum 2 typow z jednego meczu.";
+    if (slip.length < 2) return "Bet Builder wymaga minimum 2 typów z jednego meczu.";
 
     const matchIds = new Set(slip.map((item) => String(item.matchId)));
     if (matchIds.size !== 1) {
-      return "Bet Builder dziala tylko dla jednego meczu naraz.";
+      return "Bet Builder działa tylko dla jednego meczu naraz.";
     }
 
     return null;
@@ -873,6 +873,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                   type="button"
                   onClick={() => changeMode(option.value)}
                   disabled={submitting}
+                  aria-pressed={mode === option.value}
                   className={cx(
                     "rounded-xl px-3 py-2 text-xs font-semibold transition",
                     mode === option.value
@@ -888,11 +889,11 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
             {mode === "bet_builder" ? (
               <div className="mt-3 rounded-2xl border border-sky-500/20 bg-sky-500/10 p-3 text-xs leading-5 text-sky-100">
-                Jeden mecz, wiele typow, jeden skorelowany kurs pakietu.
+                Jeden mecz, wiele typów, jeden skorelowany kurs pakietu.
                 {builderQuote && !builderQuoteError ? (
                   <span className="mt-1 block text-sky-200/80">
                     Korelacja: {builderQuote.correlationFactor.toFixed(2)}x wobec
-                    prostego mnozenia.
+                    prostego mnożenia.
                   </span>
                 ) : null}
               </div>
@@ -1013,8 +1014,10 @@ export default function BetSlip({ variant }: { variant?: string }) {
                     )}
 
                     <button
+                      type="button"
                       onClick={() => removeFromSlip(it.matchId, it.market)}
                       disabled={submitting}
+                      aria-label={`Usuń z kuponu: ${labels.marketLabel}, ${labels.selectionLabel}`}
                       className={cx(
                         "mt-2 text-xs transition",
                         submitting
@@ -1117,6 +1120,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
 
         <div className={cx("space-y-2", shake && "vb-shake")}>
           <button
+            type="button"
             onClick={onSubmit}
             disabled={!canSubmit}
             className={cx(
@@ -1130,6 +1134,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
           </button>
 
           <button
+            type="button"
             onClick={resetSlipState}
             disabled={!slip.length || submitting}
             className={cx(
@@ -1202,7 +1207,9 @@ export default function BetSlip({ variant }: { variant?: string }) {
             </div>
 
             <button
+              type="button"
               onClick={() => setOpen(true)}
+              aria-label={`Otwórz kupon, liczba zdarzeń: ${slip.length}`}
               className="shrink-0 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition active:scale-[0.99]"
             >
               Otwórz
@@ -1222,7 +1229,9 @@ export default function BetSlip({ variant }: { variant?: string }) {
               <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
                 <div className="text-sm font-semibold">Kupon</div>
                 <button
+                  type="button"
                   onClick={() => setOpen(false)}
+                  aria-label="Zamknij kupon"
                   className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition hover:bg-neutral-800"
                 >
                   Zamknij

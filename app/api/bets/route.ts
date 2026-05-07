@@ -259,7 +259,7 @@ export async function POST(req: Request) {
     );
 
     if (matchIds.length !== 1) {
-      return jsonError("Bet Builder dziala tylko dla jednego meczu naraz.", 400, {
+      return jsonError("Bet Builder działa tylko dla jednego meczu naraz.", 400, {
         code: "multi_match",
       });
     }

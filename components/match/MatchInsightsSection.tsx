@@ -1650,6 +1650,10 @@ function normalizeTabParam(value: string | null): TabKey | null {
   return null;
 }
 
+function defaultTabForMatchState(isLive?: boolean): TabKey {
+  return isLive ? "liveStats" : "info";
+}
+
 
 export default function MatchInsightsSection({
   matchId,
@@ -1665,7 +1669,9 @@ export default function MatchInsightsSection({
   const searchParams = useSearchParams();
   const requestedTab = normalizeTabParam(searchParams.get("tab"));
 
-  const [activeTab, setActiveTab] = useState<TabKey>(requestedTab ?? "info");
+  const [activeTab, setActiveTab] = useState<TabKey>(
+    requestedTab ?? defaultTabForMatchState(isLive)
+  );
   const [refreshTick, setRefreshTick] = useState(0);
 
   const [lineupsWidgetMapped, setLineupsWidgetMapped] = useState<boolean | null>(
@@ -1757,13 +1763,13 @@ export default function MatchInsightsSection({
 
     if (isLive) {
       return withChampionsLeagueTabs([
-        ...(aiTabAvailable ? [{ key: "ai" as const, label: "AI" }] : []),
-        { key: "info" as const, label: "Info" },
-        { key: "lineups" as const, label: "Składy" },
         { key: "liveStats" as const, label: "Statystyki" },
-        { key: "table" as const, label: "Tabela" },
         { key: "momentum" as const, label: "Momentum" },
         { key: "timeline" as const, label: "Timeline" },
+        { key: "lineups" as const, label: "Składy" },
+        { key: "table" as const, label: "Tabela" },
+        { key: "info" as const, label: "Info" },
+        ...(aiTabAvailable ? [{ key: "ai" as const, label: "AI" }] : []),
       ]);
     }
 
@@ -1794,12 +1800,17 @@ export default function MatchInsightsSection({
   useEffect(() => {
     setActiveTab((current) => {
       if (!visibleTabs.some((tab) => tab.key === current)) {
-        return visibleTabs[0]?.key ?? "info";
+        return visibleTabs[0]?.key ?? defaultTabForMatchState(isLive);
       }
 
       return current;
     });
-  }, [visibleTabs]);
+  }, [isLive, visibleTabs]);
+
+  useEffect(() => {
+    if (requestedTab || !isLive) return;
+    setActiveTab((current) => (current === "info" ? "liveStats" : current));
+  }, [isLive, requestedTab]);
 
   const selectTab = useCallback(
     (tabKey: TabKey) => {
@@ -2315,12 +2326,33 @@ export default function MatchInsightsSection({
     return value ? "Tak" : "Nie";
   };
 
+  const formatSeasonLabel = (value: string | number | null | undefined) => {
+    const text = textOrDash(value)?.trim();
+    if (!text) return null;
+
+    if (/^\d{4}$/.test(text)) {
+      const startYear = Number(text);
+      if (Number.isFinite(startYear)) {
+        return `${startYear}/${startYear + 1}`;
+      }
+    }
+
+    const slashSeason = text.match(/^(\d{4})[/-](\d{2}|\d{4})$/);
+    if (slashSeason) {
+      const endYear =
+        slashSeason[2].length === 2 ? `20${slashSeason[2]}` : slashSeason[2];
+      return `${slashSeason[1]}/${endYear}`;
+    }
+
+    return text;
+  };
+
   const renderMatchInfo = () => {
     if (infoLoading && !matchInfo) {
       return (
         <StateBox
           title="Ładowanie informacji meczowych..."
-          description="Pobieramy zapisane dane BSD: stadion, sędziego, trenerów, warunki i identyfikatory źródłowe."
+          description="Pobieramy zapisane dane BSD: stadion, sędziego i kontekst meczu."
         />
       );
     }
@@ -2361,14 +2393,14 @@ export default function MatchInsightsSection({
           <InlineWarning message="Nie udało się odświeżyć informacji meczowych. Pokazujemy ostatnio pobrane dane." />
         ) : null}
 
-        <Surface className="p-5">
+        <Surface className="overflow-hidden border-sky-400/15 bg-[linear-gradient(135deg,rgba(14,165,233,0.11),rgba(255,255,255,0.035)_45%,rgba(0,0,0,0.35))] p-5">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
               <div className="text-lg font-semibold text-white">
                 Informacje meczowe BSD
               </div>
               <div className="mt-1 text-sm text-neutral-400">
-                Stadion, obsada, warunki i kontekst zapisane przy synchronizacji meczu.
+                Stadion, sędzia, venue i kontekst zapisane przy synchronizacji meczu.
               </div>
             </div>
             <StatusChip>Aktualizacja: {formatDateTime(matchInfo.updatedAt)}</StatusChip>
@@ -2386,8 +2418,6 @@ export default function MatchInsightsSection({
           )}
           {renderInfoValue("Współrzędne", coordinates)}
           {renderInfoValue("Sędzia", textOrDash(matchInfo.officials.referee))}
-          {renderInfoValue(`${homeTeam} trener`, textOrDash(matchInfo.coaches.home))}
-          {renderInfoValue(`${awayTeam} trener`, textOrDash(matchInfo.coaches.away))}
           {renderInfoValue("Neutralny teren", boolOrDash(matchInfo.context.neutralGround))}
           {renderInfoValue("Derby lokalne", boolOrDash(matchInfo.context.localDerby))}
           {renderInfoValue(
@@ -2398,23 +2428,9 @@ export default function MatchInsightsSection({
           )}
           {renderInfoValue("Runda", textOrDash(matchInfo.competition.round))}
           {renderInfoValue("Kolejka", textOrDash(matchInfo.competition.matchday))}
-          {renderInfoValue("Sezon", textOrDash(matchInfo.competition.season))}
+          {renderInfoValue("Sezon", formatSeasonLabel(matchInfo.competition.season))}
           {renderInfoValue("Pogoda", textOrDash(matchInfo.conditions.weatherCode))}
-          {renderInfoValue(
-            "Temperatura",
-            matchInfo.conditions.temperatureC !== null
-              ? `${formatInsightNumber(matchInfo.conditions.temperatureC, 1)}°C`
-              : null
-          )}
-          {renderInfoValue(
-            "Wiatr",
-            matchInfo.conditions.windSpeed !== null
-              ? `${formatInsightNumber(matchInfo.conditions.windSpeed, 1)} km/h`
-              : null
-          )}
           {renderInfoValue("Murawa", textOrDash(matchInfo.conditions.pitchCondition))}
-          {renderInfoValue("BSD event id", textOrDash(matchInfo.source.eventId))}
-          {renderInfoValue("BSD league id", textOrDash(matchInfo.source.leagueId))}
         </div>
       </div>
     );

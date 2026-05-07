@@ -64,6 +64,8 @@ type Match = {
   leagueLine: string;
   homeId: number | null;
   awayId: number | null;
+  homeCrest: string | null;
+  awayCrest: string | null;
   home: string;
   away: string;
   time: string;
@@ -198,6 +200,17 @@ function safeString(v: unknown): string | null {
 
   const s = String(v).trim();
   return s.length > 0 ? s : null;
+}
+
+function isDateParam(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function initialSelectedDateFromUrl() {
+  if (typeof window === "undefined") return todayLocalYYYYMMDD();
+
+  const date = new URLSearchParams(window.location.search).get("date");
+  return isDateParam(date) ? date : todayLocalYYYYMMDD();
 }
 
 function safeStringArray(v: unknown): string[] {
@@ -792,6 +805,25 @@ function readTeamIdFromMatch(rawMatch: unknown, side: "home" | "away") {
   return Number.isFinite(n) ? n : null;
 }
 
+function readTeamCrestFromMatch(rawMatch: unknown, side: "home" | "away") {
+  const m = asRecord(rawMatch);
+  if (!m) return null;
+
+  const team = asRecord(side === "home" ? m.homeTeam : m.awayTeam);
+  const teamObj = asRecord(side === "home" ? m.home_team_obj : m.away_team_obj);
+
+  return firstText(
+    team?.crest,
+    team?.logo,
+    team?.emblem,
+    team?.image,
+    teamObj?.crest,
+    teamObj?.logo,
+    teamObj?.emblem,
+    teamObj?.image
+  );
+}
+
 
 function buildMatchesFromPayload(payload: unknown, selectedDate: string): Match[] {
   const all: Match[] = [];
@@ -822,6 +854,8 @@ function buildMatchesFromPayload(payload: unknown, selectedDate: string): Match[
 
       const homeId = readTeamIdFromMatch(m, "home");
       const awayId = readTeamIdFromMatch(m, "away");
+      const homeCrest = readTeamCrestFromMatch(m, "home");
+      const awayCrest = readTeamCrestFromMatch(m, "away");
 
       const homeName = readTeamNameFromMatch(m, "home");
       const awayName = readTeamNameFromMatch(m, "away");
@@ -842,6 +876,8 @@ function buildMatchesFromPayload(payload: unknown, selectedDate: string): Match[
         leagueLine: `${competitionName} • ${time}`,
         homeId,
         awayId,
+        homeCrest,
+        awayCrest,
         home: homeName,
         away: awayName,
         time,
@@ -1119,10 +1155,12 @@ function EmptyStateCard({
 
 function TeamNameLine({
   name,
+  crest,
   score,
   highlight,
 }: {
   name: string;
+  crest?: string | null;
   score: number | null;
   highlight?: boolean;
 }) {
@@ -1130,11 +1168,18 @@ function TeamNameLine({
     <div className="flex items-center justify-between gap-4">
       <div
         className={cn(
-          "min-w-0 truncate text-base font-semibold leading-7 sm:text-lg",
+          "flex min-w-0 items-center gap-2.5 text-base font-semibold leading-7 sm:text-lg",
           highlight ? "text-white" : "text-neutral-100"
         )}
       >
-        {name}
+        <LeagueIcon
+          src={crest}
+          alt={name}
+          size={22}
+          fallback={name.slice(0, 1)}
+          className="rounded-full"
+        />
+        <span className="min-w-0 truncate">{name}</span>
       </div>
 
       {score !== null ? (
@@ -1452,8 +1497,8 @@ export default function EventsPage() {
   const router = useRouter();
   const { addToSlip, removeFromSlip, isActivePick } = useBetSlip();
 
-  const [selectedDate, setSelectedDate] = useState<string>(() =>
-    todayLocalYYYYMMDD()
+  const [selectedDate, setSelectedDate] = useState<string>(
+    initialSelectedDateFromUrl
   );
   const [selectedLeague, setSelectedLeague] = useState<string>("ALL");
   const [activeRightTab, setActiveRightTab] = useState<"matches" | "table">(
@@ -2201,6 +2246,7 @@ export default function EventsPage() {
     qs.set("k", m.kickoffUtc);
     qs.set("hn", m.home);
     qs.set("an", m.away);
+    qs.set("date", selectedDate);
 
     router.push(`/events/${m.id}?${qs.toString()}`);
   };
@@ -2321,6 +2367,7 @@ export default function EventsPage() {
                         : "border-neutral-800 bg-neutral-950 text-white hover:border-neutral-600 hover:bg-neutral-900"
                 )}
                 title={title}
+                aria-pressed={active}
                 aria-label={`${pickLabel(pick)} ${hasOdd ? formatOdd(odd) : "brak kursu"}`}
               >
                 <div className="text-sm font-semibold leading-none">
@@ -2355,7 +2402,8 @@ export default function EventsPage() {
         key={m.id}
         type="button"
         onClick={() => goMatch(m)}
-        className="group w-full rounded-3xl border border-neutral-800 bg-gradient-to-b from-neutral-900/90 to-neutral-950/90 p-4 text-left transition hover:border-neutral-700 hover:from-neutral-900 hover:to-neutral-950"
+        aria-label={`Otwórz szczegóły meczu ${m.home} vs ${m.away}`}
+        className="group w-full rounded-3xl border border-neutral-800 bg-gradient-to-b from-neutral-900/90 to-neutral-950/90 p-4 text-left transition hover:border-neutral-700 hover:from-neutral-900 hover:to-neutral-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -2378,11 +2426,13 @@ export default function EventsPage() {
         <div className="mt-4 space-y-2">
           <TeamNameLine
             name={m.home}
+            crest={m.homeCrest}
             score={m.homeScore}
             highlight={hasVisibleScore(m)}
           />
           <TeamNameLine
             name={m.away}
+            crest={m.awayCrest}
             score={m.awayScore}
             highlight={hasVisibleScore(m)}
           />
@@ -2415,6 +2465,7 @@ export default function EventsPage() {
         key={m.id}
         role="button"
         tabIndex={0}
+        aria-label={`Otwórz szczegóły meczu ${m.home} vs ${m.away}`}
         onClick={() => goMatch(m)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -2422,7 +2473,7 @@ export default function EventsPage() {
             goMatch(m);
           }
         }}
-        className="group cursor-pointer rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:border-neutral-700 hover:bg-neutral-900/70"
+        className="group cursor-pointer rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:border-neutral-700 hover:bg-neutral-900/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
       >
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
           <div className="min-w-0 flex-1">
@@ -2442,8 +2493,16 @@ export default function EventsPage() {
             </div>
 
             <div className="mt-4 grid gap-2">
-              <TeamNameLine name={m.home} score={m.homeScore} />
-              <TeamNameLine name={m.away} score={m.awayScore} />
+              <TeamNameLine
+                name={m.home}
+                crest={m.homeCrest}
+                score={m.homeScore}
+              />
+              <TeamNameLine
+                name={m.away}
+                crest={m.awayCrest}
+                score={m.awayScore}
+              />
             </div>
 
             <PredictionInlineStrip

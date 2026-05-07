@@ -80,6 +80,12 @@ type FeaturesRow = {
   updated_at: string | null;
 };
 
+type TeamRow = {
+  id: number;
+  crest: string | null;
+  short_name: string | null;
+};
+
 type OddsSet = { "1": number | null; X: number | null; "2": number | null };
 type OddsMeta = {
   source: string | null;
@@ -562,6 +568,7 @@ export async function GET(req: Request) {
 
   let predictionsMap = new Map<number, PredictionRow>();
   let featuresMap = new Map<number, FeaturesRow>();
+  let teamMap = new Map<number, TeamRow>();
 
   try {
     oddsMap = await readOddsMap(matchIds);
@@ -579,6 +586,12 @@ export async function GET(req: Request) {
     featuresMap = await readFeaturesMap(matchIds);
   } catch {
     featuresMap = new Map();
+  }
+
+  try {
+    teamMap = await readTeamMap(matches);
+  } catch {
+    teamMap = new Map();
   }
 
   const grouped = new Map<
@@ -645,6 +658,12 @@ export async function GET(req: Request) {
             const prediction = buildPrediction(predictionRow, featuresRow);
             const homeTeamName = cleanString(m.home_team, "Home");
             const awayTeamName = cleanString(m.away_team, "Away");
+            const homeTeamId = safeInt(m.home_team_id);
+            const awayTeamId = safeInt(m.away_team_id);
+            const homeTeamMeta =
+              homeTeamId !== null ? teamMap.get(homeTeamId) : null;
+            const awayTeamMeta =
+              awayTeamId !== null ? teamMap.get(awayTeamId) : null;
             const dataQuality = buildDataQuality({
               odds,
               oddsMeta: oddsBundle.meta,
@@ -665,12 +684,16 @@ export async function GET(req: Request) {
               matchday: m.matchday,
               season: m.season ? { startDate: `${m.season}-01-01` } : null,
               homeTeam: {
-                id: safeInt(m.home_team_id),
+                id: homeTeamId,
                 name: homeTeamName,
+                crest: homeTeamMeta?.crest ?? null,
+                shortName: homeTeamMeta?.short_name ?? null,
               },
               awayTeam: {
-                id: safeInt(m.away_team_id),
+                id: awayTeamId,
                 name: awayTeamName,
+                crest: awayTeamMeta?.crest ?? null,
+                shortName: awayTeamMeta?.short_name ?? null,
               },
               score: {
                 fullTime: {
@@ -724,4 +747,39 @@ async function readFeaturesMap(matchIds: number[]) {
   }
 
   return featuresMap;
+}
+
+async function readTeamMap(matches: DbMatchRow[]) {
+  const teamMap = new Map<number, TeamRow>();
+  const teamIds = Array.from(
+    new Set(
+      matches
+        .flatMap((match) => [match.home_team_id, match.away_team_id])
+        .map((id) => safeInt(id))
+        .filter((id): id is number => id !== null)
+    )
+  );
+
+  if (!teamIds.length) return teamMap;
+
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
+    .from("teams")
+    .select("id, crest, short_name")
+    .in("id", teamIds);
+
+  if (error) return teamMap;
+
+  for (const row of (data ?? []) as TeamRow[]) {
+    const id = safeInt(row.id);
+    if (id === null) continue;
+
+    teamMap.set(id, {
+      id,
+      crest: cleanString(row.crest, "") || null,
+      short_name: cleanString(row.short_name, "") || null,
+    });
+  }
+
+  return teamMap;
 }

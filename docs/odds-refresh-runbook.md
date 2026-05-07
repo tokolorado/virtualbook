@@ -47,6 +47,16 @@ curl -X POST "$APP_URL/api/odds/sync" \
 - refuse fallback when inputs are too weak,
 - never create repeated placeholder-like odds such as `2.35 / 4.18 / 3.71`.
 
+6. Audit active odds and model runs:
+
+```bash
+curl "$APP_URL/api/admin/odds/audit?from=2026-05-06&days=21" \
+  -H "x-cron-secret: $CRON_SECRET"
+```
+
+The audit should show empty `warnings`, no `knownBadFallbackMatches`, no
+`duplicatePricedRuns`, and no `orphanPricedRuns`.
+
 ## Staging-Only Full Purge
 
 Use this only when you intentionally want to remove all future odds, including real BSD odds:

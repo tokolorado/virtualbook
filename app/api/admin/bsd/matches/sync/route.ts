@@ -2,7 +2,12 @@
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseServer";
-import { bsdFetchJson, bsdFetchPaginated, normalizeBsdText } from "@/lib/bsd/client";
+import {
+  bsdFetchJson,
+  bsdFetchPaginated,
+  bsdImageUrl,
+  normalizeBsdText,
+} from "@/lib/bsd/client";
 import {
   buildBsdEventFeaturesSnapshot,
   buildPricingFeatureSnapshot,
@@ -107,6 +112,17 @@ type MatchUpsertRow = {
   attendance: number | null;
 
   raw_bsd: UnknownRecord;
+};
+
+type TeamUpsertRow = {
+  id: number;
+  name: string;
+  short_name: string | null;
+  tla: string | null;
+  crest: string | null;
+  area_name: string | null;
+  venue: string | null;
+  last_sync_at: string;
 };
 
 type OddsInput = {
@@ -763,6 +779,40 @@ function buildMatchRow(args: {
 
     raw_bsd: args.event,
   };
+}
+
+function buildTeamRows(matchRows: MatchUpsertRow[], fetchedAt: string): TeamUpsertRow[] {
+  const rows: TeamUpsertRow[] = [];
+
+  for (const match of matchRows) {
+    if (match.home_team_id !== null) {
+      rows.push({
+        id: match.home_team_id,
+        name: match.home_team,
+        short_name: match.home_short_name,
+        tla: null,
+        crest: bsdImageUrl("team", match.home_team_id),
+        area_name: match.home_country ?? match.venue_country,
+        venue: match.venue_name,
+        last_sync_at: fetchedAt,
+      });
+    }
+
+    if (match.away_team_id !== null) {
+      rows.push({
+        id: match.away_team_id,
+        name: match.away_team,
+        short_name: match.away_short_name,
+        tla: null,
+        crest: bsdImageUrl("team", match.away_team_id),
+        area_name: match.away_country,
+        venue: null,
+        last_sync_at: fetchedAt,
+      });
+    }
+  }
+
+  return uniqueBy(rows, (row) => String(row.id));
 }
 
 
@@ -1685,11 +1735,13 @@ export async function GET(req: Request): Promise<Response> {
     });
 
     const matchResultRows = buildMatchResultRows(uniqueMatchRows);
+    const teamRows = buildTeamRows(uniqueMatchRows, fetchedAt);
 
     let upsertedMatchesCount = 0;
     let upsertedOddsCount = 0;
     let upsertedPricingFeaturesCount = 0;
     let upsertedBsdEventFeaturesCount = 0;
+    let upsertedTeamsCount = 0;
 
     let matchResultsSync: MatchResultsSyncStats = {
       attempted: matchResultRows.length,
@@ -1710,6 +1762,20 @@ export async function GET(req: Request): Promise<Response> {
       }
 
       upsertedMatchesCount = uniqueMatchRows.length;
+    }
+
+    if (!dryRun && teamRows.length > 0) {
+      const { error: teamsUpsertError } = await supabase
+        .from("teams")
+        .upsert(teamRows, { onConflict: "id" });
+
+      if (teamsUpsertError) {
+        return jsonError("teams upsert failed", 500, {
+          details: teamsUpsertError.message,
+        });
+      }
+
+      upsertedTeamsCount = teamRows.length;
     }
 
     if (!dryRun && uniqueOddsRows.length > 0) {
@@ -1795,6 +1861,8 @@ export async function GET(req: Request): Promise<Response> {
       uniqueOddsRowsCount: uniqueOddsRows.length,
       bsdOddsApi: oddsFetchStats,
       bsdOddsApiWarnings: oddsFetchWarnings.slice(0, 20),
+      builtTeamRowsCount: teamRows.length,
+      upsertedTeamsCount,
       builtPricingFeatureRowsCount: pricingFeatureRows.length,
       upsertedPricingFeaturesCount,
       builtBsdEventFeatureRowsCount: bsdEventFeatureRows.length,

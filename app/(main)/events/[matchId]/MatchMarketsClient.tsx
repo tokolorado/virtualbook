@@ -4,9 +4,10 @@
 import MatchInsightsSection from "@/components/match/MatchInsightsSection";
 import { LeagueIcon } from "@/components/LeagueIcon";
 import { formatOdd } from "@/lib/format";
-import { formatPolishDateTime } from "@/lib/date";
+import { formatPolishDateTime, localDateKeyFromISO } from "@/lib/date";
 import { supabase } from "@/lib/supabase";
 import { useBetSlip } from "@/lib/BetSlipContext";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
@@ -23,6 +24,8 @@ type OddsRow = {
 type MatchUI = {
   home: string;
   away: string;
+  homeCrest: string | null;
+  awayCrest: string | null;
   leagueName: string;
   leagueEmblem: string | null;
   kickoffLocal: string;
@@ -494,6 +497,10 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
+function isDateParam(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
 function safeNum(v: unknown): number | null {
   if (v === null || v === undefined || v === "") return null;
 
@@ -785,6 +792,41 @@ function hasVisibleScore(match: MatchUI) {
   return match.homeScore !== null || match.awayScore !== null;
 }
 
+function formatMatchMinute(match: MatchUI) {
+  if (match.minute === null) return null;
+  if (match.injuryTime !== null && match.injuryTime > 0) {
+    return `${match.minute}+${match.injuryTime}'`;
+  }
+  return `${match.minute}'`;
+}
+
+function liveStatusCopy(match: MatchUI, effectiveLive: boolean) {
+  const status = String(match.status || "").toUpperCase();
+
+  if (status === "PAUSED") {
+    return {
+      label: "LIVE",
+      title: "Mecz jest na żywo",
+      detail: "Spotkanie jest aktualnie wstrzymane albo trwa przerwa.",
+    };
+  }
+
+  if (effectiveLive) {
+    return {
+      label: "LIVE",
+      title: "Mecz jest na żywo",
+      detail:
+        "Statystyki, momentum i timeline są teraz najważniejszym kontekstem meczu.",
+    };
+  }
+
+  return {
+    label: "LIVE",
+    title: "Mecz jest na żywo",
+    detail: "Dane live są odświeżane automatycznie.",
+  };
+}
+
 function groupMarkets(
   oddsRows: OddsRow[],
   marketCatalog: MarketCatalogRow[],
@@ -868,6 +910,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   const kickoffUtcQS = sp.get("k") || "";
   const homeNameQS = sp.get("hn") || "";
   const awayNameQS = sp.get("an") || "";
+  const returnDateQS = sp.get("date") || "";
 
   const { addToSlip, removeFromSlip, isActivePick } = useBetSlip();
 
@@ -879,6 +922,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   const [matchUI, setMatchUI] = useState<MatchUI>({
     home: homeNameQS || "Home",
     away: awayNameQS || "Away",
+    homeCrest: null,
+    awayCrest: null,
     leagueName: competitionCode || "Liga",
     leagueEmblem: null,
     kickoffLocal: kickoffUtcQS ? formatPolishDateTime(kickoffUtcQS) : "",
@@ -923,11 +968,33 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   ]);
 
   const effectiveMatchStatus = effectiveIsLive ? "LIVE" : matchUI.status;
+  const liveMinute = effectiveIsLive ? formatMatchMinute(matchUI) : null;
+  const liveCopy = liveStatusCopy(matchUI, effectiveIsLive);
 
   const closed = useMemo(() => {
     if (effectiveIsLive || matchUI.isFinished) return true;
     return kickoffIso ? isBettingClosed(kickoffIso, nowMs) : false;
   }, [effectiveIsLive, kickoffIso, nowMs, matchUI.isFinished]);
+
+  useEffect(() => {
+    if (effectiveIsLive) {
+      setMatchCenterOpen(true);
+    }
+  }, [effectiveIsLive]);
+
+  const backDate = useMemo(() => {
+    if (isDateParam(returnDateQS)) return returnDateQS;
+
+    const source = kickoffIso || kickoffUtcQS;
+    if (!source) return "";
+
+    const parsed = Date.parse(source);
+    return Number.isFinite(parsed) ? localDateKeyFromISO(source) : "";
+  }, [kickoffIso, kickoffUtcQS, returnDateQS]);
+
+  const backHref = backDate
+    ? `/events?date=${encodeURIComponent(backDate)}`
+    : "/events";
 
   const shouldAutoRefreshMatch = useMemo(() => {
     const status = String(matchUI.status || "").toUpperCase();
@@ -977,14 +1044,14 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           { data: marketData, error: marketErr },
           { data: selectionData, error: selectionErr },
         ] = await Promise.all([
-        supabase
-          .from("matches")
-          .select(
-            "home_team, away_team, competition_id, competition_name, utc_date, status, home_score, away_score, minute, injury_time"
-          )
-          .eq("source", "bsd")
-          .eq("id", matchIdNum)
-          .maybeSingle(),
+          supabase
+            .from("matches")
+            .select(
+              "home_team, away_team, home_team_id, away_team_id, competition_id, competition_name, utc_date, status, home_score, away_score, minute, injury_time"
+            )
+            .eq("source", "bsd")
+            .eq("id", matchIdNum)
+            .maybeSingle(),
 
           supabase
             .from("odds")
@@ -1038,6 +1105,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           | {
               home_team?: string | null;
               away_team?: string | null;
+              home_team_id?: number | null;
+              away_team_id?: number | null;
               competition_id?: string | null;
               competition_name?: string | null;
               utc_date?: string | null;
@@ -1051,6 +1120,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
         const home = row?.home_team ? String(row.home_team) : homeNameQS || "Home";
         const away = row?.away_team ? String(row.away_team) : awayNameQS || "Away";
+        const homeTeamId = safeInt(row?.home_team_id);
+        const awayTeamId = safeInt(row?.away_team_id);
 
         const leagueCode = row?.competition_id
           ? String(row.competition_id)
@@ -1078,6 +1149,33 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
               : null;
         }
 
+        let homeCrest: string | null = null;
+        let awayCrest: string | null = null;
+        const teamIds = [homeTeamId, awayTeamId].filter(
+          (id): id is number => id !== null
+        );
+
+        if (teamIds.length > 0) {
+          const { data: teamRows } = await supabase
+            .from("teams")
+            .select("id, crest")
+            .in("id", teamIds);
+
+          for (const team of (teamRows ?? []) as Array<{
+            id?: number | null;
+            crest?: string | null;
+          }>) {
+            const id = safeInt(team.id);
+            const crest =
+              typeof team.crest === "string" && team.crest.trim().length > 0
+                ? team.crest.trim()
+                : null;
+
+            if (id !== null && id === homeTeamId) homeCrest = crest;
+            if (id !== null && id === awayTeamId) awayCrest = crest;
+          }
+        }
+
         const kickoff = row?.utc_date ? String(row.utc_date) : kickoffUtcQS || "";
         const status = row?.status ? String(row.status) : "SCHEDULED";
 
@@ -1094,6 +1192,8 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           setMatchUI({
             home,
             away,
+            homeCrest,
+            awayCrest,
             leagueName,
             leagueEmblem,
             kickoffLocal,
@@ -1223,7 +1323,9 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     compact = false
   ) => {
     const hasOdd =
-      typeof item.odd === "number" && Number.isFinite(item.odd) && item.odd > 0;
+      typeof item.odd === "number" &&
+      Number.isFinite(item.odd) &&
+      item.odd >= 1.01;
     const isModelOdd = item.isModel;
 
     const active = isActivePick(matchId, market.marketId, item.selection);
@@ -1231,7 +1333,12 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
     return (
       <button
         key={`${market.marketId}__${item.selection}`}
+        type="button"
         disabled={!hasOdd || closed}
+        aria-pressed={active}
+        aria-label={`${market.marketLabel}: ${item.label}, ${
+          hasOdd ? `kurs ${formatOdd(item.odd!)}` : "brak kursu"
+        }`}
         onClick={() => {
           if (!hasOdd || closed) return;
 
@@ -1253,7 +1360,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           });
         }}
         className={cn(
-          "rounded-2xl border text-left transition",
+          "rounded-2xl border text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400",
           compact ? "min-h-[62px] px-3 py-2.5" : "px-3 py-3",
           !hasOdd || closed
             ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
@@ -1290,8 +1397,22 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
   return (
     <div className="space-y-4">
-      <section className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[#050505]">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_14%_0%,rgba(255,255,255,0.11),transparent_34%),radial-gradient(circle_at_88%_18%,rgba(255,255,255,0.045),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_48%)]" />
+      <section
+        className={cn(
+          "relative overflow-hidden rounded-[34px] border bg-[#050505]",
+          effectiveIsLive
+            ? "border-red-400/25 shadow-[0_0_90px_rgba(239,68,68,0.12)]"
+            : "border-white/10"
+        )}
+      >
+          <div
+            className={cn(
+              "pointer-events-none absolute inset-0",
+              effectiveIsLive
+                ? "bg-[radial-gradient(circle_at_13%_0%,rgba(239,68,68,0.28),transparent_34%),radial-gradient(circle_at_88%_18%,rgba(14,165,233,0.08),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.04),transparent_50%)]"
+                : "bg-[radial-gradient(circle_at_14%_0%,rgba(255,255,255,0.11),transparent_34%),radial-gradient(circle_at_88%_18%,rgba(255,255,255,0.045),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.035),transparent_48%)]"
+            )}
+          />
 
           {loading ? (
             <div className="relative px-6 py-8 text-neutral-400 sm:px-10 sm:py-10">
@@ -1300,6 +1421,61 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           ) : (
             <div className="relative px-6 py-5 sm:px-10 sm:py-7 xl:px-12 xl:py-8">
               <div className="flex flex-col gap-5">
+                <div>
+                  <Link
+                    href={backHref}
+                    className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-neutral-200 transition hover:border-sky-400/40 hover:bg-sky-400/10 hover:text-white"
+                  >
+                    <span aria-hidden="true">←</span>
+                    <span>Wstecz</span>
+                    {backDate ? (
+                      <span className="hidden text-neutral-500 sm:inline">
+                        {backDate}
+                      </span>
+                    ) : null}
+                  </Link>
+                </div>
+
+                {effectiveIsLive ? (
+                  <div className="flex flex-col gap-3 rounded-[24px] border border-red-400/25 bg-red-500/10 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span className="relative flex size-3 shrink-0">
+                        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                        <span className="relative inline-flex size-3 rounded-full bg-red-400" />
+                      </span>
+
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-red-300/30 bg-red-400/15 px-2.5 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-red-100">
+                            {liveCopy.label}
+                          </span>
+                          {liveMinute ? (
+                            <span className="rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1 text-xs font-bold tabular-nums text-white">
+                              {liveMinute}
+                            </span>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-2 text-sm font-semibold text-white">
+                          {liveCopy.title}
+                        </div>
+                        <div className="mt-1 text-xs leading-5 text-red-100/75">
+                          {liveCopy.detail}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/35 px-4 py-3 text-left sm:text-right">
+                      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-neutral-500">
+                        Aktualny wynik
+                      </div>
+                      <div className="mt-1 text-2xl font-black tabular-nums text-white">
+                        {matchUI.homeScore ?? 0} : {matchUI.awayScore ?? 0}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="flex size-10 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/[0.04] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
@@ -1336,13 +1512,31 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
                 </div>
 
                 <div>
-                  <h1 className="max-w-full text-[clamp(2rem,2.8vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-white lg:overflow-hidden lg:text-ellipsis lg:whitespace-nowrap">
-                    <span>{matchUI.home}</span>
-                    <span className="mx-3 font-normal text-neutral-600">vs</span>
-                    <span>{matchUI.away}</span>
+                  <h1 className="flex max-w-full flex-wrap items-center gap-x-3 gap-y-2 text-[clamp(2rem,2.8vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.045em] text-white">
+                    <span className="inline-flex min-w-0 max-w-full items-center gap-3">
+                      <LeagueIcon
+                        src={matchUI.homeCrest}
+                        alt={matchUI.home}
+                        size={34}
+                        fallback={matchUI.home.slice(0, 1)}
+                        className="rounded-full"
+                      />
+                      <span className="min-w-0 truncate">{matchUI.home}</span>
+                    </span>
+                    <span className="font-normal text-neutral-600">vs</span>
+                    <span className="inline-flex min-w-0 max-w-full items-center gap-3">
+                      <LeagueIcon
+                        src={matchUI.awayCrest}
+                        alt={matchUI.away}
+                        size={34}
+                        fallback={matchUI.away.slice(0, 1)}
+                        className="rounded-full"
+                      />
+                      <span className="min-w-0 truncate">{matchUI.away}</span>
+                    </span>
                   </h1>
 
-                  {hasVisibleScore(matchUI) ? (
+                  {hasVisibleScore(matchUI) && !effectiveIsLive ? (
                     <div className="mt-6 inline-flex items-center rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-lg font-semibold text-white">
                       {matchUI.homeScore ?? 0} : {matchUI.awayScore ?? 0}
                     </div>
@@ -1353,28 +1547,69 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           )}
         </section>
 
-      <section className="rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4">
+      <section
+        className={cn(
+          "overflow-hidden rounded-[28px] border shadow-[0_18px_70px_rgba(0,0,0,0.35)]",
+          effectiveIsLive
+            ? "border-red-400/25 bg-[linear-gradient(135deg,rgba(239,68,68,0.18),rgba(14,165,233,0.08)_42%,rgba(0,0,0,0.5))]"
+            : "border-white/10 bg-[linear-gradient(135deg,rgba(14,165,233,0.12),rgba(255,255,255,0.035)_42%,rgba(0,0,0,0.45))]"
+        )}
+      >
         <button
           type="button"
           onClick={() => setMatchCenterOpen((open) => !open)}
-          className="flex w-full items-center justify-between gap-4 text-left"
+          className="group flex w-full flex-col gap-4 px-5 py-4 text-left transition hover:bg-white/[0.025] focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400 sm:flex-row sm:items-center sm:justify-between"
         >
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-neutral-500">
-              Match Center
+          <div className="flex min-w-0 items-center gap-4">
+            <div
+              className={cn(
+                "flex size-10 shrink-0 items-center justify-center rounded-2xl border text-[11px] font-black uppercase tracking-[0.12em] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]",
+                effectiveIsLive
+                  ? "border-red-300/30 bg-red-400/15 text-red-100"
+                  : "border-sky-400/25 bg-sky-400/10 text-sky-200"
+              )}
+            >
+              {effectiveIsLive ? "ON" : "MC"}
             </div>
-            <div className="mt-1 text-sm text-neutral-300">
-              Info, składy, porównanie, H2H i tabela są ładowane dopiero po
-              rozwinięciu.
+
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-sky-300">
+                Match Center
+              </div>
+              <div className="mt-1 text-sm font-semibold text-white">
+                {effectiveIsLive
+                  ? "Centrum live meczu"
+                  : "Centrum danych meczu"}
+              </div>
+              <div className="mt-1 text-xs leading-5 text-neutral-400">
+                {effectiveIsLive
+                  ? "Dla meczu live Match Center otwiera się automatycznie. Statystyki, momentum i timeline są pod ręką."
+                  : "Info, składy, statystyki, tabela i timeline są ładowane dopiero po rozwinięciu."}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold text-neutral-300">
+                  Dane BSD
+                </span>
+                <span
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-[11px] font-semibold",
+                    effectiveIsLive
+                      ? "border-red-300/25 bg-red-400/10 text-red-100"
+                      : "border-sky-400/20 bg-sky-400/10 text-sky-200"
+                  )}
+                >
+                  {effectiveIsLive ? "Live data" : "Ładowanie na żądanie"}
+                </span>
+              </div>
             </div>
           </div>
-          <span className="rounded-2xl border border-neutral-800 bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-200">
+          <span className="rounded-full border border-white/10 bg-white px-3 py-2 text-xs font-bold text-neutral-950 transition group-hover:bg-sky-100">
             {matchCenterOpen ? "Zwiń" : "Rozwiń"}
           </span>
         </button>
 
         {matchCenterOpen ? (
-          <div className="mt-4">
+          <div className="border-t border-white/10 p-4 sm:p-5">
             <MatchInsightsSection
               matchId={matchId}
               competitionCode={competitionCode || matchUI.leagueName}
@@ -1402,7 +1637,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
 
       {hasModelMarkets && !loading ? (
         <div className="rounded-3xl border border-cyan-500/20 bg-cyan-500/10 p-4 text-sm text-cyan-100">
-          Kursy modelowe sa fallbackiem VirtualBook, bo BSD nie podalo kursow dla tych rynkow. Mozesz je obstawiac jak normalne kursy wirtualne.
+          Kursy modelowe są fallbackiem VirtualBook, bo BSD nie podało kursów dla tych rynków. Są oznaczone osobno i zapisywane do audytu.
         </div>
       ) : null}
 

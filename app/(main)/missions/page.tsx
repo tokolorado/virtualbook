@@ -248,7 +248,7 @@ export default function MissionsPage() {
             </h1>
             <p className="mt-3 max-w-3xl text-sm leading-7 text-neutral-400">
               Dziennie i tygodniowe wyzwania za aktywnosc, trafione kupony i
-              granie odważniejszych typow.
+              granie odważniejszych typów.
             </p>
           </div>
 

@@ -196,14 +196,26 @@ export async function GET(request: NextRequest) {
       updatedAt: row.last_sync_at,
     };
 
+    const displayableCompetition = {
+      season: payload.competition.season,
+      round: payload.competition.round,
+      matchday: payload.competition.matchday,
+      group: payload.competition.group,
+    };
+
+    const displayableConditions = {
+      weatherCode: payload.conditions.weatherCode,
+      pitchCondition: payload.conditions.pitchCondition,
+    };
+
     return NextResponse.json({
       ...payload,
       available:
         hasAnyValue(payload.venue) ||
         hasAnyValue(payload.officials) ||
-        hasAnyValue(payload.coaches) ||
         hasAnyValue(payload.context) ||
-        hasAnyValue(payload.conditions),
+        hasAnyValue(displayableCompetition) ||
+        hasAnyValue(displayableConditions),
     });
   } catch (error) {
     return NextResponse.json(
