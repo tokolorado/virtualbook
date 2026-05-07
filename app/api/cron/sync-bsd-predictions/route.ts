@@ -1,3 +1,4 @@
+//app/api/cron/sync-bsd-predictions/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { addDaysLocal, todayLocalYYYYMMDD } from "@/lib/date";
 import { requireCronSecret } from "@/lib/requireCronSecret";

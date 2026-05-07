@@ -1,3 +1,4 @@
+//app/api/cron/sync-runner/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { requireCronSecret } from "@/lib/requireCronSecret";
 
