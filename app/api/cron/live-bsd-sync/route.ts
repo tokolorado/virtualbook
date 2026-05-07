@@ -73,6 +73,49 @@ async function parseBody(request: NextRequest): Promise<Body> {
   }
 }
 
+
+async function callSettle(args: {
+  baseUrl: string;
+  cronSecret: string;
+}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20_000);
+
+  try {
+    const response = await fetch(`${args.baseUrl}/api/cron/settle`, {
+      method: "POST",
+      headers: {
+        "x-cron-secret": args.cronSecret,
+      },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+
+    const payload = await response.json().catch(() => null);
+
+    return {
+      ok: response.ok && payload?.ok !== false,
+      status: response.status,
+      error: payload?.error ?? payload?.message ?? null,
+      payload,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 599,
+      error:
+        error instanceof Error && error.name === "AbortError"
+          ? "settle timeout"
+          : error instanceof Error
+            ? error.message
+            : "settle failed",
+      payload: null,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function run(request: NextRequest) {
   const unauthorized = requireCronSecret(request);
   if (unauthorized) return unauthorized;
@@ -181,18 +224,29 @@ async function run(request: NextRequest) {
     }
   }
 
-  const failed = results.filter((item) => !item.ok);
 
-  return NextResponse.json(
+    const failed = results.filter((item) => !item.ok);
+
+    const settleResult = await callSettle({
+    baseUrl,
+    cronSecret,
+    });
+
+    const settleFailed = !settleResult.ok;
+    const ok = failed.length === 0 && !settleFailed;
+
+    return NextResponse.json(
     {
-      ok: failed.length === 0,
-      job: "live-bsd-sync",
-      dates,
-      failedCount: failed.length,
-      results,
+        ok,
+        job: "live-bsd-sync",
+        dates,
+        failedCount: failed.length,
+        settleTriggered: true,
+        settleResult,
+        results,
     },
-    { status: failed.length === 0 ? 200 : 207 }
-  );
+    { status: ok ? 200 : 207 }
+    );
 }
 
 export async function GET(request: NextRequest) {
