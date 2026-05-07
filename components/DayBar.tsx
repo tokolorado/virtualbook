@@ -1,3 +1,4 @@
+// components/DayBar.tsx
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -163,16 +164,13 @@ export default function DayBar({
     addMonthsYmd(calendarMonth, 1).slice(0, 7) <= horizonEnd.slice(0, 7);
 
   return (
-    <div className="vb-daybar-shell overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/75">
-      <div className="relative h-[92px] min-w-0 overflow-hidden">
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-20 w-8 bg-gradient-to-r from-neutral-950 via-neutral-950/70 to-transparent sm:w-10" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-20 w-8 bg-gradient-to-l from-neutral-950 via-neutral-950/70 to-transparent sm:w-10" />
-
+    <div className="vb-daybar-shell overflow-hidden rounded-3xl border border-sky-500/20 bg-neutral-950/75">
+      <div className="h-[92px] min-w-0 overflow-hidden">
         <div
           ref={scrollRef}
           className="no-scrollbar h-full min-w-0 overflow-x-auto overflow-y-hidden"
         >
-          <div className="flex h-full min-w-full items-stretch px-2">
+          <div className="flex h-full min-w-full justify-center px-2 sm:px-3">
             {visibleDates.map((item) => {
               const active = item.ymd === value;
               const disabledLook = !item.hasMatches && !active;
@@ -186,7 +184,7 @@ export default function DayBar({
                   type="button"
                   onClick={() => onChange(item.ymd)}
                   className={cn(
-                    "vb-date-item relative shrink-0 border-b-[3px] text-center outline-none transition duration-200 active:scale-[0.985]",
+                    "vb-date-item relative h-full border-b-[3px] px-1 text-center outline-none transition duration-200 active:scale-[0.98]",
                     active ? "vb-date-active" : "vb-date-idle",
                     disabledLook && "vb-date-muted"
                   )}
@@ -201,10 +199,10 @@ export default function DayBar({
                       className={cn(
                         "block text-[10px] font-black uppercase leading-none tracking-[0.2em] sm:text-[11px]",
                         active
-                          ? "text-cyan-50"
+                          ? "text-sky-50"
                           : disabledLook
-                            ? "text-neutral-600"
-                            : "text-neutral-500"
+                            ? "text-slate-600"
+                            : "text-slate-400"
                       )}
                     >
                       {item.dayLabel}
@@ -212,21 +210,17 @@ export default function DayBar({
 
                     <span
                       className={cn(
-                        "block text-lg font-black leading-none tracking-tight sm:text-xl",
+                        "mt-1.5 block text-lg font-black leading-none tracking-tight sm:text-xl",
                         active
                           ? "text-white"
                           : disabledLook
-                            ? "text-neutral-500"
-                            : "text-neutral-300"
+                            ? "text-slate-500"
+                            : "text-slate-200"
                       )}
                     >
                       {item.dateLabel}
                     </span>
                   </span>
-
-                  {disabledLook ? (
-                    <span className="pointer-events-none absolute bottom-3 left-1/2 z-10 h-1 w-5 -translate-x-1/2 rounded-full bg-neutral-800/90" />
-                  ) : null}
                 </button>
               );
             })}
@@ -235,11 +229,11 @@ export default function DayBar({
       </div>
 
       {showCalendarInline ? (
-        <div className="border-t border-neutral-800/80 p-3">
+        <div className="border-t border-sky-500/10 p-3">
           <button
             type="button"
             onClick={() => setCalendarOpen((v) => !v)}
-            className="flex w-full items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-left outline-none transition hover:border-cyan-400/40 hover:bg-neutral-900"
+            className="flex w-full items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-left outline-none transition hover:border-sky-400/40 hover:bg-neutral-900"
           >
             <span>
               <span className="block text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-500">
@@ -250,7 +244,7 @@ export default function DayBar({
               </span>
             </span>
 
-            <span className="rounded-full border border-amber-400/20 bg-amber-400/5 px-3 py-1 text-xs font-semibold text-amber-200">
+            <span className="rounded-full border border-sky-400/20 bg-sky-400/5 px-3 py-1 text-xs font-semibold text-sky-200">
               {calendarOpen ? "Ukryj" : "Pokaż"}
             </span>
           </button>
@@ -265,7 +259,7 @@ export default function DayBar({
                   className={cn(
                     "rounded-xl border px-3 py-2 text-sm font-semibold outline-none transition",
                     canGoPrevMonth
-                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-cyan-400/40 hover:bg-neutral-900"
+                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-sky-400/40 hover:bg-neutral-900"
                       : "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-700"
                   )}
                 >
@@ -283,7 +277,7 @@ export default function DayBar({
                   className={cn(
                     "rounded-xl border px-3 py-2 text-sm font-semibold outline-none transition",
                     canGoNextMonth
-                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-cyan-400/40 hover:bg-neutral-900"
+                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-sky-400/40 hover:bg-neutral-900"
                       : "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-700"
                   )}
                 >
@@ -314,8 +308,8 @@ export default function DayBar({
                       className={cn(
                         "relative flex h-9 items-center justify-center rounded-xl border text-xs font-semibold outline-none transition",
                         active
-                          ? "border-cyan-300 bg-cyan-400 text-black shadow-[0_0_22px_rgba(34,211,238,0.22)]"
-                          : "border-neutral-900 bg-neutral-950 text-neutral-300 hover:border-cyan-400/40 hover:bg-neutral-900",
+                          ? "border-sky-300 bg-sky-400 text-black shadow-[0_0_22px_rgba(56,189,248,0.22)]"
+                          : "border-neutral-900 bg-neutral-950 text-neutral-300 hover:border-sky-400/40 hover:bg-neutral-900",
                         !inMonth && "text-neutral-700",
                         !hasMatches && inHorizon && "opacity-45",
                         disabled && "cursor-not-allowed opacity-20"
@@ -324,7 +318,7 @@ export default function DayBar({
                       {Number(ymd.slice(8, 10))}
 
                       {hasMatches && inHorizon ? (
-                        <span className="absolute bottom-1 h-1 w-1 rounded-full bg-amber-300" />
+                        <span className="absolute bottom-1 h-1 w-1 rounded-full bg-sky-300" />
                       ) : null}
                     </button>
                   );
@@ -349,25 +343,25 @@ export default function DayBar({
           position: relative;
           background:
             radial-gradient(
-              circle at 7% 10%,
-              rgba(34, 211, 238, 0.14),
-              transparent 30%
+              circle at 18% 50%,
+              rgba(14, 165, 233, 0.18),
+              transparent 34%
             ),
             radial-gradient(
-              circle at 94% 12%,
-              rgba(245, 158, 11, 0.12),
-              transparent 30%
+              circle at 82% 50%,
+              rgba(37, 99, 235, 0.12),
+              transparent 36%
             ),
             linear-gradient(
               180deg,
-              rgba(255, 255, 255, 0.04),
-              rgba(255, 255, 255, 0.012)
-            ),
-            rgba(10, 10, 10, 0.9);
+              rgba(7, 17, 38, 0.98),
+              rgba(2, 8, 23, 0.98)
+            );
           box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.055),
-            inset 0 -1px 0 rgba(255, 255, 255, 0.025),
-            0 18px 70px rgba(0, 0, 0, 0.36);
+            inset 0 1px 0 rgba(125, 211, 252, 0.12),
+            inset 0 -1px 0 rgba(14, 165, 233, 0.08),
+            0 0 0 1px rgba(56, 189, 248, 0.04),
+            0 22px 70px rgba(0, 0, 0, 0.38);
         }
 
         .vb-daybar-shell::before {
@@ -379,7 +373,7 @@ export default function DayBar({
             linear-gradient(
               90deg,
               transparent,
-              rgba(255, 255, 255, 0.07),
+              rgba(125, 211, 252, 0.08),
               transparent
             );
           opacity: 0.22;
@@ -387,12 +381,24 @@ export default function DayBar({
           animation: vb-shell-sheen 7s ease-in-out infinite;
         }
 
+        .vb-daybar-shell::after {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background-image:
+            linear-gradient(rgba(125, 211, 252, 0.045) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(125, 211, 252, 0.035) 1px, transparent 1px);
+          background-size: 64px 64px;
+          opacity: 0.22;
+        }
+
         @keyframes vb-shell-sheen {
           0%,
-          34% {
+          38% {
             transform: translateX(-100%);
           }
-          62%,
+          68%,
           100% {
             transform: translateX(100%);
           }
@@ -401,11 +407,8 @@ export default function DayBar({
         .vb-date-item {
           position: relative;
           display: flex;
-          flex: 1 0 calc(100% / 14);
-          width: calc(100% / 14);
-          min-width: 64px;
-          max-width: none;
-          height: 92px;
+          flex: 1 0 62px;
+          min-width: 62px;
           align-items: center;
           justify-content: center;
           border-bottom-color: transparent;
@@ -418,7 +421,7 @@ export default function DayBar({
           flex-direction: column;
           align-items: center;
           justify-content: center;
-          gap: 8px;
+          gap: 3px;
           pointer-events: none;
           transform: none;
         }
@@ -426,14 +429,14 @@ export default function DayBar({
         .vb-date-item::before {
           content: "";
           position: absolute;
-          inset: 10px 7px;
+          inset: 9px 5px;
           border-radius: 18px;
           opacity: 0;
           background:
             radial-gradient(
               circle at 50% 0%,
-              rgba(34, 211, 238, 0.16),
-              transparent 60%
+              rgba(56, 189, 248, 0.18),
+              transparent 62%
             ),
             linear-gradient(
               180deg,
@@ -442,8 +445,9 @@ export default function DayBar({
             );
           transition:
             opacity 180ms ease,
-            transform 180ms ease;
-          transform: translateY(2px);
+            transform 180ms ease,
+            border-color 180ms ease;
+          transform: translateY(1px);
           pointer-events: none;
         }
 
@@ -452,82 +456,95 @@ export default function DayBar({
           transform: translateY(0);
         }
 
+        .vb-date-item:not(:last-child)::after {
+          content: "";
+          position: absolute;
+          top: 22px;
+          right: 0;
+          bottom: 22px;
+          width: 1px;
+          background: rgba(125, 211, 252, 0.08);
+          pointer-events: none;
+        }
+
         .vb-date-active {
-          border-bottom-color: rgb(34, 211, 238);
+          border-bottom-color: rgb(56, 189, 248);
           text-shadow:
-            0 0 12px rgba(34, 211, 238, 0.22),
-            0 0 20px rgba(245, 158, 11, 0.1);
+            0 0 12px rgba(56, 189, 248, 0.26),
+            0 0 22px rgba(14, 165, 233, 0.16);
         }
 
         .vb-date-active::before {
           opacity: 1;
           transform: translateY(0);
+          border: 1px solid rgba(56, 189, 248, 0.48);
           background:
             radial-gradient(
-              circle at 50% 12%,
-              rgba(34, 211, 238, 0.27),
+              circle at 50% 18%,
+              rgba(56, 189, 248, 0.28),
               transparent 58%
-            ),
-            radial-gradient(
-              circle at 50% 100%,
-              rgba(245, 158, 11, 0.13),
-              transparent 55%
             ),
             linear-gradient(
               180deg,
-              rgba(255, 255, 255, 0.08),
-              rgba(255, 255, 255, 0.014)
+              rgba(14, 165, 233, 0.18),
+              rgba(8, 47, 73, 0.16)
             );
           box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.055),
-            0 0 22px rgba(34, 211, 238, 0.1);
+            inset 0 1px 0 rgba(255, 255, 255, 0.13),
+            0 0 24px rgba(56, 189, 248, 0.18),
+            0 0 42px rgba(14, 165, 233, 0.1);
         }
 
         .vb-date-active::after {
           content: "";
           position: absolute;
-          left: 16px;
-          right: 16px;
+          left: 13px;
+          right: 13px;
           bottom: 0;
           height: 3px;
           border-radius: 999px;
           background:
             linear-gradient(
               90deg,
-              rgba(245, 158, 11, 0),
-              rgba(245, 158, 11, 0.95),
-              rgba(34, 211, 238, 1),
-              rgba(245, 158, 11, 0.95),
-              rgba(245, 158, 11, 0)
+              rgba(56, 189, 248, 0),
+              rgba(56, 189, 248, 0.95),
+              rgba(125, 211, 252, 1),
+              rgba(56, 189, 248, 0.95),
+              rgba(56, 189, 248, 0)
             );
           box-shadow:
-            0 0 14px rgba(34, 211, 238, 0.52),
-            0 0 20px rgba(245, 158, 11, 0.22);
+            0 0 16px rgba(56, 189, 248, 0.58),
+            0 0 26px rgba(14, 165, 233, 0.22);
         }
 
         .vb-date-idle:hover {
-          border-bottom-color: rgba(245, 158, 11, 0.42);
+          border-bottom-color: rgba(56, 189, 248, 0.38);
         }
 
         .vb-date-muted::before {
           background:
             linear-gradient(
               180deg,
-              rgba(255, 255, 255, 0.025),
+              rgba(255, 255, 255, 0.024),
               rgba(255, 255, 255, 0.006)
             );
         }
 
         .vb-date-muted:hover {
-          border-bottom-color: rgba(115, 115, 115, 0.4);
+          border-bottom-color: rgba(51, 65, 85, 0.7);
         }
 
         @media (min-width: 640px) {
           .vb-date-item {
-            width: 108px;
-            min-width: 108px;
-            max-width: 108px;
-            height: 108px;
+            flex-basis: 66px;
+            min-width: 66px;
+          }
+        }
+
+        @media (min-width: 1280px) {
+          .vb-date-item {
+            flex-basis: 68px;
+            min-width: 68px;
           }
         }
 
