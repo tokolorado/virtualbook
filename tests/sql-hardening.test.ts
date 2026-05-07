@@ -2,11 +2,6 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-const snapshot = fs.readFileSync(
-  "supabase/functions/public_function_definitions_20260427.sql",
-  "utf8"
-);
-
 const migration = fs.readFileSync(
   "supabase/migrations/20260427_harden_upsert_match_result_search_path.sql",
   "utf8"
@@ -42,10 +37,19 @@ const internalFallbackBettingMigration = fs.readFileSync(
   "utf8"
 );
 
-test("production function snapshot documents every inspected public function", () => {
-  const functionHeaders = snapshot.match(/^-- Function:/gm) ?? [];
+test("SQL hardening checks use versioned migrations as the source of truth", () => {
+  const migrationFiles = fs
+    .readdirSync("supabase/migrations")
+    .filter((file) => file.endsWith(".sql"));
 
-  assert.equal(functionHeaders.length, 11);
+  for (const file of [
+    "20260427_harden_upsert_match_result_search_path.sql",
+    "20260427_harden_function_execute_privileges.sql",
+    "20260505_harden_bsd_betting_odds.sql",
+    "20260506_allow_internal_model_fallback_bets.sql",
+  ]) {
+    assert.ok(migrationFiles.includes(file));
+  }
 });
 
 test("upsert_match_result hardening migration pins both overload search paths", () => {

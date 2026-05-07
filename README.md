@@ -1,58 +1,58 @@
 # VirtualBook
 
-VirtualBook to aplikacja bukmacherska bez prawdziwych pieniędzy, zbudowana na Next.js i Supabase. Projekt służy do przeglądania meczów piłkarskich, kursów, analiz, kuponów i wirtualnego salda VB.
+VirtualBook to aplikacja bukmacherska bez prawdziwych pieniędzy, z wirtualnym saldem VB. Projekt działa na Next.js App Router, React, TypeScript i Supabase. Głównym źródłem meczów, kursów, statusów, danych live i informacji meczowych jest BSD / Bzzoiro Sports.
 
-Aktualnym źródłem danych meczowych, kursów i statusów jest BSD / Bzzoiro Sports. Starsze źródła typu `football-data` są wyłączone i nie powinny wracać jako źródło prawdy.
+Stan dokumentacji: 2026-05-07.
 
-## Najważniejsze Zasady
+## Zasady Produktowe
 
-- Mecze publicznie używane przez aplikację pochodzą z BSD: `matches.source = 'bsd'`.
-- Publiczne kursy bukmacherskie mogą być pokazywane tylko z `odds.source = 'bsd'` i `odds.pricing_method = 'bsd_market_normalized'`.
-- Aplikacja nie może udawać kursów realnego bukmachera, jeżeli BSD ich nie zwróciło.
-- Dla meczu bez realnych kursów UI pokazuje: `Jeszcze nie ma kursów dla tego meczu.`
-- `bsd_model_derived` jest wyłączone i nie powinno wracać.
-- Przyszły fallback modelowy musi być jawnie oznaczony osobną metodą, np. `internal_model_fallback`, i nie może być traktowany jako kurs BSD.
+- Mecze publiczne pochodzą z BSD: `matches.source = 'bsd'`.
+- Realne kursy BSD są zapisywane i pokazywane wyłącznie jako `source = 'bsd'` oraz `pricing_method = 'bsd_market_normalized'`.
+- Stary fallback `bsd_model_derived` jest wyłączony i nie wolno go przywracać.
+- Brak kursów jest poprawnym stanem produktu. UI pokazuje wtedy: `Jeszcze nie ma kursów dla tego meczu.`
+- Wewnętrzny fallback modelowy może istnieć tylko jako osobne, jawne źródło: `source = 'internal_model'` i `pricing_method = 'internal_model_fallback'`.
+- Model nie nadpisuje realnych kursów BSD i musi zostawiać ślad w `internal_odds_model_runs`.
+- Kupony, portfel VB, ledger i settlement muszą pozostać idempotentne.
 
 ## Stack
 
 - Next.js App Router
-- React
+- React 19
 - TypeScript
-- Tailwind CSS v4
-- Supabase Auth
-- Supabase Postgres
-- Supabase RPC / funkcje SQL
-- BSD / Bzzoiro Sports API
-- SofaScore jako dodatkowe źródło mapowania i match center, gdy mapping jest dostępny
+- Tailwind CSS 4
+- Supabase Auth, Postgres i RPC
+- BSD / Bzzoiro Sports API v2 oraz WebSocket jako kierunek realtime
+- SofaScore jako dodatkowe źródło mapowania i match center, gdy mapping istnieje
 
 ## Główne Funkcje
 
-- lista wydarzeń z kalendarzem dni meczowych,
-- szczegóły meczu i match center,
-- kursy 1X2 oraz wybrane rynki dodatkowe,
-- kupon standardowy,
+- lista meczów z kalendarzem dni meczowych,
+- szczegóły meczu, kursy i rynki,
+- match center z informacjami, składami, statystykami, tabelą i H2H,
+- obsługa meczów live z priorytetem dla danych live,
+- standardowy kupon AKO,
 - Bet Builder dla jednego meczu,
 - historia kuponów,
-- wirtualny portfel VB i ledger,
-- ranking, misje i profile użytkowników,
+- wirtualne saldo VB i ledger,
+- ranking, quizy, misje i grupy,
 - panel admina,
-- crony synchronizacji BSD, predykcji, mapowania i rozliczeń,
-- AI prediction / insights dla kwalifikujących się meczów.
+- synchronizacja BSD, predykcji, kursów, ikon, mapowania i settlementu.
 
-## Struktura Projektu
+## Struktura Repozytorium
 
-- `app/` - routing, strony i API routes.
-- `components/` - komponenty UI.
-- `lib/` - logika domenowa, Supabase, auth, odds, formatowanie.
+- `app/` - strony, layouty i API routes.
+- `components/` - współdzielone komponenty UI.
+- `lib/` - logika domenowa, Supabase, BSD, kursy, kupony i formatowanie.
 - `scripts/` - lokalne narzędzia i workery.
-- `supabase/` - migracje SQL i snapshoty funkcji.
-- `tests/` - testy Node/TypeScript.
-- `public/` - statyczne assety.
+- `supabase/migrations/` - źródło prawdy dla zmian SQL.
+- `tests/` - testy TypeScript/Node.
+- `docs/` - runbooki i plany rozwoju.
+- `public/` - statyczne assety aplikacji.
 
 ## Najważniejsze Ścieżki UI
 
-- `/events` - lista meczów, kalendarz i kursy.
-- `/events/[matchId]` - szczegóły meczu, rynki, informacje, porównanie i insighty.
+- `/events` - oferta meczów, kalendarz, filtry, kursy i kupon.
+- `/events/[matchId]` - karta meczu, rynki, match center i szczegóły.
 - `/bets` - historia kuponów.
 - `/wallet` - saldo VB i ledger.
 - `/account` - konto użytkownika.
@@ -62,93 +62,85 @@ Aktualnym źródłem danych meczowych, kursów i statusów jest BSD / Bzzoiro Sp
 
 ## Najważniejsze Endpointy
 
-### Publiczne / Użytkownika
+Publiczne i użytkownika:
 
-- `GET /api/events` - mecze z bazy, tylko BSD.
-- `GET /api/events-enabled-dates` - dni z meczami BSD.
-- `POST /api/bets` - zapis kuponu standardowego lub Bet Buildera.
-- `GET /api/match-center/info` - informacje meczowe z BSD/raw snapshotów.
-- `GET /api/match-center/comparison` - porównanie drużyn, forma i statystyki.
-- `GET /api/predictions/bsd/match-insights` - zapisane insighty dla meczu.
+- `GET /api/events` - mecze z bazy/cache, bez ciężkiego fetcha BSD przy wejściu użytkownika.
+- `GET /api/events-enabled-dates` - daty z meczami z bazy.
+- `POST /api/bets` - zapis kuponu AKO albo Bet Buildera.
+- `GET /api/match-center/info` - informacje meczowe z `matches`, `raw_bsd` i snapshotów.
+- `GET /api/match-center/comparison` - porównanie drużyn.
+- `GET /api/predictions/bsd/match-insights` - zapisane insighty i predykcje.
 
-### BSD / Admin
+BSD, admin i crony:
 
-- `GET /api/admin/bsd/leagues/sync` - synchronizacja lig BSD i mapowania do `competitions`.
-- `GET /api/admin/bsd/matches/sync?date=YYYY-MM-DD` - synchronizacja meczów, wyników, snapshotów i realnych kursów BSD.
-- `GET /api/admin/bsd/debug/events` - diagnostyka eventów BSD.
+- `GET /api/admin/bsd/leagues/sync` - synchronizacja lig BSD i ikon lig.
+- `GET /api/admin/bsd/matches/sync?date=YYYY-MM-DD` - synchronizacja meczów, wyników, snapshotów i kursów BSD.
+- `POST /api/odds/sync` - horyzontowa synchronizacja kursów BSD.
+- `POST /api/admin/odds/purge-future` - kontrolowane czyszczenie przyszłych kursów modelowych do testów.
+- `GET /api/admin/internal-odds/fallback/sync` - bezpieczny fallback modelowy dla kwalifikujących się meczów bez kursów BSD.
 - `GET /api/admin/sync-runner` - główny runner administracyjny.
-- `GET /api/admin/internal-odds/fallback/sync` - eksperymentalny zapis jawnych kursów modelowych `internal_model_fallback` dla meczów bez BSD odds.
+- `GET /api/cron/sync-runner` - wrapper cronowy.
+- `GET /api/cron/settle` - settlement kuponów.
 
-### Cron
+Starsze endpointy po legacy providerach są blokowane albo wygaszane. Nie powinny wracać jako źródło danych publicznych.
 
-- `GET /api/cron/sync-runner` - cronowy wrapper sync runnera.
-- `GET /api/cron/sync-bsd-predictions` - automatyzacja predykcji BSD dla meczów z realnymi kursami.
-- `GET /api/cron/settle` - rozliczanie kuponów.
-- `GET /api/cron/enqueue-match-mapping` - kolejka mapowania SofaScore.
-- `GET /api/cron/process-match-mapping` - przetwarzanie kolejki mapowania.
-- `GET /api/cron/import-match-center-batch` - import danych match center dla zmapowanych meczów.
+## Flow Danych
 
-Niektóre stare endpointy istnieją tylko jako świadome blokady i zwracają `410 Gone`, np. `/api/matches`, `/api/fixtures`, `/api/results/sync`, `/api/standings`.
+1. Cron albo admin sync pobiera mecze BSD.
+2. Endpoint BSD sync filtruje lokalnie aktywne ligi z `provider_leagues`.
+3. Dane są zapisywane w `matches`, `match_pricing_features`, `bsd_event_features` i `match_results`.
+4. Kursy realne są pobierane z BSD v2 i zapisywane w `odds` jako `bsd_market_normalized`.
+5. Frontend czyta bazę przez `/api/events` i endpointy match center.
+6. Jeżeli BSD nie ma kursów, aplikacja może pokazać brak kursów albo, po spełnieniu guardów, jawne kursy `internal_model_fallback`.
+7. Kupon przechodzi walidację w UI, API i SQL.
 
-## Dane I Kursy
+Klikanie po kalendarzu nie powinno wywoływać ciężkich fetchy do BSD. Daty i mecze mają pochodzić z bazy/cache.
 
-Podstawowy flow danych:
+## Kluczowe Tabele
 
-1. Cron lub admin uruchamia synchronizację BSD.
-2. Dane są zapisywane w Supabase.
-3. Frontend czyta bazę przez `/api/events` i endpointy match center.
-4. Klikanie po kalendarzu nie powinno robić ciężkich fetchy do BSD.
+- `matches` - mecze BSD, statusy, `raw_bsd`, identyfikatory providera.
+- `odds` - realne kursy BSD i jawnie oznaczone kursy modelowe.
+- `provider_leagues` - aktywne ligi providera BSD.
+- `icons_leagues` - ikony lig z bazy.
+- `icons_teams` - ikony drużyn z bazy.
+- `match_pricing_features` - read model pricingowy meczu.
+- `bsd_event_features` - cechy eventu BSD, xG, prawdopodobieństwa i live stats.
+- `team_stat_snapshots` - statystyki drużynowe pod fallback i porównania.
+- `event_predictions` - predykcje i insighty.
+- `internal_odds_model_runs` - audyt uruchomień modelu fallback.
+- `bsd_realtime_frames` - surowe ramki WebSocket BSD do audytu realtime.
 
-Ważne tabele:
+## Kursy I Kupony
 
-- `matches` - mecze, statusy, źródło BSD i `raw_bsd`.
-- `odds` - kursy i metadane pricingu.
-- `provider_leagues` - aktywne ligi providera.
-- `competitions` - dane lig używane w UI, w tym ikony.
-- `match_pricing_features` - snapshoty cech pricingowych.
-- `bsd_event_features` - snapshoty cech eventów BSD.
-- `event_predictions` - zapisane predykcje/insighty.
-- `team_stat_snapshots` - fundament pod statystyki drużynowe.
-- `internal_odds_model_runs` - log uruchomień fallback odds modelu.
+Realne kursy BSD mają pierwszeństwo. Model fallback:
 
-## Reguły Zakładów
+- działa tylko, gdy BSD nie podało rynku albo nie podało kursów,
+- wymaga wystarczających danych wejściowych,
+- zapisuje osobne źródło i metodę pricingu,
+- nie może generować identycznych placeholderów dla różnych meczów,
+- musi przejść walidację zakresu kursów, prawdopodobieństw i audytu wejścia.
 
-Warstwa aplikacji i funkcje SQL w bazie wymagają realnych kursów BSD:
+Szczegóły kuponów i Bet Buildera są w [docs/betting-and-odds.md](docs/betting-and-odds.md).
 
-```sql
-source = 'bsd'
-pricing_method = 'bsd_market_normalized'
-coalesce(is_model, false) = false
-```
+## Realtime BSD
 
-Funkcje `place_bet` i `place_bet_builder` dodatkowo wymagają, aby mecz pochodził z BSD. To zabezpieczenie jest celowo zdublowane: UI daje dobry komunikat użytkownikowi, API waliduje payload, a SQL jest ostatnią granicą przed zapisem kuponu.
+BSD ogłosiło v2, ruchy kursów co minutę oraz pełniejsze live stats na WebSocket. Obecny bezpieczny kierunek:
 
-## Predykcje AI
+- synchronizacja REST v2 pozostaje podstawą produkcji,
+- hot sync powinien odświeżać najbliższy horyzont częściej niż długi horyzont,
+- worker WebSocket zapisuje surowe ramki do audytu,
+- mapowanie ramek `odds` i `odds_book` na publiczne kursy wymaga stabilnego parsera i walidacji.
 
-Predykcje BSD są automatyzowane przez:
+Plan: [docs/bsd-v2-realtime-plan.md](docs/bsd-v2-realtime-plan.md).
 
-- `GET /api/predictions/bsd/sync`
-- `GET /api/cron/sync-bsd-predictions`
+## Ikony
 
-Kwalifikacja meczu:
+Ikony lig i drużyn powinny pochodzić z bazy, nie z ręcznego mapowania w komponencie:
 
-- `matches.source = 'bsd'`,
-- mecz ma realne kursy `bsd_market_normalized`,
-- BSD udostępnia predykcję lub dane wystarczające do zmapowania,
-- rekord `event_predictions` nie istnieje albo wymaga odświeżenia.
+- ligi: `icons_leagues`,
+- drużyny: `icons_teams`.
 
-## Match Center
-
-Match center zbiera dane z kilku źródeł:
-
-- `matches` i `raw_bsd`,
-- `bsd_event_features`,
-- `event_predictions`,
-- dane SofaScore, jeśli istnieje mapping.
-
-Zakładka informacji meczowych pokazuje m.in. stadion, lokalizację, sędziego, trenerów, rundę, sezon, pogodę i identyfikatory BSD, o ile dane są dostępne.
-
-Zakładka porównania pokazuje ostatnie mecze, formę, gole, trendy BTTS/over, ratingi i krótkie summary.
+BSD jest preferowanym źródłem ikon, jeżeli dostarcza stabilny URL w danych ligi, drużyny albo `raw_bsd`. Stare pola `fallback_provider` i `fallback_code` po `football-data` nie powinny być używane jako logika publiczna.
 
 ## Uruchomienie Lokalnie
 
@@ -157,39 +149,22 @@ npm install
 npm run dev
 ```
 
-Aplikacja lokalnie działa zwykle pod:
+Aplikacja lokalnie działa zwykle pod `http://localhost:3000`.
 
-```text
-http://localhost:3000
-```
-
-Testy:
+Przydatne komendy:
 
 ```bash
+npm run lint
 npm test
-```
-
-Build produkcyjny:
-
-```bash
 npm run build
-```
-
-Lokalny cron:
-
-```bash
 npm run cron:local
-```
-
-Worker mapowania SofaScore:
-
-```bash
 npm run sofascore:worker
+npm run bsd:realtime
 ```
 
 ## Zmienne Środowiskowe
 
-Minimalny zestaw do pracy lokalnej:
+Minimalny zestaw:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
@@ -201,40 +176,22 @@ CRON_SECRET=
 CRON_BASE_URL=http://localhost:3000
 ```
 
-Opcjonalnie używane są też:
+Realtime BSD:
 
 ```env
-NEXT_PUBLIC_BASE_URL=
-NEXT_PUBLIC_SITE_URL=
-SITE_URL=
-APP_URL=
-VERCEL_URL=
-PREFETCH_SECRET=
-CRON_INTERVAL_MS=
-CRON_RANGE_EVERY_N_TICKS=
-CRON_STALE_LIMIT=
-CRON_RANGE_LIMIT=
-CRON_RANGE_DAYS_BACK=
-SETTLE_BATCH_LIMIT=
-SETTLE_BET_BACKFILL_LIMIT=
-MAPPING_WORKER_ID=
-MAPPING_BATCH_SIZE=
-MAPPING_MAX_ATTEMPTS=
-MAPPING_MIN_CONFIDENCE=
+BSD_REALTIME_WS_URL=
+BSD_REALTIME_TOKEN=
+BSD_REALTIME_POLL_MS=
+BSD_REALTIME_MAX_EVENTS=
 ```
 
-Nie commituj `.env.local`. `SUPABASE_SERVICE_ROLE_KEY`, `BSD_API_KEY` i `CRON_SECRET` nie mogą trafić do klienta.
+Nie commituj `.env.local`. Sekrety `SUPABASE_SERVICE_ROLE_KEY`, `BSD_API_KEY`, `BSD_REALTIME_TOKEN` i `CRON_SECRET` nie mogą trafić do klienta.
 
 ## Migracje SQL
 
-Migracje w `supabase/migrations/` są częścią kontraktu produkcyjnego. Szczególnie ważne:
+Migracje w `supabase/migrations/` są źródłem prawdy dla zmian produkcyjnych. Snapshoty eksportowane z Supabase nie są już trzymane w repo.
 
-- migracje hardeningowe funkcji SQL,
-- migracje tabel BSD i predykcji,
-- migracje idempotentnego rozliczania kuponów,
-- migracje misji, ledgera i publicznego udostępniania kuponów.
-
-Po zmianie funkcji `SECURITY DEFINER` warto sprawdzić definicje:
+Po zmianie funkcji `SECURITY DEFINER` sprawdź definicję w produkcji:
 
 ```sql
 select
@@ -246,20 +203,21 @@ where n.nspname = 'public'
   and p.proname in ('place_bet', 'place_bet_builder');
 ```
 
-## Konwencje Operacyjne
+## Operacyjne Checklisty
 
-1. Endpointy cronowe nie są wywoływane bezpośrednio z klienta.
-2. Admin UI używa endpointów adminowych, a backend dopiero wtedy wywołuje chronione flow.
-3. Ledger VB jest źródłem prawdy dla salda.
-4. Rozliczanie kuponów musi być idempotentne.
-5. Brak kursów jest poprawnym stanem produktu, nie błędem do maskowania.
-6. Każdy modelowy fallback kursów musi być jawnie oznaczony i oddzielony od realnych kursów BSD.
+- Po zmianach kursów uruchom lint/build.
+- Przed testem fallbacku można wyczyścić przyszłe `internal_model_fallback`, ale nie usuwać realnych kursów BSD bez wyraźnego powodu.
+- Po deployu sprawdź `/api/odds/sync` dla horyzontu dni z meczami.
+- Sprawdź, czy `/api/events` pokazuje realne BSD odds albo czytelny brak kursów.
+- Sprawdź, czy model fallback nie generuje identycznego rozkładu dla wielu meczów.
+- Sprawdź `internal_odds_model_runs` po każdej zmianie modelu.
 
-## Znane Kierunki Rozwoju
+## Kierunki Rozwoju
 
-- rozbudowa `team_stat_snapshots` i danych drużynowych,
-- jakościowy fallback odds model oparty o statystyki, a nie placeholdery,
-- bogatszy head-to-head i porównanie drużyn,
-- dalsze wzbogacanie match center o dane BSD,
-- stabilniejsze pobieranie danych SofaScore tam, gdzie pojawia się `403`,
-- porządkowanie starszego długu ESLint.
+- dopracowanie parsera BSD WebSocket `odds`, `odds_book` i `event`,
+- automatyczne zasilanie `icons_leagues` i `icons_teams` z BSD,
+- rozbudowa `team_stat_snapshots`,
+- lepszy model fallback odds oparty o dane drużynowe, xG, formę, absencje i venue,
+- bogatsze porównanie drużyn i H2H,
+- pełniejsze match center live,
+- bezpieczna gamifikacja: streak, misje, quizy, sklep VB i koło nagród jako osobny etap.

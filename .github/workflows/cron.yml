@@ -3,7 +3,6 @@ name: VirtualBook Cron
 on:
   schedule:
     - cron: "*/5 * * * *"
-    - cron: "*/15 * * * *"
     - cron: "*/20 * * * *"
   workflow_dispatch:
 
@@ -25,3 +24,19 @@ jobs:
         run: |
           curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/cron/settle" \
             -H "x-cron-secret: ${{ secrets.CRON_SECRET }}"
+
+      - name: Call hot BSD odds sync
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *'
+        run: |
+          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/odds/sync" \
+            -H "content-type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            --data '{"days":7,"stopOnError":false,"tz":"Europe/Warsaw"}'
+
+      - name: Call horizon BSD odds sync
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/20 * * * *'
+        run: |
+          curl -fsS -X POST "${{ secrets.CRON_BASE_URL }}/api/odds/sync" \
+            -H "content-type: application/json" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            --data '{"days":21,"stopOnError":false,"tz":"Europe/Warsaw"}'

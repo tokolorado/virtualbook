@@ -14,6 +14,14 @@ const BETTING_CLOSE_BUFFER_MS = 60_000;
 
 // statusy meczów, które traktujemy jako jeszcze nie zakończone
 const OPEN_STATUSES = ["SCHEDULED", "TIMED", "IN_PLAY", "PAUSED"] as const;
+const REAL_BSD_ODDS_SOURCE = "bsd";
+const REAL_BSD_ODDS_PRICING_METHOD = "bsd_market_normalized";
+const ODDS_WATCH_DEFAULT_HORIZON_DAYS = 7;
+const ODDS_WATCH_MAX_HORIZON_DAYS = 14;
+const ODDS_WATCH_DEFAULT_MAX_DATES = 8;
+const ODDS_WATCH_HARD_MAX_DATES = 10;
+const ODDS_WATCH_FRESHNESS_MINUTES = 10;
+const WARSAW_TIME_ZONE = "Europe/Warsaw";
 
 type RunnerBody = {
   // start cursor jeśli chcesz wymusić (YYYY-MM-DD)
@@ -31,6 +39,22 @@ type RunnerBody = {
   homeAdv?: number;
   drawBoost?: number;
   margin?: number;
+
+  // High-frequency real BSD odds watch. Keeps newly published provider odds fresh.
+  oddsWatchHorizonDays?: number;
+  oddsWatchMaxDates?: number;
+};
+
+type OddsWatchPlan = {
+  horizonDays: number;
+  maxDates: number;
+  freshnessMinutes: number;
+  candidateMatches: number;
+  missingMatches: number;
+  staleMatches: number;
+  dates: string[];
+  skippedDates: number;
+  error: string | null;
 };
 
 function isYYYYMMDD(s: unknown): s is string {
@@ -46,6 +70,33 @@ function plusDaysISODate(dateYYYYMMDD: string, days: number) {
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + days);
   return dt.toISOString().slice(0, 10);
+}
+
+function clampPositiveInt(value: unknown, fallback: number, max: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(1, Math.floor(n)));
+}
+
+function dateInTimeZoneYYYYMMDD(
+  value: string | Date,
+  timeZone = WARSAW_TIME_ZONE
+) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+
+  return year && month && day ? `${year}-${month}-${day}` : null;
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -90,6 +141,144 @@ async function closeBettingForStartedMatches(
     cutoffIso,
     closed,
     error: null as string | null,
+  };
+}
+
+async function buildOddsWatchPlan(
+  sb: ReturnType<typeof supabaseAdmin>,
+  args: {
+    nowIso: string;
+    maxAheadDays: number;
+    horizonDays: number;
+    maxDates: number;
+  }
+): Promise<OddsWatchPlan> {
+  const nowMs = Date.parse(args.nowIso);
+  const horizonDays = Math.min(args.maxAheadDays, args.horizonDays);
+  const horizonEndIso = new Date(
+    nowMs + horizonDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+  const staleBeforeMs =
+    nowMs - ODDS_WATCH_FRESHNESS_MINUTES * 60 * 1000;
+
+  const { data: upcomingMatches, error: matchesError } = await sb
+    .from("matches")
+    .select("id, utc_date")
+    .eq("source", "bsd")
+    .in("status", OPEN_STATUSES as unknown as string[])
+    .gte("utc_date", args.nowIso)
+    .lte("utc_date", horizonEndIso)
+    .order("utc_date", { ascending: true })
+    .limit(800);
+
+  if (matchesError) {
+    return {
+      horizonDays,
+      maxDates: args.maxDates,
+      freshnessMinutes: ODDS_WATCH_FRESHNESS_MINUTES,
+      candidateMatches: 0,
+      missingMatches: 0,
+      staleMatches: 0,
+      dates: [],
+      skippedDates: 0,
+      error: matchesError.message,
+    };
+  }
+
+  const matches = (upcomingMatches ?? []) as Array<{
+    id: number | string | null;
+    utc_date: string | null;
+  }>;
+
+  const matchIds = matches
+    .map((match) => Number(match.id))
+    .filter((id) => Number.isFinite(id));
+
+  if (!matchIds.length) {
+    return {
+      horizonDays,
+      maxDates: args.maxDates,
+      freshnessMinutes: ODDS_WATCH_FRESHNESS_MINUTES,
+      candidateMatches: 0,
+      missingMatches: 0,
+      staleMatches: 0,
+      dates: [],
+      skippedDates: 0,
+      error: null,
+    };
+  }
+
+  const { data: oddsRows, error: oddsError } = await sb
+    .from("odds")
+    .select("match_id, updated_at")
+    .eq("source", REAL_BSD_ODDS_SOURCE)
+    .eq("pricing_method", REAL_BSD_ODDS_PRICING_METHOD)
+    .in("match_id", matchIds)
+    .limit(5000);
+
+  if (oddsError) {
+    return {
+      horizonDays,
+      maxDates: args.maxDates,
+      freshnessMinutes: ODDS_WATCH_FRESHNESS_MINUTES,
+      candidateMatches: matches.length,
+      missingMatches: 0,
+      staleMatches: 0,
+      dates: [],
+      skippedDates: 0,
+      error: oddsError.message,
+    };
+  }
+
+  const latestOddsByMatch = new Map<number, number>();
+
+  for (const row of (oddsRows ?? []) as Array<{
+    match_id: number | string | null;
+    updated_at: string | null;
+  }>) {
+    const matchId = Number(row.match_id);
+    const updatedAtMs = Date.parse(String(row.updated_at ?? ""));
+    if (!Number.isFinite(matchId) || !Number.isFinite(updatedAtMs)) continue;
+    latestOddsByMatch.set(
+      matchId,
+      Math.max(latestOddsByMatch.get(matchId) ?? 0, updatedAtMs)
+    );
+  }
+
+  const dates = new Set<string>();
+  let missingMatches = 0;
+  let staleMatches = 0;
+
+  for (const match of matches) {
+    const matchId = Number(match.id);
+    if (!Number.isFinite(matchId) || !match.utc_date) continue;
+
+    const latestOddsAtMs = latestOddsByMatch.get(matchId);
+    const missing = latestOddsAtMs === undefined;
+    const stale =
+      latestOddsAtMs !== undefined && latestOddsAtMs < staleBeforeMs;
+
+    if (!missing && !stale) continue;
+
+    if (missing) missingMatches += 1;
+    if (stale) staleMatches += 1;
+
+    const localDate = dateInTimeZoneYYYYMMDD(match.utc_date);
+    if (localDate) dates.add(localDate);
+  }
+
+  const allDates = Array.from(dates);
+
+  return {
+    horizonDays,
+    maxDates: args.maxDates,
+    freshnessMinutes: ODDS_WATCH_FRESHNESS_MINUTES,
+    candidateMatches: matches.length,
+    missingMatches,
+    staleMatches,
+    dates: allDates.slice(0, args.maxDates),
+    skippedDates: Math.max(0, allDates.length - args.maxDates),
+    error: null,
   };
 }
 
@@ -357,6 +546,8 @@ export async function POST(req: Request) {
     let fallbackPricedMatches = 0;
     let fallbackOddsRows = 0;
     let fallbackSkipped = 0;
+    let oddsWatchPlanSummary: OddsWatchPlan | null = null;
+    const oddsWatchRefreshedDates: string[] = [];
     let bsdOddsApiAttempted = 0;
     let bsdOddsApiSucceeded = 0;
     let bsdOddsApiFailed = 0;
@@ -367,15 +558,34 @@ export async function POST(req: Request) {
     const warnings: string[] = [];
 
     try {
-      let todayBsdRefreshRes: Awaited<ReturnType<typeof callBsdMatchesSync>> | null =
-        null;
+      type BsdMatchesSyncResult = Awaited<ReturnType<typeof callBsdMatchesSync>>;
+
+      const bsdRefreshes: Array<{
+        date: string;
+        reason: "today_hot_refresh" | "odds_watch" | "cursor";
+        result: BsdMatchesSyncResult;
+      }> = [];
+
+      const refreshBsdDate = async (
+        date: string,
+        reason: "today_hot_refresh" | "odds_watch" | "cursor"
+      ) => {
+        const existing = bsdRefreshes.find((item) => item.date === date);
+        if (existing) return existing.result;
+
+        const result = await callBsdMatchesSync({ date });
+        bsdRefreshes.push({ date, reason, result });
+        return result;
+      };
+
+      let todayBsdRefreshRes: BsdMatchesSyncResult | null = null;
       let todayFallbackOddsRes:
         | Awaited<ReturnType<typeof callInternalFallbackOddsSync>>
         | null = null;
 
       if (cursorDate !== today) {
         try {
-          todayBsdRefreshRes = await callBsdMatchesSync({ date: today });
+          todayBsdRefreshRes = await refreshBsdDate(today, "today_hot_refresh");
         } catch (e: unknown) {
           warnings.push(`today_bsd_refresh: ${errorMessage(e, "failed")}`);
         }
@@ -387,7 +597,42 @@ export async function POST(req: Request) {
         }
       }
 
-      const bsdRes = await callBsdMatchesSync({ date: cursorDate });
+      const oddsWatchHorizonDays = clampPositiveInt(
+        body.oddsWatchHorizonDays,
+        ODDS_WATCH_DEFAULT_HORIZON_DAYS,
+        ODDS_WATCH_MAX_HORIZON_DAYS
+      );
+      const oddsWatchMaxDates = clampPositiveInt(
+        body.oddsWatchMaxDates,
+        ODDS_WATCH_DEFAULT_MAX_DATES,
+        ODDS_WATCH_HARD_MAX_DATES
+      );
+
+      try {
+        oddsWatchPlanSummary = await buildOddsWatchPlan(sb, {
+          nowIso,
+          maxAheadDays: maxAhead,
+          horizonDays: oddsWatchHorizonDays,
+          maxDates: oddsWatchMaxDates,
+        });
+
+        if (oddsWatchPlanSummary.error) {
+          warnings.push(`odds_watch_plan: ${oddsWatchPlanSummary.error}`);
+        }
+
+        for (const date of oddsWatchPlanSummary.dates) {
+          try {
+            await refreshBsdDate(date, "odds_watch");
+            oddsWatchRefreshedDates.push(date);
+          } catch (e: unknown) {
+            warnings.push(`odds_watch:${date}: ${errorMessage(e, "failed")}`);
+          }
+        }
+      } catch (e: unknown) {
+        warnings.push(`odds_watch_plan: ${errorMessage(e, "failed")}`);
+      }
+
+      const bsdRes = await refreshBsdDate(cursorDate, "cursor");
       const teamStatsRes = await callTeamStatsBackfill({
         snapshotDate: today,
         throughDate: lastAllowed,
@@ -421,27 +666,25 @@ export async function POST(req: Request) {
       stepOk = true;
       message = warnings.length ? warnings.join(" | ") : null;
 
-      matchesUpserted =
-        (Number(todayBsdRefreshRes?.upsertedMatchesCount ?? 0) || 0) +
-        (Number(bsdRes?.upsertedMatchesCount ?? 0) || 0);
-      oddsUpserted =
-        (Number(todayBsdRefreshRes?.upsertedOddsCount ?? 0) || 0) +
-        (Number(bsdRes?.upsertedOddsCount ?? 0) || 0);
-      bsdOddsApiAttempted =
-        (Number(todayBsdRefreshRes?.bsdOddsApi?.attempted ?? 0) || 0) +
-        (Number(bsdRes?.bsdOddsApi?.attempted ?? 0) || 0);
-      bsdOddsApiSucceeded =
-        (Number(todayBsdRefreshRes?.bsdOddsApi?.succeeded ?? 0) || 0) +
-        (Number(bsdRes?.bsdOddsApi?.succeeded ?? 0) || 0);
-      bsdOddsApiFailed =
-        (Number(todayBsdRefreshRes?.bsdOddsApi?.failed ?? 0) || 0) +
-        (Number(bsdRes?.bsdOddsApi?.failed ?? 0) || 0);
-      bsdOddsApiSourceRows =
-        (Number(todayBsdRefreshRes?.bsdOddsApi?.sourceRows ?? 0) || 0) +
-        (Number(bsdRes?.bsdOddsApi?.sourceRows ?? 0) || 0);
-      bsdOddsApiInputs =
-        (Number(todayBsdRefreshRes?.bsdOddsApi?.inputs ?? 0) || 0) +
-        (Number(bsdRes?.bsdOddsApi?.inputs ?? 0) || 0);
+      const sumBsdNumber = (selector: (result: BsdMatchesSyncResult) => unknown) =>
+        bsdRefreshes.reduce(
+          (sum, item) => sum + (Number(selector(item.result)) || 0),
+          0
+        );
+
+      matchesUpserted = sumBsdNumber((result) => result?.upsertedMatchesCount);
+      oddsUpserted = sumBsdNumber((result) => result?.upsertedOddsCount);
+      bsdOddsApiAttempted = sumBsdNumber(
+        (result) => result?.bsdOddsApi?.attempted
+      );
+      bsdOddsApiSucceeded = sumBsdNumber(
+        (result) => result?.bsdOddsApi?.succeeded
+      );
+      bsdOddsApiFailed = sumBsdNumber((result) => result?.bsdOddsApi?.failed);
+      bsdOddsApiSourceRows = sumBsdNumber(
+        (result) => result?.bsdOddsApi?.sourceRows
+      );
+      bsdOddsApiInputs = sumBsdNumber((result) => result?.bsdOddsApi?.inputs);
 
       mappingEnqueued = Number(enqueueRes?.enqueued ?? 0) || 0;
       mappingClaimed = Number(processRes?.claimed ?? 0) || 0;
@@ -474,6 +717,18 @@ export async function POST(req: Request) {
         (Number(fallbackOddsRes?.summary?.skipped ?? 0) || 0);
 
       extra = {
+        oddsWatch: {
+          plan: oddsWatchPlanSummary,
+          refreshedDates: oddsWatchRefreshedDates,
+        },
+        bsdRefreshes: bsdRefreshes.map((item) => ({
+          date: item.date,
+          reason: item.reason,
+          upsertedMatchesCount:
+            Number(item.result?.upsertedMatchesCount ?? 0) || 0,
+          upsertedOddsCount: Number(item.result?.upsertedOddsCount ?? 0) || 0,
+          bsdOddsApi: item.result?.bsdOddsApi ?? null,
+        })),
         todayRefresh:
           cursorDate !== today
             ? {
@@ -575,6 +830,20 @@ export async function POST(req: Request) {
         pricedMatches: fallbackPricedMatches,
         oddsRows: fallbackOddsRows,
         skipped: fallbackSkipped,
+      },
+      oddsWatch: {
+        ...(oddsWatchPlanSummary ?? {
+          horizonDays: ODDS_WATCH_DEFAULT_HORIZON_DAYS,
+          maxDates: ODDS_WATCH_DEFAULT_MAX_DATES,
+          freshnessMinutes: ODDS_WATCH_FRESHNESS_MINUTES,
+          candidateMatches: 0,
+          missingMatches: 0,
+          staleMatches: 0,
+          dates: [],
+          skippedDates: 0,
+          error: null,
+        }),
+        refreshedDates: oddsWatchRefreshedDates,
       },
       bsdOddsApi: {
         attempted: bsdOddsApiAttempted,

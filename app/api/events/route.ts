@@ -763,10 +763,39 @@ async function readTeamMap(matches: DbMatchRow[]) {
   if (!teamIds.length) return teamMap;
 
   const sb = supabaseAdmin();
+
+  const { data: iconRows, error: iconError } = await sb
+    .from("icons_teams")
+    .select("provider_team_id, icon_url, short_name")
+    .eq("provider", "bsd")
+    .in("provider_team_id", teamIds);
+
+  if (!iconError) {
+    for (const row of (iconRows ?? []) as Array<{
+      provider_team_id?: number | string | null;
+      icon_url?: string | null;
+      short_name?: string | null;
+    }>) {
+      const id = safeInt(row.provider_team_id);
+      if (id === null) continue;
+
+      teamMap.set(id, {
+        id,
+        crest: cleanString(row.icon_url, "") || null,
+        short_name: cleanString(row.short_name, "") || null,
+      });
+    }
+  }
+
+  if (teamMap.size === teamIds.length) return teamMap;
+
+  const missingTeamIds = teamIds.filter((id) => !teamMap.has(id));
+  if (!missingTeamIds.length) return teamMap;
+
   const { data, error } = await sb
     .from("teams")
     .select("id, crest, short_name")
-    .in("id", teamIds);
+    .in("id", missingTeamIds);
 
   if (error) return teamMap;
 

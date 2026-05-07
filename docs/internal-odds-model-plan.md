@@ -1,16 +1,21 @@
-# Internal odds model - plan rozwoju
+# Internal Odds Model
 
-## Zasady produktowe
+Stan: 2026-05-07.
 
-- Realne kursy BSD pozostają nadrzędne: `source = "bsd"` i `pricing_method = "bsd_market_normalized"`.
-- Model wewnętrzny działa wyłącznie jako fallback i zapisuje kursy jako `source = "internal_model"` oraz `pricing_method = "internal_model_fallback"`.
+Ten dokument opisuje bezpieczny zakres wewnętrznego modelu kursów. Model nie jest zamiennikiem BSD i nie może udawać realnych kursów bukmacherskich.
+
+## Kontrakt Produktowy
+
+- Realne kursy BSD są nadrzędne: `source = 'bsd'`, `pricing_method = 'bsd_market_normalized'`.
+- Stary fallback `bsd_model_derived` nie wraca.
+- Wewnętrzny model zapisuje wyłącznie `source = 'internal_model'` i `pricing_method = 'internal_model_fallback'`.
 - Model nie nadpisuje realnych kursów BSD.
-- Jeżeli dane wejściowe są zbyt słabe, system nie generuje kursów i pokazuje komunikat: "Jeszcze nie ma kursów dla tego meczu."
-- Każde uruchomienie modelu musi zostawić ślad w `internal_odds_model_runs`.
+- Jeżeli dane wejściowe są zbyt słabe, system nie generuje kursów.
+- Każde uruchomienie zostawia audyt w `internal_odds_model_runs`.
 
-## Obecny bezpieczny zakres
+## Obecny Bezpieczny Zakres
 
-Model może liczyć podstawowe rynki:
+Model może liczyć tylko podstawowe rynki:
 
 - 1X2,
 - over/under 1.5,
@@ -18,37 +23,60 @@ Model może liczyć podstawowe rynki:
 - over/under 3.5,
 - BTTS.
 
-Źródła danych wejściowych:
+Źródła danych wejściowych, w kolejności preferencji:
 
-- `team_stat_snapshots` jako preferowana baza drużynowa,
-- `bsd_event_features` jako fallback, gdy snapshoty drużynowe są niedostępne,
-- `match_pricing_features` jako read model meczowy i audytowy.
+- `team_stat_snapshots` - statystyki drużynowe,
+- `bsd_event_features` - cechy wydarzenia BSD,
+- `match_pricing_features` - snapshot pricingowy meczu,
+- realne rynki BSD jako kotwica tylko wtedy, gdy BSD poda część rynków.
 
-Walidacja wyniku:
+## Guardy
 
-- brak `null`, `NaN`, `Infinity`,
-- kurs od 1.01 do 100,
-- logiczna suma prawdopodobieństw w obrębie rynku,
-- brak duplikatów selekcji,
-- brak placeholderowego identycznego rozkładu 1X2.
+Model nie powinien zapisać kursów, jeżeli:
 
-## Docelowe wejścia modelu
+- mecz nie pochodzi z BSD,
+- realne kursy BSD już istnieją dla tego samego rynku,
+- brakuje danych wejściowych dla obu drużyn,
+- wynik zawiera `null`, `NaN`, `Infinity`,
+- kurs jest poza zakresem 1.01-100,
+- suma prawdopodobieństw w rynku jest nielogiczna,
+- rozkład 1X2 wygląda jak stały placeholder,
+- input snapshot nie pozwala odtworzyć decyzji modelu.
 
-- globalny ranking drużyn,
-- statystyki teamowe home/away,
-- xG oraz xGA,
-- forma last 5 i last 10,
-- absencje, kontuzje, zawieszenia i kartki,
-- styl gry oraz trener,
-- venue, neutral ground, local derby,
+## Audyt
+
+Każdy run powinien zapisywać:
+
+- `match_id`,
+- `model_version`,
+- `status`,
+- `confidence`,
+- `lambda_home`,
+- `lambda_away`,
+- `input_snapshot`,
+- `output_snapshot`.
+
+Statusy powinny odróżniać udane wyceny od pominięć, błędów, purga i starszych runów zastąpionych nowszym wynikiem.
+
+## Docelowe Dane
+
+Model docelowo powinien korzystać z:
+
+- globalnego rankingu drużyn,
+- statystyk home/away,
+- xG i xGA,
+- formy last 5 i last 10,
+- absencji, kontuzji, zawieszeń i kartek,
+- stylu gry i trenera,
+- venue, neutral ground i local derby,
 - H2H,
-- rest days, fatigue index, podróże,
-- live stats, jeżeli mecz trwa.
+- rest days, fatigue index i podróży,
+- danych live, jeżeli mecz trwa.
 
-## Kolejne kroki
+## Kolejne Kroki
 
-1. Rozszerzyć `team_stat_snapshots` o pełniejsze home/away split i last 5 / last 10.
-2. Dodać ranking siły drużyn liczony per liga i globalnie.
-3. Zbudować osobny audyt jakości wejścia modelu, widoczny w adminie.
-4. Dopuścić brakujące rynki modelowe przy częściowych kursach BSD tylko wtedy, gdy rynek BSD nie istnieje.
-5. Dodać panel porównania kurs BSD vs model, ale bez oznaczania tego jako Value Monitor w UI użytkownika.
+1. Rozszerzyć `team_stat_snapshots` o home/away split oraz last 5 / last 10.
+2. Dodać ranking siły drużyn per liga i globalnie.
+3. Zbudować panel audytu modelu w adminie.
+4. Dopuścić modelowe uzupełnianie brakujących rynków tylko wtedy, gdy realne rynki BSD pozostają nienaruszone.
+5. Dodać monitoring jakości: liczba meczów wycenionych, pominiętych, z realnymi BSD odds i z fallbackiem.

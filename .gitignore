@@ -40,6 +40,11 @@ yarn-error.log*
 # vercel
 .vercel
 
+# Local Supabase exports / screenshots
+/supabase/*.png
+/supabase/*.txt
+/supabase/functions/*.sql
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

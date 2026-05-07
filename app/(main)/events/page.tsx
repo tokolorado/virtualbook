@@ -113,6 +113,12 @@ type CompetitionDbRow = {
   emblem: string | null;
 };
 
+type LeagueIconDbRow = {
+  app_code: string | null;
+  league_name: string | null;
+  icon_url: string | null;
+};
+
 type StandingsRowUI = {
   position: number;
   teamId: number;
@@ -355,13 +361,6 @@ function formatPredictionPercent(value: unknown) {
   return `${n.toFixed(Math.abs(n) >= 10 ? 0 : 1)}%`;
 }
 
-function formatPredictionNumber(value: unknown) {
-  const n = safeNum(value);
-  if (n === null) return "—";
-
-  return n.toFixed(2);
-}
-
 function predictionDirection(prediction: MatchPrediction): PredictionDirection | null {
   const result = String(prediction.predictedResult ?? "").trim().toUpperCase();
   const label = String(prediction.predictedLabel ?? "").trim().toLowerCase();
@@ -371,31 +370,6 @@ function predictionDirection(prediction: MatchPrediction): PredictionDirection |
   if (result === "A" || result === "2" || label === "away") return "away";
 
   return null;
-}
-
-function predictionScoreDirection(
-  prediction: MatchPrediction
-): PredictionDirection | null {
-  let home = prediction.predictedHomeScore;
-  let away = prediction.predictedAwayScore;
-
-  if ((home === null || away === null) && prediction.predictedScore) {
-    const match = prediction.predictedScore.match(
-      /^\s*(\d{1,2})\s*[-:]\s*(\d{1,2})\s*$/
-    );
-
-    if (match) {
-      home = Number(match[1]);
-      away = Number(match[2]);
-    }
-  }
-
-  if (home === null || away === null) return null;
-  if (!Number.isFinite(home) || !Number.isFinite(away)) return null;
-
-  if (home > away) return "home";
-  if (home < away) return "away";
-  return "draw";
 }
 
 function predictionDirectionLabel(
@@ -1153,38 +1127,63 @@ function EmptyStateCard({
   );
 }
 
-function TeamNameLine({
+function getCountdownParts(kickoffUtc: string, nowMs: number) {
+  const ts = Date.parse(kickoffUtc);
+  if (!Number.isFinite(ts)) return null;
+
+  const diffMs = Math.max(0, ts - nowMs);
+  const days = Math.floor(diffMs / 86_400_000);
+  const hours = Math.floor((diffMs % 86_400_000) / 3_600_000);
+  const minutes = Math.floor((diffMs % 3_600_000) / 60_000);
+  const seconds = Math.floor((diffMs % 60_000) / 1_000);
+
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return [
+    { label: "DNI", value: pad(days) },
+    { label: "GODZ", value: pad(hours) },
+    { label: "MIN", value: pad(minutes) },
+    { label: "SEK", value: pad(seconds) },
+  ];
+}
+
+function PosterTeam({
   name,
   crest,
+  side,
   score,
-  highlight,
+  showScore,
 }: {
   name: string;
   crest?: string | null;
+  side: "home" | "away";
   score: number | null;
-  highlight?: boolean;
+  showScore: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <div
-        className={cn(
-          "flex min-w-0 items-center gap-2.5 text-base font-semibold leading-7 sm:text-lg",
-          highlight ? "text-white" : "text-neutral-100"
-        )}
-      >
+    <div className="flex min-w-0 flex-col items-center text-center">
+      <div className="relative">
+        <div className="absolute inset-0 rounded-full bg-white/20 blur-2xl" />
         <LeagueIcon
           src={crest}
           alt={name}
-          size={22}
+          size={112}
           fallback={name.slice(0, 1)}
-          className="rounded-full"
+          className="relative rounded-full border-white/15 bg-white p-4 shadow-[0_20px_55px_rgba(0,0,0,0.45)]"
         />
-        <span className="min-w-0 truncate">{name}</span>
       </div>
 
-      {score !== null ? (
-        <div className="min-w-8 rounded-xl border border-neutral-800 bg-neutral-950 px-2.5 py-1 text-center text-sm font-semibold text-white">
-          {score}
+      <div className="mt-5 max-w-full truncate text-xl font-semibold tracking-tight text-white sm:text-2xl">
+        {name}
+      </div>
+
+      <div className="mt-2 text-[11px] font-bold uppercase tracking-[0.24em] text-neutral-500">
+        {side === "home" ? "HOME" : "AWAY"}
+      </div>
+
+      {showScore ? (
+        <div className="mt-4 min-w-14 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-2 text-center text-2xl font-semibold text-white shadow-inner">
+          {score ?? 0}
         </div>
       ) : null}
     </div>
@@ -1264,130 +1263,6 @@ function MatchDataQualityStrip({
         <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2.5 py-1 font-semibold text-yellow-300">
           Brakuje: {missing.join(", ")}
         </span>
-      ) : null}
-    </div>
-  );
-}
-
-function PredictionPanel({
-  prediction,
-  homeTeam,
-  awayTeam,
-  compact = false,
-}: {
-  prediction: MatchPrediction | null;
-  homeTeam: string;
-  awayTeam: string;
-  compact?: boolean;
-}) {
-  if (!prediction) return null;
-
-  const direction = predictionDirection(prediction);
-  const scoreDirection = predictionScoreDirection(prediction);
-  const pick = predictionDirectionLabel(direction, homeTeam, awayTeam);
-  const pickCode = predictionPickCode(direction);
-  const scoreDirectionLabel = predictionDirectionLabel(
-    scoreDirection,
-    homeTeam,
-    awayTeam
-  );
-
-  const hasScoreDirectionConflict =
-    direction !== null &&
-    scoreDirection !== null &&
-    direction !== scoreDirection;
-
-  const source = prediction.source?.toUpperCase() ?? "AI";
-  const scoreSourceLabel =
-    prediction.scoreSource === "model_snapshot"
-      ? "Model xG"
-      : prediction.scoreSource === "bsd_prediction"
-        ? "Predykcja BSD"
-        : source;
-  const model = prediction.modelVersion ?? null;
-
-  return (
-    <div
-      className={cn(
-        "mt-4 rounded-2xl border border-sky-500/20 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.13),transparent_34%),linear-gradient(135deg,rgba(8,47,73,0.18),rgba(5,5,5,0.92))] p-3",
-        compact && "p-3"
-      )}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.2em] text-sky-300/80">
-            AI prediction
-          </div>
-          <div className="mt-1 text-xs text-neutral-400">
-            {scoreSourceLabel}
-            {model ? ` • ${model}` : ""}
-            {prediction.matchConfidence ? ` • ${prediction.matchConfidence}` : ""}
-          </div>
-        </div>
-
-        <div className="text-right">
-          <div className="text-[10px] uppercase tracking-[0.16em] text-neutral-500">
-            Najbardziej prawdopodobny wynik
-          </div>
-          <div className="mt-1 text-2xl font-black tracking-tight text-white">
-            {prediction.predictedScore ?? "—"}
-          </div>
-          <div className="mt-0.5 text-[11px] text-neutral-400">
-            kierunek {pickCode} / {pick} • pewność{" "}
-            {formatPredictionPercent(prediction.confidence)}
-            {prediction.scoreSource === "model_snapshot" &&
-            prediction.scoreProbability !== null
-              ? ` - score ${formatPredictionPercent(prediction.scoreProbability)}`
-              : ""}
-          </div>
-        </div>
-      </div>
-
-      {hasScoreDirectionConflict ? (
-        <div className="mt-3 rounded-xl border border-yellow-500/20 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-200">
-          Dokładny wynik wskazuje: {scoreDirectionLabel}, ale kierunek 1X2 modelu
-          wskazuje: {pick}.
-        </div>
-      ) : null}
-
-      <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
-        <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
-          <div className="truncate text-neutral-500">1 · {homeTeam}</div>
-          <div className="mt-1 font-semibold text-white">
-            {formatPredictionPercent(prediction.probabilities.homeWin)}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
-          <div className="text-neutral-500">X · Remis</div>
-          <div className="mt-1 font-semibold text-white">
-            {formatPredictionPercent(prediction.probabilities.draw)}
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-neutral-800 bg-black/25 p-2">
-          <div className="truncate text-neutral-500">2 · {awayTeam}</div>
-          <div className="mt-1 font-semibold text-white">
-            {formatPredictionPercent(prediction.probabilities.awayWin)}
-          </div>
-        </div>
-      </div>
-
-      {!compact ? (
-        <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-neutral-400">
-          <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1">
-            xG {formatPredictionNumber(prediction.expectedHomeGoals)} :{" "}
-            {formatPredictionNumber(prediction.expectedAwayGoals)}
-          </span>
-
-          <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1">
-            O2.5 {formatPredictionPercent(prediction.probabilities.over25)}
-          </span>
-
-          <span className="rounded-full border border-neutral-800 bg-black/20 px-2.5 py-1">
-            BTTS {formatPredictionPercent(prediction.probabilities.bttsYes)}
-          </span>
-        </div>
       ) : null}
     </div>
   );
@@ -1557,25 +1432,48 @@ export default function EventsPage() {
     let cancelled = false;
 
     const loadCompetitions = async () => {
+      const map: Record<string, CompetitionMeta> = {};
+
+      const { data: iconRows, error: iconError } = await supabase
+        .from("icons_leagues")
+        .select("app_code, league_name, icon_url")
+        .eq("provider", "bsd");
+
+      if (!cancelled && !iconError) {
+        for (const row of (iconRows ?? []) as LeagueIconDbRow[]) {
+          const id = String(row.app_code || "").trim();
+          if (!id) continue;
+
+          map[id] = {
+            name: row.league_name ? String(row.league_name) : id,
+            emblem:
+              typeof row.icon_url === "string" && row.icon_url.trim().length > 0
+                ? row.icon_url.trim()
+                : null,
+          };
+        }
+      }
+
       const { data, error } = await supabase
         .from("competitions")
         .select("id, name, emblem");
 
-      if (cancelled || error) return;
+      if (cancelled) return;
 
-      const map: Record<string, CompetitionMeta> = {};
+      if (!error) {
+        for (const row of (data ?? []) as CompetitionDbRow[]) {
+          const id = String(row.id || "").trim();
+          if (!id) continue;
 
-      for (const row of (data ?? []) as CompetitionDbRow[]) {
-        const id = String(row.id || "").trim();
-        if (!id) continue;
-
-        map[id] = {
-          name: row.name ? String(row.name) : id,
-          emblem:
-            typeof row.emblem === "string" && row.emblem.trim().length > 0
-              ? row.emblem.trim()
-              : null,
-        };
+          map[id] = {
+            name: map[id]?.name ?? (row.name ? String(row.name) : id),
+            emblem:
+              map[id]?.emblem ??
+              (typeof row.emblem === "string" && row.emblem.trim().length > 0
+                ? row.emblem.trim()
+                : null),
+          };
+        }
       }
 
       setCompetitionMetaByCode(map);
@@ -2222,7 +2120,6 @@ export default function EventsPage() {
   const openSectionTitle =
     selectedDate === todayLocalYYYYMMDD() ? "Dziś" : "Zaplanowane";
 
-  const featuredMatches: Match[] = [];
   const regularOpenMatches = openMatches;
 
   const leagueCounts = useMemo(() => {
@@ -2393,137 +2290,135 @@ export default function EventsPage() {
     );
   };
 
-  const renderFeaturedMatchCard = (m: Match) => {
-    const distance = formatKickoffDistance(m.kickoffUtc, nowMs);
-    const liveClock = formatLiveClock(m, nowMs);
-
-    return (
-      <button
-        key={m.id}
-        type="button"
-        onClick={() => goMatch(m)}
-        aria-label={`Otwórz szczegóły meczu ${m.home} vs ${m.away}`}
-        className="group w-full rounded-3xl border border-neutral-800 bg-gradient-to-b from-neutral-900/90 to-neutral-950/90 p-4 text-left transition hover:border-neutral-700 hover:from-neutral-900 hover:to-neutral-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <SmallPill tone="blue">{m.competitionName}</SmallPill>
-              <span className="text-xs text-neutral-500">{m.time}</span>
-            </div>
-
-            {distance ? (
-              <div className="mt-2 text-xs text-neutral-500">{distance}</div>
-            ) : null}
-          </div>
-
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <MatchStatusPill match={m} nowMs={nowMs} />
-            {liveClock ? <SmallPill tone="red">{liveClock}</SmallPill> : null}
-          </div>
-        </div>
-
-        <div className="mt-4 space-y-2">
-          <TeamNameLine
-            name={m.home}
-            crest={m.homeCrest}
-            score={m.homeScore}
-            highlight={hasVisibleScore(m)}
-          />
-          <TeamNameLine
-            name={m.away}
-            crest={m.awayCrest}
-            score={m.awayScore}
-            highlight={hasVisibleScore(m)}
-          />
-        </div>
-        
-        <PredictionPanel
-          prediction={m.prediction}
-          homeTeam={m.home}
-          awayTeam={m.away}
-          compact
-        />
-
-        <MatchDataQualityStrip match={m} compact />
-
-        <div className="mt-4">{renderMarketButtons(m)}</div>
-
-        <div className="mt-3 text-xs text-neutral-500 transition group-hover:text-neutral-300">
-          Otwórz pełne rynki →
-        </div>
-      </button>
-    );
-  };
-
   const renderMatchCard = (m: Match) => {
     const distance = formatKickoffDistance(m.kickoffUtc, nowMs);
     const liveClock = formatLiveClock(m, nowMs);
+    const countdown = getCountdownParts(m.kickoffUtc, nowMs);
+    const showScore = hasVisibleScore(m);
+    const isLive = m.isLive || isLiveStatus(m.status);
 
     return (
-      <div
+      <article
         key={m.id}
-        role="button"
-        tabIndex={0}
-        aria-label={`Otwórz szczegóły meczu ${m.home} vs ${m.away}`}
-        onClick={() => goMatch(m)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            goMatch(m);
-          }
-        }}
-        className="group cursor-pointer rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4 transition hover:border-neutral-700 hover:bg-neutral-900/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-sky-400"
+        className={cn(
+          "group overflow-hidden rounded-[28px] border shadow-[0_26px_90px_rgba(0,0,0,0.48)] transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/35 hover:shadow-[0_34px_120px_rgba(6,182,212,0.18)]",
+          isLive
+            ? "border-red-400/30 bg-red-950/10"
+            : m.oddsMeta?.isModel
+              ? "border-cyan-400/25 bg-cyan-950/10"
+              : "border-white/10 bg-[#07090f]"
+        )}
       >
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <SmallPill>{m.competitionName}</SmallPill>
+        <div className="relative min-h-[360px] overflow-hidden bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.30),transparent_38%),linear-gradient(120deg,#050810,#0a1020_48%,#05070c)] bg-[size:84px_84px,84px_84px,100%_100%,100%_100%] px-6 py-7 sm:px-10 sm:py-9">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black/55 to-transparent" />
+          <div className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-[radial-gradient(circle_at_30%_50%,rgba(20,184,166,0.18),transparent_52%)]" />
+          <div className="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-[radial-gradient(circle_at_70%_50%,rgba(59,130,246,0.20),transparent_52%)]" />
 
-              <span className="rounded-full border border-neutral-800 bg-neutral-950 px-3 py-1 text-[11px] font-semibold text-neutral-300">
-                {formatLocalDateTime(m.kickoffUtc)}
-              </span>
-
-              <MatchStatusPill match={m} nowMs={nowMs} />
-              {liveClock ? <SmallPill tone="red">{liveClock}</SmallPill> : null}
-
-              {distance ? (
-                <span className="text-xs text-neutral-500">{distance}</span>
-              ) : null}
-            </div>
-
-            <div className="mt-4 grid gap-2">
-              <TeamNameLine
-                name={m.home}
-                crest={m.homeCrest}
-                score={m.homeScore}
-              />
-              <TeamNameLine
-                name={m.away}
-                crest={m.awayCrest}
-                score={m.awayScore}
-              />
-            </div>
-
-            <PredictionInlineStrip
-              prediction={m.prediction}
-              homeTeam={m.home}
-              awayTeam={m.away}
+          <div className="relative z-10 grid min-h-[300px] items-center gap-8 lg:grid-cols-[1fr_1.12fr_1fr]">
+            <PosterTeam
+              name={m.home}
+              crest={m.homeCrest}
+              side="home"
+              score={m.homeScore}
+              showScore={showScore}
             />
 
-            <MatchDataQualityStrip match={m} />
+            <div className="flex min-w-0 flex-col items-center text-center">
+              <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/12 bg-white/[0.07] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.18em] text-neutral-200 shadow-[0_12px_40px_rgba(0,0,0,0.28)] backdrop-blur">
+                <span
+                  className={cn(
+                    "h-2 w-2 rounded-full",
+                    isLive ? "animate-pulse bg-red-400" : "bg-emerald-400"
+                  )}
+                />
+                <span>{isLive ? "LIVE" : "Featured"}</span>
+                <span className="text-neutral-500">/</span>
+                <span>{distance}</span>
+              </div>
 
-            <div className="mt-3 text-xs text-neutral-500 transition group-hover:text-neutral-300">
-              Kliknij kartę, aby zobaczyć wszystkie rynki
+              <div className="mt-7 flex max-w-full items-center justify-center gap-3 text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                <LeagueIcon
+                  src={competitionMetaByCode[m.competitionCode]?.emblem ?? null}
+                  alt={m.competitionName}
+                  size={22}
+                  fallback={m.competitionCode.slice(0, 2)}
+                  className="rounded-full bg-white/8"
+                />
+                <span className="truncate">{m.competitionName}</span>
+              </div>
+
+              <div className="mt-5 text-6xl font-black tracking-tight text-white/10 sm:text-7xl">
+                VS
+              </div>
+
+              <div className="mt-4 text-sm font-semibold text-neutral-300">
+                {formatLocalDateTime(m.kickoffUtc)}
+              </div>
+
+              <div className="mt-3 flex justify-center">
+                <MatchStatusPill match={m} nowMs={nowMs} />
+              </div>
+
+              {isLive ? (
+                <div className="mt-5 rounded-2xl border border-red-400/30 bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-100 shadow-[0_0_40px_rgba(248,113,113,0.16)]">
+                  Na zywo {liveClock ? `- ${liveClock}` : ""}
+                </div>
+              ) : countdown ? (
+                <div className="mt-5 grid grid-cols-4 gap-2 sm:gap-3">
+                  {countdown.map((part) => (
+                    <div
+                      key={part.label}
+                      className="min-w-16 rounded-2xl border border-white/10 bg-white/[0.07] px-3 py-3 text-center shadow-inner backdrop-blur"
+                    >
+                      <div className="text-2xl font-black leading-none text-white sm:text-3xl">
+                        {part.value}
+                      </div>
+                      <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500">
+                        {part.label}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={() => goMatch(m)}
+                className="mt-6 rounded-full bg-white px-6 py-3 text-sm font-bold text-neutral-950 shadow-[0_16px_45px_rgba(255,255,255,0.18)] transition hover:scale-[1.02] hover:bg-cyan-50"
+              >
+                Otworz mecz &rarr;
+              </button>
+            </div>
+
+            <PosterTeam
+              name={m.away}
+              crest={m.awayCrest}
+              side="away"
+              score={m.awayScore}
+              showScore={showScore}
+            />
+          </div>
+        </div>
+
+        <div className="border-t border-white/10 bg-black/28 px-5 py-5 sm:px-7">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <MatchDataQualityStrip match={m} />
+              <PredictionInlineStrip
+                prediction={m.prediction}
+                homeTeam={m.home}
+                awayTeam={m.away}
+              />
+            </div>
+            <div className="text-[11px] font-semibold text-neutral-500">
+              Kliknij kurs, zeby dodac typ do kuponu.
             </div>
           </div>
-
-          <div className="w-full xl:w-[360px]">{renderMarketButtons(m)}</div>
+          <div className="mt-4">{renderMarketButtons(m)}</div>
         </div>
-      </div>
+      </article>
     );
   };
-
   const dayToolsPanel = (
     <details className="rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
@@ -3167,19 +3062,6 @@ export default function EventsPage() {
               />
             ) : (
               <div className="space-y-5">
-                {featuredMatches.length > 0 ? (
-                  <div className="space-y-3">
-                    <SectionHeader
-                      title="Najważniejsze mecze"
-                      count={featuredMatches.length}
-                      subtitle="Szybki dostęp do aktualnych i najbliższych spotkań."
-                    />
-                    <div className="grid gap-3 xl:grid-cols-2 2xl:grid-cols-3">
-                      {featuredMatches.map((m) => renderFeaturedMatchCard(m))}
-                    </div>
-                  </div>
-                ) : null}
-
                 {liveMatches.length > 0 ? (
                   <div className="space-y-3">
                     <SectionHeader

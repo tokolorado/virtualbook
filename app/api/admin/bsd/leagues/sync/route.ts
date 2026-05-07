@@ -29,7 +29,6 @@ type TargetLeague = {
   appCode: string;
   aliases: string[];
   countries?: string[];
-  fallbackCode?: string | null;
   sortOrder: number;
 };
 
@@ -54,11 +53,24 @@ type ProviderLeagueUpsertRow = {
   sort_order: number;
 
   fallback_provider: string | null;
-  fallback_code: string | null | undefined;
+  fallback_code: null;
 
   logo_url: string | null;
   raw: BsdLeague;
 
+  updated_at: string;
+};
+
+type IconLeagueUpsertRow = {
+  provider: "bsd";
+  provider_league_id: string;
+  app_code: string;
+  league_name: string;
+  country: string | null;
+  icon_url: string;
+  source: "bsd";
+  raw: BsdLeague;
+  last_sync_at: string;
   updated_at: string;
 };
 
@@ -82,118 +94,101 @@ const TARGET_LEAGUES: TargetLeague[] = [
     appCode: "CL",
     aliases: ["Champions League", "UEFA Champions League"],
     countries: ["Europe"],
-    fallbackCode: "CL",
     sortOrder: 10,
   },
   {
     appCode: "UEL",
     aliases: ["Europa League", "UEFA Europa League"],
     countries: ["Europe"],
-    fallbackCode: null,
     sortOrder: 20,
   },
   {
     appCode: "WC",
     aliases: ["World Cup", "World Cup 2026", "FIFA World Cup"],
-    fallbackCode: "WC",
     sortOrder: 30,
   },
   {
     appCode: "PL",
     aliases: ["Premier League"],
     countries: ["England"],
-    fallbackCode: "PL",
     sortOrder: 100,
   },
   {
     appCode: "CH",
     aliases: ["Championship", "EFL Championship"],
     countries: ["England"],
-    fallbackCode: null,
     sortOrder: 110,
   },
   {
     appCode: "BL1",
     aliases: ["Bundesliga"],
     countries: ["Germany"],
-    fallbackCode: "BL1",
     sortOrder: 120,
   },
   {
     appCode: "DFB",
     aliases: ["DFB Pokal", "DFB-Pokal"],
     countries: ["Germany"],
-    fallbackCode: null,
     sortOrder: 125,
   },
   {
     appCode: "FL1",
     aliases: ["Ligue 1"],
     countries: ["France"],
-    fallbackCode: "FL1",
     sortOrder: 130,
   },
   {
     appCode: "SA",
     aliases: ["Serie A"],
     countries: ["Italy"],
-    fallbackCode: "SA",
     sortOrder: 140,
   },
   {
     appCode: "CI",
     aliases: ["Coppa Italia"],
     countries: ["Italy"],
-    fallbackCode: null,
     sortOrder: 145,
   },
   {
     appCode: "PD",
     aliases: ["La Liga", "LaLiga"],
     countries: ["Spain"],
-    fallbackCode: "PD",
     sortOrder: 150,
   },
   {
     appCode: "CDR",
     aliases: ["Copa del Rey"],
     countries: ["Spain"],
-    fallbackCode: null,
     sortOrder: 155,
   },
   {
     appCode: "EK",
     aliases: ["Ekstraklasa"],
     countries: ["Poland"],
-    fallbackCode: null,
     sortOrder: 160,
   },
   {
     appCode: "PPL",
     aliases: ["Puchar Polski", "Polish Cup"],
     countries: ["Poland"],
-    fallbackCode: null,
     sortOrder: 165,
   },
   {
     appCode: "POR1",
     aliases: ["Liga Portugal", "Liga Portugal Betclic", "Primeira Liga"],
     countries: ["Portugal"],
-    fallbackCode: null,
     sortOrder: 170,
   },
   {
     appCode: "NED1",
     aliases: ["Eredivisie"],
     countries: ["Netherlands"],
-    fallbackCode: null,
     sortOrder: 180,
   },
   {
     appCode: "MLS",
     aliases: ["MLS", "Major League Soccer"],
     countries: ["United States", "USA"],
-    fallbackCode: null,
     sortOrder: 190,
   },
   {
@@ -205,21 +200,18 @@ const TARGET_LEAGUES: TargetLeague[] = [
       "Süper Lig",
     ],
     countries: ["Turkey"],
-    fallbackCode: null,
     sortOrder: 200,
   },
   {
     appCode: "SPL",
     aliases: ["Saudi Pro League"],
     countries: ["Saudi Arabia"],
-    fallbackCode: null,
     sortOrder: 210,
   },
   {
     appCode: "FAC",
     aliases: ["FA Cup"],
     countries: ["England"],
-    fallbackCode: null,
     sortOrder: 220,
   },
 ];
@@ -390,7 +382,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         sort_order: target.sortOrder,
 
         fallback_provider: null,
-        fallback_code: target.fallbackCode,
+        fallback_code: null,
 
         logo_url: bsdImageUrl("league", id),
         raw: league,
@@ -407,6 +399,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       countries: target.countries ?? null,
     }));
 
+    let upsertedIconLeaguesCount = 0;
+    let iconLeaguesWarning: string | null = null;
+
     if (!dryRun && matchedRows.length > 0) {
       const { error } = await supabase.from("provider_leagues").upsert(
         matchedRows,
@@ -419,6 +414,36 @@ export async function GET(req: Request): Promise<NextResponse> {
         return jsonError("provider_leagues upsert failed", 500, {
           details: error.message,
         });
+      }
+
+      const iconLeagueRows: IconLeagueUpsertRow[] = matchedRows
+        .filter((row) => row.logo_url && row.logo_url.trim().length > 0)
+        .map((row) => ({
+          provider: "bsd",
+          provider_league_id: String(row.provider_league_id),
+          app_code: row.app_code,
+          league_name: row.name,
+          country: row.country,
+          icon_url: row.logo_url ?? "",
+          source: "bsd",
+          raw: row.raw,
+          last_sync_at: fetchedAt,
+          updated_at: fetchedAt,
+        }));
+
+      if (iconLeagueRows.length > 0) {
+        const { error: iconLeaguesError } = await supabase
+          .from("icons_leagues")
+          .upsert(iconLeagueRows, {
+            onConflict: "provider,provider_league_id",
+          });
+
+        if (iconLeaguesError) {
+          iconLeaguesWarning = iconLeaguesError.message;
+          console.warn("icons_leagues upsert failed", iconLeaguesError.message);
+        } else {
+          upsertedIconLeaguesCount = iconLeagueRows.length;
+        }
       }
 
       const competitionRows = matchedRows.map((row) => ({
@@ -451,13 +476,17 @@ export async function GET(req: Request): Promise<NextResponse> {
       fetchedLeaguesCount: leagues.length,
       matchedCount: matchedRows.length,
       upsertedCount: dryRun ? 0 : matchedRows.length,
+      builtIconLeagueRowsCount: matchedRows.filter(
+        (row) => row.logo_url && row.logo_url.trim().length > 0
+      ).length,
+      upsertedIconLeaguesCount: dryRun ? 0 : upsertedIconLeaguesCount,
+      iconLeaguesWarning,
       matched: matchedRows.map((row) => ({
         appCode: row.app_code,
         bsdLeagueId: row.provider_league_id,
         bsdSeasonId: row.provider_season_id,
         name: row.name,
         country: row.country,
-        fallbackCode: row.fallback_code,
         sortOrder: row.sort_order,
       })),
       unmatchedTargets,

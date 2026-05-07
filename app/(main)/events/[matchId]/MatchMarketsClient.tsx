@@ -1134,6 +1134,26 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         let leagueEmblem: string | null = null;
 
         if (leagueCode) {
+          const { data: iconLeagueRow, error: iconLeagueError } = await supabase
+            .from("icons_leagues")
+            .select("icon_url")
+            .eq("provider", "bsd")
+            .eq("app_code", leagueCode)
+            .maybeSingle();
+
+          if (!iconLeagueError) {
+            const iconUrl = (
+              iconLeagueRow as { icon_url?: string | null } | null
+            )?.icon_url;
+
+            leagueEmblem =
+              typeof iconUrl === "string" && iconUrl.trim().length > 0
+                ? iconUrl.trim()
+                : null;
+          }
+        }
+
+        if (!leagueEmblem && leagueCode) {
           const { data: competitionRow } = await supabase
             .from("competitions")
             .select("emblem")
@@ -1156,10 +1176,41 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
         );
 
         if (teamIds.length > 0) {
+          const { data: iconTeamRows, error: iconTeamError } = await supabase
+            .from("icons_teams")
+            .select("provider_team_id, icon_url")
+            .eq("provider", "bsd")
+            .in("provider_team_id", teamIds);
+
+          if (!iconTeamError) {
+            for (const team of (iconTeamRows ?? []) as Array<{
+              provider_team_id?: number | string | null;
+              icon_url?: string | null;
+            }>) {
+              const id = safeInt(team.provider_team_id);
+              const crest =
+                typeof team.icon_url === "string" &&
+                team.icon_url.trim().length > 0
+                  ? team.icon_url.trim()
+                  : null;
+
+              if (id !== null && id === homeTeamId) homeCrest = crest;
+              if (id !== null && id === awayTeamId) awayCrest = crest;
+            }
+          }
+        }
+
+        const missingTeamIds = teamIds.filter((id) => {
+          if (id === homeTeamId && homeCrest) return false;
+          if (id === awayTeamId && awayCrest) return false;
+          return true;
+        });
+
+        if (missingTeamIds.length > 0) {
           const { data: teamRows } = await supabase
             .from("teams")
             .select("id, crest")
-            .in("id", teamIds);
+            .in("id", missingTeamIds);
 
           for (const team of (teamRows ?? []) as Array<{
             id?: number | null;

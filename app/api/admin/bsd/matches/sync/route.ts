@@ -5,8 +5,10 @@ import { supabaseAdmin } from "@/lib/supabaseServer";
 import {
   bsdFetchJson,
   bsdFetchPaginated,
+  bsdFetchV2Json,
   bsdImageUrl,
   normalizeBsdText,
+  safeNumber,
 } from "@/lib/bsd/client";
 import {
   buildBsdEventFeaturesSnapshot,
@@ -125,6 +127,19 @@ type TeamUpsertRow = {
   last_sync_at: string;
 };
 
+type IconTeamUpsertRow = {
+  provider: "bsd";
+  provider_team_id: number;
+  team_name: string;
+  short_name: string | null;
+  country: string | null;
+  icon_url: string;
+  source: "bsd";
+  raw: UnknownRecord;
+  last_sync_at: string;
+  updated_at: string;
+};
+
 type OddsInput = {
   marketId: string;
   selection: string;
@@ -155,6 +170,12 @@ type BsdEventOddsPayload = {
   count?: number | null;
   odds?: BsdOddsRow[] | null;
   results?: BsdOddsRow[] | null;
+};
+
+type BsdOddsSourcePayload = {
+  apiVersion: "v1" | "v2";
+  endpoint: string;
+  payload: BsdEventOddsPayload | UnknownRecord;
 };
 
 type BsdOddsFetchStats = {
@@ -815,6 +836,53 @@ function buildTeamRows(matchRows: MatchUpsertRow[], fetchedAt: string): TeamUpse
   return uniqueBy(rows, (row) => String(row.id));
 }
 
+function buildIconTeamRows(
+  matchRows: MatchUpsertRow[],
+  fetchedAt: string
+): IconTeamUpsertRow[] {
+  const rows: IconTeamUpsertRow[] = [];
+
+  for (const match of matchRows) {
+    const homeTeamRaw = readRecord(match.raw_bsd, "home_team") ?? {};
+    const awayTeamRaw = readRecord(match.raw_bsd, "away_team") ?? {};
+
+    if (match.home_team_id !== null) {
+      rows.push({
+        provider: "bsd",
+        provider_team_id: match.home_team_id,
+        team_name: match.home_team,
+        short_name: match.home_short_name,
+        country: match.home_country ?? match.venue_country,
+        icon_url: bsdImageUrl("team", match.home_team_id) ?? "",
+        source: "bsd",
+        raw: homeTeamRaw,
+        last_sync_at: fetchedAt,
+        updated_at: fetchedAt,
+      });
+    }
+
+    if (match.away_team_id !== null) {
+      rows.push({
+        provider: "bsd",
+        provider_team_id: match.away_team_id,
+        team_name: match.away_team,
+        short_name: match.away_short_name,
+        country: match.away_country,
+        icon_url: bsdImageUrl("team", match.away_team_id) ?? "",
+        source: "bsd",
+        raw: awayTeamRaw,
+        last_sync_at: fetchedAt,
+        updated_at: fetchedAt,
+      });
+    }
+  }
+
+  return uniqueBy(
+    rows.filter((row) => row.icon_url.trim().length > 0),
+    (row) => String(row.provider_team_id)
+  );
+}
+
 
 function collectOddsInputs(event: UnknownRecord): OddsInput[] {
   const directSpecs = [
@@ -982,17 +1050,221 @@ function selectPreferredBsdOdd(rows: BsdOddsRow[]): BsdOddsRow | null {
     })[0] ?? null;
 }
 
-function oddsPayloadRows(payload: BsdEventOddsPayload): BsdOddsRow[] {
-  if (Array.isArray(payload.odds)) return payload.odds;
-  if (Array.isArray(payload.results)) return payload.results;
+function bsdOddsRowFromFlatField(
+  market: string,
+  outcome: string,
+  decimalOdds: unknown,
+  updatedAt: unknown
+): BsdOddsRow | null {
+  const bookOdds = safeNumber(decimalOdds);
+  if (bookOdds === null || bookOdds <= 1) return null;
+
+  return {
+    market,
+    outcome,
+    bookmaker: "Consensus",
+    bookmaker_code: BSD_CONSENSUS_BOOKMAKER_CODE,
+    decimal_odds: bookOdds,
+    updated_at: typeof updatedAt === "string" ? updatedAt : null,
+  };
+}
+
+function flatBsdV2OddsRows(payload: UnknownRecord): BsdOddsRow[] {
+  const specs = [
+    { key: "home_win", market: "1x2", outcome: "home" },
+    { key: "draw", market: "1x2", outcome: "draw" },
+    { key: "away_win", market: "1x2", outcome: "away" },
+    { key: "over_15_goals", market: "over_under_1_5", outcome: "over" },
+    { key: "under_15_goals", market: "over_under_1_5", outcome: "under" },
+    { key: "over_25_goals", market: "over_under_2_5", outcome: "over" },
+    { key: "under_25_goals", market: "over_under_2_5", outcome: "under" },
+    { key: "over_35_goals", market: "over_under_3_5", outcome: "over" },
+    { key: "under_35_goals", market: "over_under_3_5", outcome: "under" },
+    { key: "btts_yes", market: "btts", outcome: "yes" },
+    { key: "btts_no", market: "btts", outcome: "no" },
+  ];
+
+  const updatedAt = payload.updated_at ?? payload.fetched_at ?? null;
+  const rows: BsdOddsRow[] = [];
+
+  for (const spec of specs) {
+    const row = bsdOddsRowFromFlatField(
+      spec.market,
+      spec.outcome,
+      payload[spec.key],
+      updatedAt
+    );
+    if (row) rows.push(row);
+  }
+
+  return rows;
+}
+
+function isBsdOddsLikeRecord(value: unknown): value is UnknownRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as UnknownRecord;
+
+  const hasOdd =
+    readPositiveOdd(record, "decimal_odds") !== null ||
+    readPositiveOdd(record, "odds") !== null ||
+    readPositiveOdd(record, "price") !== null ||
+    readPositiveOdd(record, "value") !== null;
+
+  return hasOdd && (
+    record.market !== undefined ||
+    record.market_name !== undefined ||
+    record.outcome !== undefined ||
+    record.outcome_name !== undefined ||
+    record.selection !== undefined ||
+    record.selection_name !== undefined ||
+    record.label !== undefined ||
+    record.name !== undefined
+  );
+}
+
+function normalizeBsdOddsLikeRecord(
+  record: UnknownRecord,
+  context?: { market?: unknown; bookmaker?: unknown; bookmakerCode?: unknown }
+): BsdOddsRow {
+  return {
+    id: (record.id as string | number | null | undefined) ?? null,
+    market:
+      (record.market as string | null | undefined) ??
+      (record.market_name as string | null | undefined) ??
+      (record.market_key as string | null | undefined) ??
+      (context?.market as string | null | undefined) ??
+      null,
+    outcome:
+      (record.outcome as string | null | undefined) ??
+      (record.selection as string | null | undefined) ??
+      (record.label as string | null | undefined) ??
+      (record.name as string | null | undefined) ??
+      null,
+    outcome_name:
+      (record.outcome_name as string | null | undefined) ??
+      (record.selection_name as string | null | undefined) ??
+      null,
+    bookmaker:
+      (record.bookmaker as string | null | undefined) ??
+      (record.bookmaker_name as string | null | undefined) ??
+      (context?.bookmaker as string | null | undefined) ??
+      null,
+    bookmaker_code:
+      (record.bookmaker_code as string | null | undefined) ??
+      (record.bookmaker_key as string | null | undefined) ??
+      (record.book as string | null | undefined) ??
+      (context?.bookmakerCode as string | null | undefined) ??
+      null,
+    decimal_odds:
+      (record.decimal_odds as string | number | null | undefined) ??
+      (record.odds as string | number | null | undefined) ??
+      (record.price as string | number | null | undefined) ??
+      (record.value as string | number | null | undefined) ??
+      null,
+    previous_decimal_odds:
+      (record.previous_decimal_odds as string | number | null | undefined) ??
+      (record.previous_odds as string | number | null | undefined) ??
+      null,
+    is_max_quote:
+      typeof record.is_max_quote === "boolean"
+        ? record.is_max_quote
+        : typeof record.is_best === "boolean"
+          ? record.is_best
+          : null,
+    implied_probability:
+      (record.implied_probability as string | number | null | undefined) ??
+      (record.probability as string | number | null | undefined) ??
+      null,
+    movement: (record.movement as string | null | undefined) ?? null,
+    updated_at:
+      (record.updated_at as string | null | undefined) ??
+      (record.last_update as string | null | undefined) ??
+      (record.timestamp as string | null | undefined) ??
+      null,
+  };
+}
+
+function collectNestedBsdOddsRows(
+  value: unknown,
+  depth = 0,
+  context?: { market?: unknown; bookmaker?: unknown; bookmakerCode?: unknown }
+): BsdOddsRow[] {
+  if (depth > 5 || value === null || value === undefined) return [];
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectNestedBsdOddsRows(item, depth + 1, context));
+  }
+
+  if (isBsdOddsLikeRecord(value)) {
+    return [normalizeBsdOddsLikeRecord(value, context)];
+  }
+
+  if (typeof value !== "object") return [];
+
+  const record = value as UnknownRecord;
+  const nextContext = {
+    market:
+      record.market ??
+      record.market_name ??
+      record.market_key ??
+      record.name ??
+      context?.market,
+    bookmaker:
+      record.bookmaker ??
+      record.bookmaker_name ??
+      context?.bookmaker,
+    bookmakerCode:
+      record.bookmaker_code ??
+      record.bookmaker_key ??
+      record.book ??
+      context?.bookmakerCode,
+  };
+  const rows: BsdOddsRow[] = [];
+
+  for (const key of [
+    "odds",
+    "results",
+    "markets",
+    "outcomes",
+    "selections",
+    "bookmakers",
+    "books",
+    "consensus",
+  ]) {
+    if (record[key] !== undefined) {
+      rows.push(...collectNestedBsdOddsRows(record[key], depth + 1, nextContext));
+    }
+  }
+
+  return rows;
+}
+
+function oddsPayloadRows(payload: BsdEventOddsPayload | UnknownRecord): BsdOddsRow[] {
+  const directOdds = (payload as BsdEventOddsPayload).odds;
+  if (Array.isArray(directOdds) && directOdds.length) {
+    return directOdds;
+  }
+
+  const directResults = (payload as BsdEventOddsPayload).results;
+  if (Array.isArray(directResults) && directResults.length) {
+    return directResults;
+  }
+
+  const flatRows = flatBsdV2OddsRows(payload as UnknownRecord);
+  const nestedRows = collectNestedBsdOddsRows(payload);
+
+  if (flatRows.length || nestedRows.length) {
+    return [...flatRows, ...nestedRows];
+  }
+
   return [];
 }
 
 function collectOddsInputsFromBsdOddsPayload(
   eventId: string,
-  payload: BsdEventOddsPayload
+  sourcePayload: BsdOddsSourcePayload
 ): OddsInput[] {
-  const rows = oddsPayloadRows(payload);
+  const rows = oddsPayloadRows(sourcePayload.payload);
   const groups = new Map<string, BsdOddsRow[]>();
 
   for (const row of rows) {
@@ -1030,8 +1302,8 @@ function collectOddsInputsFromBsdOddsPayload(
       field: `bsd_odds_api:${row.market ?? marketId}:${row.outcome ?? row.outcome_name ?? selection}`,
       bookOdds,
       rawSource: {
-        source: "bsd_odds_api",
-        endpoint: "/api/odds/",
+        source: `bsd_odds_api_${sourcePayload.apiVersion}`,
+        endpoint: sourcePayload.endpoint,
         event_id: eventId,
         market: row.market ?? null,
         outcome: row.outcome ?? row.outcome_name ?? null,
@@ -1056,15 +1328,52 @@ async function fetchBsdEventOddsInputs(eventId: string): Promise<{
   inputs: OddsInput[];
   sourceRows: number;
 }> {
-  const payload = await bsdFetchJson<BsdEventOddsPayload>("/odds/", {
-    event: eventId,
-    market: "all",
-    page_size: 500,
-  });
+  const payloads: BsdOddsSourcePayload[] = [];
+  let lastError: unknown = null;
+
+  try {
+    const payload = await bsdFetchV2Json<UnknownRecord>(
+      `/events/${encodeURIComponent(eventId)}/odds/`
+    );
+
+    payloads.push({
+      apiVersion: "v2",
+      endpoint: `/api/v2/events/${eventId}/odds/`,
+      payload,
+    });
+  } catch (error) {
+    lastError = error;
+  }
+
+  try {
+    const payload = await bsdFetchJson<BsdEventOddsPayload>("/odds/", {
+      event: eventId,
+      market: "all",
+      page_size: 500,
+    });
+
+    payloads.push({
+      apiVersion: "v1",
+      endpoint: "/api/odds/",
+      payload,
+    });
+  } catch (error) {
+    lastError = error;
+  }
+
+  if (!payloads.length && lastError) {
+    throw lastError;
+  }
+
+  const inputs = payloads.flatMap((payload) =>
+    collectOddsInputsFromBsdOddsPayload(eventId, payload)
+  );
 
   return {
-    inputs: collectOddsInputsFromBsdOddsPayload(eventId, payload),
-    sourceRows: oddsPayloadRows(payload).length,
+    inputs,
+    sourceRows: payloads.reduce((sum, payload) => {
+      return sum + oddsPayloadRows(payload.payload).length;
+    }, 0),
   };
 }
 
@@ -1736,12 +2045,15 @@ export async function GET(req: Request): Promise<Response> {
 
     const matchResultRows = buildMatchResultRows(uniqueMatchRows);
     const teamRows = buildTeamRows(uniqueMatchRows, fetchedAt);
+    const iconTeamRows = buildIconTeamRows(uniqueMatchRows, fetchedAt);
 
     let upsertedMatchesCount = 0;
     let upsertedOddsCount = 0;
     let upsertedPricingFeaturesCount = 0;
     let upsertedBsdEventFeaturesCount = 0;
     let upsertedTeamsCount = 0;
+    let upsertedIconTeamsCount = 0;
+    let iconTeamsWarning: string | null = null;
 
     let matchResultsSync: MatchResultsSyncStats = {
       attempted: matchResultRows.length,
@@ -1776,6 +2088,20 @@ export async function GET(req: Request): Promise<Response> {
       }
 
       upsertedTeamsCount = teamRows.length;
+    }
+
+    if (!dryRun && iconTeamRows.length > 0) {
+      const { error: iconTeamsUpsertError } = await supabase
+        .from("icons_teams")
+        .upsert(iconTeamRows, {
+          onConflict: "provider,provider_team_id",
+        });
+
+      if (iconTeamsUpsertError) {
+        iconTeamsWarning = iconTeamsUpsertError.message;
+      } else {
+        upsertedIconTeamsCount = iconTeamRows.length;
+      }
     }
 
     if (!dryRun && uniqueOddsRows.length > 0) {
@@ -1863,6 +2189,9 @@ export async function GET(req: Request): Promise<Response> {
       bsdOddsApiWarnings: oddsFetchWarnings.slice(0, 20),
       builtTeamRowsCount: teamRows.length,
       upsertedTeamsCount,
+      builtIconTeamRowsCount: iconTeamRows.length,
+      upsertedIconTeamsCount,
+      iconTeamsWarning,
       builtPricingFeatureRowsCount: pricingFeatureRows.length,
       upsertedPricingFeaturesCount,
       builtBsdEventFeatureRowsCount: bsdEventFeatureRows.length,

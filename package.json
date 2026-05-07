@@ -9,6 +9,7 @@
     "test": "tsc -p tsconfig.test.json && node .test-dist/tests/run.js",
     "lint": "eslint",
     "cron:local": "tsx --env-file=.env.local scripts/cron-local.ts",
+    "bsd:realtime": "tsx --env-file=.env.local scripts/bsdRealtimeWorker.ts",
     "sofascore:worker": "tsx --env-file=.env.local scripts/sofascoreMappingWorker.ts"
   },
   "dependencies": {

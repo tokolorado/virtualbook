@@ -1,6 +1,7 @@
 // lib/bsd/client.ts
 
 const BSD_BASE_URL = "https://sports.bzzoiro.com/api";
+const BSD_V2_BASE_URL = "https://sports.bzzoiro.com/api/v2";
 const BSD_IMAGE_BASE_URL = "https://sports.bzzoiro.com/img";
 
 export type BsdListResponse<T> = {
@@ -55,6 +56,19 @@ function buildBsdUrl(pathOrUrl: string, params?: Record<string, string | number 
   return url;
 }
 
+function buildBsdV2Url(pathOrUrl: string, params?: Record<string, string | number | boolean | null | undefined>) {
+  const url = pathOrUrl.startsWith("http")
+    ? new URL(pathOrUrl)
+    : new URL(`${BSD_V2_BASE_URL}${pathOrUrl.startsWith("/") ? "" : "/"}${pathOrUrl}`);
+
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value === null || value === undefined || value === "") continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  return url;
+}
+
 export async function bsdFetchJson<T>(
   pathOrUrl: string,
   params?: Record<string, string | number | boolean | null | undefined>
@@ -77,6 +91,36 @@ export async function bsdFetchJson<T>(
   if (!response.ok) {
     throw new BsdApiError(
       `BSD API error ${response.status}`,
+      response.status,
+      payload
+    );
+  }
+
+  return payload as T;
+}
+
+export async function bsdFetchV2Json<T>(
+  pathOrUrl: string,
+  params?: Record<string, string | number | boolean | null | undefined>
+): Promise<T> {
+  const apiKey = getBsdApiKey();
+  const url = buildBsdV2Url(pathOrUrl, params);
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Authorization: `Token ${apiKey}`,
+      Accept: "application/json",
+    },
+    cache: "no-store",
+  });
+
+  const text = await response.text();
+  const payload = safeJson(text);
+
+  if (!response.ok) {
+    throw new BsdApiError(
+      `BSD v2 API error ${response.status}`,
       response.status,
       payload
     );
