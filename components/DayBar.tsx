@@ -106,6 +106,7 @@ export default function DayBar({
 }: DayBarProps) {
   const today = todayLocalYYYYMMDD();
   const tomorrow = addDaysYmd(today, 1);
+
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(
     isYYYYMMDD(value) ? value : today
@@ -155,70 +156,87 @@ export default function DayBar({
 
   const monthDays = useMemo(() => buildMonthGrid(calendarMonth), [calendarMonth]);
 
-  const canGoPrevMonth = addMonthsYmd(calendarMonth, -1).slice(0, 7) >= horizonStart.slice(0, 7);
-  const canGoNextMonth = addMonthsYmd(calendarMonth, 1).slice(0, 7) <= horizonEnd.slice(0, 7);
+  const canGoPrevMonth =
+    addMonthsYmd(calendarMonth, -1).slice(0, 7) >= horizonStart.slice(0, 7);
+
+  const canGoNextMonth =
+    addMonthsYmd(calendarMonth, 1).slice(0, 7) <= horizonEnd.slice(0, 7);
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/70">
-      <div className="border-b border-neutral-800/80 bg-white/[0.025]">
-        <div className="no-scrollbar flex snap-x snap-proximity overflow-x-auto overscroll-x-contain px-2">
-          {visibleDates.map((item) => {
-            const active = item.ymd === value;
+    <div className="vb-daybar-shell overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/75">
+      <div className="relative h-[92x] min-w-0 overflow-hidden">
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-20 w-8 bg-gradient-to-r from-neutral-950 via-neutral-950/70 to-transparent sm:w-12" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-20 w-8 bg-gradient-to-l from-neutral-950 via-neutral-950/70 to-transparent sm:w-12" />
 
-            return (
-              <button
-                key={item.ymd}
-                ref={(node) => {
-                  buttonRefs.current[item.ymd] = node;
-                }}
-                type="button"
-                onClick={() => onChange(item.ymd)}
-                className={cn(
-                  "relative flex min-w-[76px] shrink-0 snap-start flex-col items-center gap-1 border-b-[3px] px-2 py-3 text-center transition",
-                  active
-                    ? "border-red-500"
-                    : "border-transparent hover:border-neutral-700",
-                  !item.hasMatches && "opacity-45 hover:opacity-70"
-                )}
-                title={
-                  item.hasMatches
-                    ? item.ymd
-                    : `${item.ymd} — brak meczów w aktualnej ofercie`
-                }
-              >
-                <span
+        <div className="no-scrollbar h-full min-w-0 overflow-x-auto overflow-y-hidden">
+          <div className="flex h-full w-max min-w-full justify-center px-1">
+            {visibleDates.map((item) => {
+              const active = item.ymd === value;
+              const disabledLook = !item.hasMatches && !active;
+
+              return (
+                <button
+                  key={item.ymd}
+                  ref={(node) => {
+                    buttonRefs.current[item.ymd] = node;
+                  }}
+                  type="button"
+                  onClick={() => onChange(item.ymd)}
                   className={cn(
-                    "text-[10px] font-black uppercase tracking-[0.16em] leading-none",
-                    active ? "text-white" : "text-neutral-500"
+                    "vb-date-item relative h-full border-b-[3px] px-2 text-center outline-none transition duration-200 active:scale-[0.98]",
+                    active ? "vb-date-active" : "vb-date-idle",
+                    disabledLook && "vb-date-muted"
                   )}
+                  title={
+                    item.hasMatches
+                      ? item.ymd
+                      : `${item.ymd} — brak meczów w aktualnej ofercie`
+                  }
                 >
-                  {item.dayLabel}
-                </span>
+                  <span className="vb-date-center relative z-10">
+                    <span
+                      className={cn(
+                        "block text-[10px] font-black uppercase leading-none tracking-[0.2em] sm:text-[11px]",
+                        active
+                          ? "text-cyan-50"
+                          : disabledLook
+                            ? "text-neutral-600"
+                            : "text-neutral-500"
+                      )}
+                    >
+                      {item.dayLabel}
+                    </span>
 
-                <span
-                  className={cn(
-                    "text-lg font-black leading-none tracking-tight",
-                    active ? "text-white" : "text-neutral-300"
-                  )}
-                >
-                  {item.dateLabel}
-                </span>
+                    <span
+                      className={cn(
+                        "mt-1 block text-lg font-black leading-none tracking-tight sm:text-xl",
+                        active
+                          ? "text-white"
+                          : disabledLook
+                            ? "text-neutral-500"
+                            : "text-neutral-300"
+                      )}
+                    >
+                      {item.dateLabel}
+                    </span>
+                  </span>
 
-                {!item.hasMatches ? (
-                  <span className="mt-0.5 h-1 w-1 rounded-full bg-neutral-700" />
-                ) : null}
-              </button>
-            );
-          })}
+                  {disabledLook ? (
+                    <span className="pointer-events-none absolute bottom-2 left-1/2 z-10 h-1 w-5 -translate-x-1/2 rounded-full bg-neutral-800/90" />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
       {showCalendarInline ? (
-        <div className="p-3">
+        <div className="border-t border-neutral-800/80 p-3">
           <button
             type="button"
             onClick={() => setCalendarOpen((v) => !v)}
-            className="flex w-full items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-left transition hover:border-neutral-700 hover:bg-neutral-900"
+            className="flex w-full items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-left outline-none transition hover:border-cyan-400/40 hover:bg-neutral-900"
           >
             <span>
               <span className="block text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-500">
@@ -229,7 +247,7 @@ export default function DayBar({
               </span>
             </span>
 
-            <span className="rounded-full border border-neutral-800 px-3 py-1 text-xs font-semibold text-neutral-300">
+            <span className="rounded-full border border-amber-400/20 bg-amber-400/5 px-3 py-1 text-xs font-semibold text-amber-200">
               {calendarOpen ? "Ukryj" : "Pokaż"}
             </span>
           </button>
@@ -242,9 +260,9 @@ export default function DayBar({
                   disabled={!canGoPrevMonth}
                   onClick={() => setCalendarMonth(addMonthsYmd(calendarMonth, -1))}
                   className={cn(
-                    "rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                    "rounded-xl border px-3 py-2 text-sm font-semibold outline-none transition",
                     canGoPrevMonth
-                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-cyan-400/40 hover:bg-neutral-900"
                       : "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-700"
                   )}
                 >
@@ -260,9 +278,9 @@ export default function DayBar({
                   disabled={!canGoNextMonth}
                   onClick={() => setCalendarMonth(addMonthsYmd(calendarMonth, 1))}
                   className={cn(
-                    "rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                    "rounded-xl border px-3 py-2 text-sm font-semibold outline-none transition",
                     canGoNextMonth
-                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:border-cyan-400/40 hover:bg-neutral-900"
                       : "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-700"
                   )}
                 >
@@ -291,10 +309,10 @@ export default function DayBar({
                       disabled={disabled}
                       onClick={() => onChange(ymd)}
                       className={cn(
-                        "relative flex h-9 items-center justify-center rounded-xl border text-xs font-semibold transition",
+                        "relative flex h-9 items-center justify-center rounded-xl border text-xs font-semibold outline-none transition",
                         active
-                          ? "border-red-500 bg-red-500 text-white"
-                          : "border-neutral-900 bg-neutral-950 text-neutral-300 hover:border-neutral-700 hover:bg-neutral-900",
+                          ? "border-cyan-300 bg-cyan-400 text-black shadow-[0_0_22px_rgba(34,211,238,0.22)]"
+                          : "border-neutral-900 bg-neutral-950 text-neutral-300 hover:border-cyan-400/40 hover:bg-neutral-900",
                         !inMonth && "text-neutral-700",
                         !hasMatches && inHorizon && "opacity-45",
                         disabled && "cursor-not-allowed opacity-20"
@@ -303,7 +321,7 @@ export default function DayBar({
                       {Number(ymd.slice(8, 10))}
 
                       {hasMatches && inHorizon ? (
-                        <span className="absolute bottom-1 h-1 w-1 rounded-full bg-yellow-400" />
+                        <span className="absolute bottom-1 h-1 w-1 rounded-full bg-amber-300" />
                       ) : null}
                     </button>
                   );
@@ -322,6 +340,197 @@ export default function DayBar({
 
         .no-scrollbar::-webkit-scrollbar {
           display: none;
+        }
+
+        .vb-daybar-shell {
+          position: relative;
+          background:
+            radial-gradient(
+              circle at 7% 10%,
+              rgba(34, 211, 238, 0.14),
+              transparent 30%
+            ),
+            radial-gradient(
+              circle at 94% 12%,
+              rgba(245, 158, 11, 0.12),
+              transparent 30%
+            ),
+            linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.04),
+              rgba(255, 255, 255, 0.012)
+            ),
+            rgba(10, 10, 10, 0.9);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.055),
+            inset 0 -1px 0 rgba(255, 255, 255, 0.025),
+            0 18px 70px rgba(0, 0, 0, 0.36);
+        }
+
+        .vb-daybar-shell::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background:
+            linear-gradient(
+              90deg,
+              transparent,
+              rgba(255, 255, 255, 0.07),
+              transparent
+            );
+          opacity: 0.22;
+          transform: translateX(-100%);
+          animation: vb-shell-sheen 7s ease-in-out infinite;
+        }
+
+        @keyframes vb-shell-sheen {
+          0%,
+          34% {
+            transform: translateX(-100%);
+          }
+          62%,
+          100% {
+            transform: translateX(100%);
+          }
+        }
+
+        .vb-date-item {
+          position: relative;
+          display: flex;
+          flex: 0 0 86px;
+          width: 86px;
+          min-width: 86px;
+          max-width: 86px;
+          align-items: center;
+          justify-content: center;
+          border-bottom-color: transparent;
+        }
+
+        .vb-date-center {
+          display: flex;
+          width: 100%;
+          min-width: 0;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 3px;
+          pointer-events: none;
+          transform: none;
+        }
+
+        .vb-date-item::before {
+          content: "";
+          position: absolute;
+          inset: 8px 5px;
+          border-radius: 18px;
+          opacity: 0;
+          background:
+            radial-gradient(
+              circle at 50% 0%,
+              rgba(34, 211, 238, 0.16),
+              transparent 60%
+            ),
+            linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.055),
+              rgba(255, 255, 255, 0.01)
+            );
+          transition:
+            opacity 180ms ease,
+            transform 180ms ease;
+          transform: translateY(2px);
+          pointer-events: none;
+        }
+
+        .vb-date-item:hover::before {
+          opacity: 1;
+          transform: translateY(0);
+        }
+
+        .vb-date-active {
+          border-bottom-color: rgb(34, 211, 238);
+          text-shadow:
+            0 0 12px rgba(34, 211, 238, 0.22),
+            0 0 20px rgba(245, 158, 11, 0.1);
+        }
+
+        .vb-date-active::before {
+          opacity: 1;
+          transform: translateY(0);
+          background:
+            radial-gradient(
+              circle at 50% 12%,
+              rgba(34, 211, 238, 0.27),
+              transparent 58%
+            ),
+            radial-gradient(
+              circle at 50% 100%,
+              rgba(245, 158, 11, 0.13),
+              transparent 55%
+            ),
+            linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.08),
+              rgba(255, 255, 255, 0.014)
+            );
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.055),
+            0 0 22px rgba(34, 211, 238, 0.1);
+        }
+
+        .vb-date-active::after {
+          content: "";
+          position: absolute;
+          left: 15px;
+          right: 15px;
+          bottom: 0;
+          height: 3px;
+          border-radius: 999px;
+          background:
+            linear-gradient(
+              90deg,
+              rgba(245, 158, 11, 0),
+              rgba(245, 158, 11, 0.95),
+              rgba(34, 211, 238, 1),
+              rgba(245, 158, 11, 0.95),
+              rgba(245, 158, 11, 0)
+            );
+          box-shadow:
+            0 0 14px rgba(34, 211, 238, 0.52),
+            0 0 20px rgba(245, 158, 11, 0.22);
+        }
+
+        .vb-date-idle:hover {
+          border-bottom-color: rgba(245, 158, 11, 0.42);
+        }
+
+        .vb-date-muted::before {
+          background:
+            linear-gradient(
+              180deg,
+              rgba(255, 255, 255, 0.025),
+              rgba(255, 255, 255, 0.006)
+            );
+        }
+
+        .vb-date-muted:hover {
+          border-bottom-color: rgba(115, 115, 115, 0.4);
+        }
+
+        @media (min-width: 640px) {
+          .vb-date-item {
+            flex-basis: 90px;
+            width: 90px;
+            min-width: 90px;
+            max-width: 90px;
+          }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .vb-daybar-shell::before {
+            animation: none;
+          }
         }
       `}</style>
     </div>
