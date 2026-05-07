@@ -4,24 +4,44 @@ set -euo pipefail
 : "${CRON_BASE_URL:?Missing CRON_BASE_URL}"
 : "${CRON_SECRET:?Missing CRON_SECRET}"
 
-TICKS="${TICKS:-10}"
-SLEEP_SECONDS="${SLEEP_SECONDS:-30}"
-ENDPOINT="${ENDPOINT:-/api/cron/live-bsd-sync}"
+INTERVAL_SECONDS="${LIVE_BSD_INTERVAL_SECONDS:-15}"
+MAX_RUNTIME_SECONDS="${LIVE_BSD_MAX_RUNTIME_SECONDS:-270}"
 
-BASE_URL="${CRON_BASE_URL%/}"
+started_at="$(date +%s)"
+tick=1
 
-for i in $(seq 1 "$TICKS"); do
-  echo "LIVE BSD sync tick ${i}/${TICKS} at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+while true; do
+  now="$(date +%s)"
+  elapsed=$((now - started_at))
 
-  curl --fail-with-body --show-error --silent --location --max-time 25 \
-    -X POST "${BASE_URL}${ENDPOINT}" \
+  if [ "$elapsed" -ge "$MAX_RUNTIME_SECONDS" ]; then
+    echo "LIVE BSD sync finished after ${elapsed}s"
+    break
+  fi
+
+  echo "LIVE BSD sync tick ${tick}, elapsed ${elapsed}s"
+
+  # ZOSTAW TU SWÓJ OBECNY CURL DO LIVE BSD SYNC
+  # Przykład:
+  curl -fsS --max-time 25 -X POST "${CRON_BASE_URL}/api/cron/live-bsd-sync" \
     -H "content-type: application/json" \
     -H "x-cron-secret: ${CRON_SECRET}" \
-    --data '{"windowHours":6,"source":"github-actions"}'
+    --data '{"tz":"Europe/Warsaw"}' \
+    || echo "LIVE BSD sync tick ${tick} failed"
 
-  echo
+  tick=$((tick + 1))
 
-  if [ "$i" -lt "$TICKS" ]; then
-    sleep "$SLEEP_SECONDS"
+  now="$(date +%s)"
+  elapsed=$((now - started_at))
+  remaining=$((MAX_RUNTIME_SECONDS - elapsed))
+
+  if [ "$remaining" -le 0 ]; then
+    break
+  fi
+
+  if [ "$remaining" -lt "$INTERVAL_SECONDS" ]; then
+    sleep "$remaining"
+  else
+    sleep "$INTERVAL_SECONDS"
   fi
 done
