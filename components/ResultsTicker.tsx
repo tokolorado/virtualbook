@@ -76,12 +76,21 @@ export default function ResultsTicker({ className }: { className?: string }) {
     };
   }, []);
 
-  const tickerItems = useMemo(() => {
-    if (!items.length) return [];
-
-    // Minimum 3 kopie, żeby animacja działała też na szerokim desktopie,
-    // nawet gdy lista wyników jest krótka.
-    return [...items, ...items, ...items];
+  const renderItems = useMemo(() => {
+    return items.map((item, index) => (
+      <span
+        key={`${item.id}-${index}`}
+        className="mr-12 inline-flex shrink-0 items-center gap-2 text-xs font-bold text-neutral-300"
+      >
+        <span className="h-1.5 w-1.5 rounded-full border border-neutral-600" />
+        <span className="text-neutral-500">FT</span>
+        <span>{cleanResultName(item.home)}</span>
+        <span className="text-white">
+          {item.homeScore} - {item.awayScore}
+        </span>
+        <span>{cleanResultName(item.away)}</span>
+      </span>
+    ));
   }, [items]);
 
   if (!loaded || !items.length) {
@@ -107,20 +116,10 @@ export default function ResultsTicker({ className }: { className?: string }) {
 
         <div className="relative min-w-0 flex-1 overflow-hidden">
           <div className="vb-results-ticker flex w-max min-w-max whitespace-nowrap pl-6">
-            {tickerItems.map((item, index) => (
-              <span
-                key={`${item.id}-${index}`}
-                className="mr-12 inline-flex shrink-0 items-center gap-2 text-xs font-bold text-neutral-300"
-              >
-                <span className="h-1.5 w-1.5 rounded-full border border-neutral-600" />
-                <span className="text-neutral-500">FT</span>
-                <span>{cleanResultName(item.home)}</span>
-                <span className="text-white">
-                  {item.homeScore} - {item.awayScore}
-                </span>
-                <span>{cleanResultName(item.away)}</span>
-              </span>
-            ))}
+            <div className="flex shrink-0">{renderItems}</div>
+            <div className="flex shrink-0" aria-hidden="true">
+              {renderItems}
+            </div>
           </div>
         </div>
       </div>
@@ -130,20 +129,19 @@ export default function ResultsTicker({ className }: { className?: string }) {
           from {
             transform: translate3d(0, 0, 0);
           }
+
           to {
-            transform: translate3d(-33.333%, 0, 0);
+            transform: translate3d(-50%, 0, 0);
           }
         }
 
         .vb-results-ticker {
-          animation: vb-results-ticker 38s linear infinite;
+          animation-name: vb-results-ticker;
+          animation-duration: 34s;
+          animation-timing-function: linear;
+          animation-iteration-count: infinite;
+          animation-play-state: running;
           will-change: transform;
-        }
-
-        @media (hover: hover) {
-          .vb-results-ticker:hover {
-            animation-play-state: paused;
-          }
         }
 
         @media (prefers-reduced-motion: reduce) {

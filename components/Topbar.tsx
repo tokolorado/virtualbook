@@ -24,18 +24,19 @@ type RefreshBalanceDetail = {
 type NavItem = {
   href: string;
   label: string;
+  icon: string;
   requiresAuth?: boolean;
   adminOnly?: boolean;
 };
 
 const BASE_NAV: NavItem[] = [
-  { href: "/events", label: "Mecze" },
-  { href: "/leaderboard", label: "Ranking" },
-  { href: "/bets", label: "Kupony", requiresAuth: true },
-  { href: "/quiz", label: "Quizy", requiresAuth: true },
-  { href: "/missions", label: "Misje", requiresAuth: true },
-  { href: "/groups", label: "Grupy", requiresAuth: true },
-  { href: "/admin", label: "Admin", requiresAuth: true, adminOnly: true },
+  { href: "/events", label: "Mecze", icon: "⚽" },
+  { href: "/leaderboard", label: "Ranking", icon: "🏆" },
+  { href: "/bets", label: "Kupony", icon: "🎫", requiresAuth: true },
+  { href: "/quiz", label: "Quizy", icon: "❓", requiresAuth: true },
+  { href: "/missions", label: "Misje", icon: "🎯", requiresAuth: true },
+  { href: "/groups", label: "Grupy", icon: "👥", requiresAuth: true },
+  { href: "/admin", label: "Admin", icon: "⚙️", requiresAuth: true, adminOnly: true },
 ];
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -55,25 +56,22 @@ function isPathActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-function NavLinkItem({
+function DesktopNavLink({
   href,
   label,
   active,
-  compact = false,
   hasAttention = false,
 }: {
   href: string;
   label: string;
   active: boolean;
-  compact?: boolean;
   hasAttention?: boolean;
 }) {
   return (
     <Link
       href={href}
       className={cx(
-        "relative rounded-2xl border text-sm font-medium transition",
-        compact ? "whitespace-nowrap px-3 py-2" : "px-4 py-2.5",
+        "relative rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
         active
           ? "border-white/15 bg-white text-black"
           : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800 hover:text-white"
@@ -84,6 +82,44 @@ function NavLinkItem({
       {hasAttention ? (
         <span
           className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-yellow-400 ring-2 ring-neutral-950"
+          title="Są mecze wymagające review"
+        />
+      ) : null}
+    </Link>
+  );
+}
+
+function MobileNavIcon({
+  href,
+  label,
+  icon,
+  active,
+  hasAttention = false,
+}: {
+  href: string;
+  label: string;
+  icon: string;
+  active: boolean;
+  hasAttention?: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={cx(
+        "relative flex aspect-square min-w-0 flex-col items-center justify-center rounded-2xl border text-center transition",
+        active
+          ? "border-white/15 bg-white text-black"
+          : "border-neutral-800 bg-neutral-950 text-neutral-200 active:bg-neutral-800"
+      )}
+    >
+      <span className="text-[18px] leading-none">{icon}</span>
+      <span className="mt-1 max-w-full truncate px-1 text-[9px] font-bold leading-none tracking-tight">
+        {label}
+      </span>
+
+      {hasAttention ? (
+        <span
+          className="absolute right-1 top-1 h-2.5 w-2.5 rounded-full bg-yellow-400 ring-2 ring-neutral-950"
           title="Są mecze wymagające review"
         />
       ) : null}
@@ -262,18 +298,18 @@ export default function Topbar() {
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-[70] border-b border-neutral-800/90 bg-neutral-950/90 backdrop-blur-xl">
-        <div className="w-full px-3 py-3 sm:px-4 xl:px-6">
-          <div className="flex items-center justify-between gap-3">
+        <div className="w-full px-2 py-2 sm:px-4 sm:py-3 xl:px-6">
+          <div className="flex items-center justify-between gap-2 sm:gap-3">
             <div className="flex min-w-0 items-center gap-3">
               <Link
                 href="/events"
-                className="group flex items-center gap-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 transition hover:bg-neutral-900"
+                className="group flex shrink-0 items-center gap-2 rounded-2xl border border-neutral-800 bg-neutral-950 px-2 py-2 transition hover:bg-neutral-900 sm:gap-3 sm:px-3"
               >
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-neutral-800 bg-white text-sm font-black text-black">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-neutral-800 bg-white text-xs font-black text-black sm:h-10 sm:w-10 sm:text-sm">
                   VB
                 </div>
 
-                <div className="min-w-0">
+                <div className="hidden min-w-0 min-[420px]:block">
                   <div className="text-sm font-semibold tracking-wide text-white">
                     VirtualBook
                   </div>
@@ -285,14 +321,12 @@ export default function Topbar() {
 
               <nav className="hidden items-center gap-2 lg:flex">
                 {visibleNav.map((item) => (
-                  <NavLinkItem
+                  <DesktopNavLink
                     key={item.href}
                     href={item.href}
                     label={item.label}
                     active={isPathActive(pathname, item.href)}
-                    hasAttention={
-                      item.href === "/admin" && mappingReviewCount > 0
-                    }
+                    hasAttention={item.href === "/admin" && mappingReviewCount > 0}
                   />
                 ))}
               </nav>
@@ -307,9 +341,7 @@ export default function Topbar() {
                         Saldo
                       </div>
                       <div className="text-sm font-semibold text-white">
-                        {balanceVb === null
-                          ? "..."
-                          : `${formatVB(balanceVb)} VB`}
+                        {balanceVb === null ? "..." : `${formatVB(balanceVb)} VB`}
                       </div>
                     </div>
                   </div>
@@ -317,7 +349,7 @@ export default function Topbar() {
                   <Link
                     href="/account"
                     className={cx(
-                      "flex min-w-[88px] flex-col items-center justify-center rounded-2xl border px-3 py-2 text-center text-sm font-medium leading-tight transition sm:px-4 sm:py-2.5",
+                      "flex h-11 min-w-[96px] flex-col items-center justify-center rounded-2xl border px-3 text-center text-xs font-semibold leading-tight transition sm:min-w-[112px] sm:px-4 sm:text-sm",
                       accountActive
                         ? "border-white/15 bg-white text-black"
                         : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
@@ -336,7 +368,7 @@ export default function Topbar() {
 
                   <button
                     onClick={logout}
-                    className="rounded-2xl border border-neutral-800 bg-neutral-950 px-3 py-2 text-sm font-medium text-neutral-200 transition hover:bg-neutral-800 sm:px-4 sm:py-2.5"
+                    className="flex h-11 min-w-[96px] items-center justify-center rounded-2xl border border-neutral-800 bg-neutral-950 px-3 text-xs font-semibold text-neutral-200 transition hover:bg-neutral-800 sm:min-w-[112px] sm:px-4 sm:text-sm"
                   >
                     Wyloguj
                   </button>
@@ -346,7 +378,7 @@ export default function Topbar() {
                   <Link
                     href="/login"
                     className={cx(
-                      "rounded-2xl border px-4 py-2.5 text-sm font-medium transition",
+                      "flex h-11 min-w-[88px] items-center justify-center rounded-2xl border px-3 text-xs font-semibold transition sm:min-w-[104px] sm:px-4 sm:text-sm",
                       isPathActive(pathname, "/login")
                         ? "border-white/15 bg-white text-black"
                         : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-800"
@@ -357,7 +389,7 @@ export default function Topbar() {
 
                   <Link
                     href="/register"
-                    className="rounded-2xl bg-white px-4 py-2.5 text-sm font-semibold text-black transition hover:bg-neutral-200"
+                    className="flex h-11 min-w-[88px] items-center justify-center rounded-2xl bg-white px-3 text-xs font-semibold text-black transition hover:bg-neutral-200 sm:min-w-[104px] sm:px-4 sm:text-sm"
                   >
                     Rejestracja
                   </Link>
@@ -366,28 +398,27 @@ export default function Topbar() {
             </div>
           </div>
 
-          <div className="mt-3 lg:hidden">
-            <div className="overflow-x-auto pb-1">
-              <div className="flex items-center gap-2">
-                {visibleNav.map((item) => (
-                  <NavLinkItem
-                    key={item.href}
-                    href={item.href}
-                    label={item.label}
-                    active={isPathActive(pathname, item.href)}
-                    hasAttention={
-                      item.href === "/admin" && mappingReviewCount > 0
-                    }
-                    compact
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
+          <nav
+            className="mt-2 grid gap-2 lg:hidden"
+            style={{
+              gridTemplateColumns: `repeat(${visibleNav.length}, minmax(0, 1fr))`,
+            }}
+          >
+            {visibleNav.map((item) => (
+              <MobileNavIcon
+                key={item.href}
+                href={item.href}
+                label={item.label}
+                icon={item.icon}
+                active={isPathActive(pathname, item.href)}
+                hasAttention={item.href === "/admin" && mappingReviewCount > 0}
+              />
+            ))}
+          </nav>
         </div>
       </header>
 
-      <div className="h-[120px] lg:h-[76px]" aria-hidden="true" />
+      <div className="h-[124px] sm:h-[128px] lg:h-[76px]" aria-hidden="true" />
     </>
   );
 }

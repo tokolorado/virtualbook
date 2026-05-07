@@ -1187,22 +1187,22 @@ function PosterTeam({
         <LeagueIcon
           src={crest}
           alt={name}
-          size={52}
+          size={42}
           fallback={name.slice(0, 1)}
-          className="relative rounded-2xl border-white/15 bg-white p-2 shadow-[0_10px_24px_rgba(0,0,0,0.34)] sm:p-3"
+          className="relative rounded-2xl border-white/15 bg-white p-1.5 shadow-[0_8px_20px_rgba(0,0,0,0.32)] sm:p-3"
         />
       </div>
 
-      <div className="mt-2 max-w-full truncate text-[13px] font-semibold tracking-tight text-white sm:mt-3 sm:text-lg">
+      <div className="mt-1.5 max-w-full truncate text-[12px] font-semibold tracking-tight text-white sm:mt-3 sm:text-lg">
         {name}
       </div>
 
-      <div className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.2em] text-neutral-500 sm:mt-1 sm:text-[10px]">
+      <div className="hidden sm:mt-1 sm:block sm:text-[10px] sm:font-bold sm:uppercase sm:tracking-[0.2em] sm:text-neutral-500">
         {side === "home" ? "HOME" : "AWAY"}
       </div>
 
       {showScore ? (
-        <div className="mt-1 min-w-9 rounded-lg border border-white/10 bg-white/[0.06] px-2 py-1 text-center text-sm font-semibold text-white shadow-inner sm:mt-2 sm:min-w-11 sm:px-3 sm:py-1.5 sm:text-xl">
+        <div className="mt-1 min-w-8 rounded-lg border border-white/10 bg-white/[0.06] px-2 py-0.5 text-center text-xs font-semibold text-white shadow-inner sm:mt-2 sm:min-w-11 sm:px-3 sm:py-1.5 sm:text-xl">
           {score ?? 0}
         </div>
       ) : null}
@@ -2372,7 +2372,7 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
       <article
         key={m.id}
         className={cn(
-          "group overflow-hidden rounded-[22px] border shadow-[0_14px_42px_rgba(0,0,0,0.34)] transition duration-300 hover:border-cyan-300/35 sm:rounded-[26px] sm:shadow-[0_20px_70px_rgba(0,0,0,0.42)] sm:hover:-translate-y-0.5 sm:hover:shadow-[0_28px_95px_rgba(6,182,212,0.16)]",
+          "group overflow-hidden rounded-[20px] border shadow-[0_12px_34px_rgba(0,0,0,0.34)] transition duration-300 hover:border-cyan-300/35 sm:rounded-[26px] sm:shadow-[0_20px_70px_rgba(0,0,0,0.42)] sm:hover:-translate-y-0.5 sm:hover:shadow-[0_28px_95px_rgba(6,182,212,0.16)]",
           isLive
             ? "border-red-400/30 bg-red-950/10"
             : m.oddsMeta?.isModel
@@ -2380,12 +2380,12 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
               : "border-white/10 bg-[#07090f]"
         )}
       >
-        <div className="relative overflow-hidden bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.26),transparent_38%),linear-gradient(120deg,#050810,#0a1020_48%,#05070c)] bg-[size:48px_48px,48px_48px,100%_100%,100%_100%] px-3 py-3 sm:min-h-[260px] sm:bg-[size:72px_72px,72px_72px,100%_100%,100%_100%] sm:px-6 sm:py-5 lg:min-h-[300px]">
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/55 to-transparent sm:h-24" />
+        <div className="relative overflow-hidden bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.24),transparent_38%),linear-gradient(120deg,#050810,#0a1020_48%,#05070c)] bg-[size:44px_44px,44px_44px,100%_100%,100%_100%] px-2.5 py-2.5 sm:min-h-[260px] sm:bg-[size:72px_72px,72px_72px,100%_100%,100%_100%] sm:px-6 sm:py-5 lg:min-h-[300px]">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/55 to-transparent sm:h-24" />
           <div className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-[radial-gradient(circle_at_30%_50%,rgba(20,184,166,0.16),transparent_52%)]" />
           <div className="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-[radial-gradient(circle_at_70%_50%,rgba(59,130,246,0.18),transparent_52%)]" />
 
-          <div className="relative z-10 grid grid-cols-[minmax(0,1fr)_minmax(105px,0.85fr)_minmax(0,1fr)] items-center gap-2 sm:min-h-[230px] sm:grid-cols-2 sm:gap-4 lg:min-h-[250px] lg:grid-cols-[1fr_1.05fr_1fr] lg:gap-6">
+          <div className="relative z-10 grid grid-cols-[minmax(0,1fr)_minmax(96px,0.78fr)_minmax(0,1fr)] items-center gap-2 sm:min-h-[230px] sm:grid-cols-2 sm:gap-4 lg:min-h-[250px] lg:grid-cols-[1fr_1.05fr_1fr] lg:gap-6">
             <PosterTeam
               name={m.home}
               crest={m.homeCrest}
@@ -2396,7 +2396,7 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
             />
 
             <div className="order-2 flex min-w-0 flex-col items-center text-center sm:order-3 sm:col-span-2 lg:order-2 lg:col-span-1">
-              <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.07] px-2 py-1 text-[8px] font-bold uppercase tracking-[0.12em] text-neutral-200 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur sm:gap-2 sm:px-4 sm:py-2 sm:text-[11px]">
+              <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.07] px-2 py-1 text-[8px] font-bold uppercase tracking-[0.11em] text-neutral-200 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur sm:gap-2 sm:px-4 sm:py-2 sm:text-[11px]">
                 <span
                   className={cn(
                     "h-1.5 w-1.5 shrink-0 rounded-full sm:h-2 sm:w-2",
@@ -2407,20 +2407,20 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
                 {distance ? (
                   <>
                     <span className="hidden text-neutral-500 sm:inline">/</span>
-                    <span className="max-w-[90px] truncate sm:max-w-none">
+                    <span className="max-w-[84px] truncate sm:max-w-none">
                       {distance}
                     </span>
                   </>
                 ) : null}
               </div>
 
-              <div className="mt-2 flex max-w-full items-center justify-center gap-1.5 text-[13px] font-semibold tracking-tight text-white sm:mt-4 sm:gap-2 sm:text-xl lg:text-2xl">
+              <div className="mt-1.5 flex max-w-full items-center justify-center gap-1.5 text-[12px] font-semibold tracking-tight text-white sm:mt-4 sm:gap-2 sm:text-xl lg:text-2xl">
                 <LeagueIcon
                   src={competitionMetaByCode[m.competitionCode]?.emblem ?? null}
                   alt={m.competitionName}
-                  size={16}
+                  size={14}
                   fallback={m.competitionCode.slice(0, 2)}
-                  className="rounded-full bg-white/8 sm:size-auto"
+                  className="rounded-full bg-white/8"
                 />
                 <span className="truncate">{m.competitionName}</span>
               </div>
@@ -2429,21 +2429,21 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
                 VS
               </div>
 
-              <div className="mt-1 text-[10px] font-semibold text-neutral-300 sm:mt-2 sm:text-sm">
+              <div className="mt-1 text-[9px] font-semibold text-neutral-300 sm:mt-2 sm:text-sm">
                 {formatLocalDateTime(m.kickoffUtc)}
               </div>
 
-              <div className="mt-1.5 flex justify-center sm:mt-2">
+              <div className="mt-1 flex justify-center sm:mt-2">
                 <MatchStatusPill match={m} nowMs={nowMs} />
               </div>
 
               {isLive ? (
-                <div className="mt-2 rounded-xl border border-red-400/30 bg-red-500/10 px-2 py-1 text-[10px] font-semibold text-red-100 shadow-[0_0_32px_rgba(248,113,113,0.14)] sm:mt-3 sm:rounded-2xl sm:px-4 sm:py-2 sm:text-sm">
-                  Na żywo {liveClock ? `- ${liveClock}` : ""}
+                <div className="mt-1.5 rounded-xl border border-red-400/30 bg-red-500/10 px-2 py-1 text-[9px] font-semibold text-red-100 shadow-[0_0_32px_rgba(248,113,113,0.14)] sm:mt-3 sm:rounded-2xl sm:px-4 sm:py-2 sm:text-sm">
+                  LIVE {liveClock ? `- ${liveClock}` : ""}
                 </div>
               ) : countdown ? (
                 <div
-                  className="mt-2 grid gap-1 sm:mt-3 sm:gap-2"
+                  className="mt-1.5 hidden gap-1 sm:mt-3 sm:grid sm:gap-2"
                   style={{
                     gridTemplateColumns: `repeat(${countdown.length}, minmax(0, 1fr))`,
                   }}
@@ -2451,12 +2451,12 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
                   {countdown.map((part) => (
                     <div
                       key={part.label}
-                      className="min-w-9 rounded-lg border border-white/10 bg-white/[0.07] px-1.5 py-1.5 text-center shadow-inner backdrop-blur sm:min-w-14 sm:rounded-2xl sm:px-3 sm:py-2"
+                      className="min-w-14 rounded-2xl border border-white/10 bg-white/[0.07] px-3 py-2 text-center shadow-inner backdrop-blur"
                     >
-                      <div className="text-sm font-black leading-none text-white sm:text-2xl">
+                      <div className="text-2xl font-black leading-none text-white">
                         {part.value}
                       </div>
-                      <div className="mt-0.5 text-[7px] font-bold uppercase tracking-[0.16em] text-neutral-500 sm:mt-1 sm:text-[9px]">
+                      <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.18em] text-neutral-500">
                         {part.label}
                       </div>
                     </div>
@@ -2467,7 +2467,7 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
               <button
                 type="button"
                 onClick={() => goMatch(m)}
-                className="mt-2 rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-neutral-950 shadow-[0_12px_36px_rgba(255,255,255,0.16)] transition hover:scale-[1.02] hover:bg-cyan-50 sm:mt-4 sm:px-6 sm:py-3 sm:text-sm"
+                className="mt-1.5 rounded-full bg-white px-3 py-1.5 text-[9px] font-bold text-neutral-950 shadow-[0_12px_36px_rgba(255,255,255,0.16)] transition hover:scale-[1.02] hover:bg-cyan-50 sm:mt-4 sm:px-6 sm:py-3 sm:text-sm"
               >
                 Otwórz <span className="hidden sm:inline">mecz</span> &rarr;
               </button>
@@ -2484,7 +2484,7 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
           </div>
         </div>
 
-        <div className="border-t border-white/10 bg-black/28 px-3 py-2.5 sm:px-6 sm:py-4">
+        <div className="border-t border-white/10 bg-black/28 px-2.5 py-2 sm:px-6 sm:py-4">
           {!checkingAdmin && isAdmin ? (
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <MatchDataQualityStrip match={m} />
