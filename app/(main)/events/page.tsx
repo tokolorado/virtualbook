@@ -102,6 +102,7 @@ type League = {
   code: string;
   name: string;
 };
+
 type CompetitionMeta = {
   name: string;
   emblem: string | null;
@@ -798,7 +799,6 @@ function readTeamCrestFromMatch(rawMatch: unknown, side: "home" | "away") {
   );
 }
 
-
 function buildMatchesFromPayload(payload: unknown, selectedDate: string): Match[] {
   const all: Match[] = [];
   const payloadRecord = asRecord(payload);
@@ -1390,7 +1390,7 @@ export default function EventsPage() {
 
   if (initialSelectedDateRef.current === null) {
     initialSelectedDateRef.current = selectedDate;
-}
+  }
 
   const [matches, setMatches] = useState<Match[]>([]);
   const [loadingMatches, setLoadingMatches] = useState(false);
@@ -1519,9 +1519,7 @@ export default function EventsPage() {
     return () => window.clearInterval(id);
   }, [selectedDate, matches]);
 
-
-
-    const availableLeagues = useMemo(() => {
+  const availableLeagues = useMemo(() => {
     const baseOrder = new Map(
       FREE_TIER_LEAGUES.map((league, index) => [league.code, index])
     );
@@ -1555,9 +1553,6 @@ export default function EventsPage() {
       return a.name.localeCompare(b.name, "pl");
     });
   }, [matches]);
-
-
-
 
   const selectedLeagueLabel = useMemo(() => {
     if (selectedLeague === "ALL") return "Wszystkie ligi";
@@ -1654,6 +1649,7 @@ export default function EventsPage() {
     },
     []
   );
+
   const refreshCurrentDay = () => {
     delete matchesCacheRef.current[selectedDate];
     delete matchesLoadedAtCacheRef.current[selectedDate];
@@ -2361,7 +2357,7 @@ export default function EventsPage() {
 
               {isLive ? (
                 <div className="mt-5 rounded-2xl border border-red-400/30 bg-red-500/10 px-5 py-3 text-sm font-semibold text-red-100 shadow-[0_0_40px_rgba(248,113,113,0.16)]">
-                  Na zywo {liveClock ? `- ${liveClock}` : ""}
+                  Na żywo {liveClock ? `- ${liveClock}` : ""}
                 </div>
               ) : countdown ? (
                 <div className="mt-5 grid grid-cols-4 gap-2 sm:gap-3">
@@ -2386,7 +2382,7 @@ export default function EventsPage() {
                 onClick={() => goMatch(m)}
                 className="mt-6 rounded-full bg-white px-6 py-3 text-sm font-bold text-neutral-950 shadow-[0_16px_45px_rgba(255,255,255,0.18)] transition hover:scale-[1.02] hover:bg-cyan-50"
               >
-                Otworz mecz &rarr;
+                Otwórz mecz &rarr;
               </button>
             </div>
 
@@ -2404,18 +2400,19 @@ export default function EventsPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               {!checkingAdmin && isAdmin ? (
-              <>
-                <MatchDataQualityStrip match={m} />
-                <PredictionInlineStrip
-                  prediction={m.prediction}
-                  homeTeam={m.home}
-                  awayTeam={m.away}
-                />
-              </>
+                <>
+                  <MatchDataQualityStrip match={m} />
+                  <PredictionInlineStrip
+                    prediction={m.prediction}
+                    homeTeam={m.home}
+                    awayTeam={m.away}
+                  />
+                </>
               ) : null}
             </div>
+
             <div className="text-[11px] font-semibold text-neutral-500">
-              Kliknij kurs, zeby dodac typ do kuponu.
+              Kliknij kurs, żeby dodać typ do kuponu.
             </div>
           </div>
           <div className="mt-4">{renderMarketButtons(m)}</div>
@@ -2423,6 +2420,7 @@ export default function EventsPage() {
       </article>
     );
   };
+
   const dayToolsPanel = (
     <details className="rounded-3xl border border-neutral-800 bg-neutral-950/70 p-4">
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
@@ -2479,7 +2477,7 @@ export default function EventsPage() {
     </details>
   );
 
-    const renderCalendarPanel = () => (
+  const renderCalendarPanel = () => (
     <SurfaceCard className="p-4">
       <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
         Kalendarz
@@ -2711,216 +2709,54 @@ export default function EventsPage() {
   };
 
   return (
-    <div className="space-y-5">
-      <SurfaceCard className="overflow-hidden">
-        <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.11),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
-              VirtualBook Football
+    <div className="grid gap-5 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
+      <aside className="hidden min-w-0 xl:block">
+        <div className="sticky top-24 space-y-4">
+          {renderCalendarPanel()}
+
+          <SurfaceCard className="p-4">
+            <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+              Ligi i filtry
             </div>
 
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
-              Mecze, kursy i typy
-            </h1>
-
-            {!checkingAdmin && isAdmin ? (
-              <>
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <StatMiniCard
-                    label="Mecze"
-                    value={filteredMatches.length}
-                    hint={selectedLeagueLabel}
-                  />
-                  <StatMiniCard
-                    label="LIVE"
-                    value={liveMatches.length}
-                    tone={liveMatches.length > 0 ? "red" : "neutral"}
-                  />
-                  <StatMiniCard
-                    label="Otwarte"
-                    value={openMatches.length}
-                    tone="green"
-                  />
-                  <StatMiniCard
-                    label="Z kursami"
-                    value={`${matchesWithOddsCount}/${filteredMatches.length}`}
-                    hint="1X2"
-                    tone="blue"
-                  />
-                </div>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <SmallPill>
-                    Liga:{" "}
-                    <span className="ml-1 font-semibold text-white">
-                      {selectedLeagueLabel}
-                    </span>
-                  </SmallPill>
-
-                  {matchesLoadedAt ? (
-                    <SmallPill>
-                      Aktualizacja:{" "}
-                      {new Date(matchesLoadedAt).toLocaleTimeString("pl-PL", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </SmallPill>
-                  ) : null}
-
-                  <SmallPill tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}>
-                    AI predictions:{" "}
-                    <span className="ml-1 font-semibold text-white">
-                      {matchesWithPredictionsCount}
-                    </span>
-                  </SmallPill>
-
-                  {beyondHorizon ? (
-                    <SmallPill tone="yellow">Poza horyzontem danych</SmallPill>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="grid gap-3 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-500">
-              Szukaj meczu, drużyny albo ligi
-            </label>
-            <input
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="np. Arsenal, Serie A, Real..."
-              className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-neutral-600"
-            />
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-500">
-              Sortowanie
-            </label>
-            <select
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
-              className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none focus:border-neutral-600"
-            >
-              <option value="smart">Smart: LIVE i najbliższe</option>
-              <option value="time">Godzina meczu</option>
-              <option value="league">Liga</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-500">
-              Widok
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveRightTab("matches")}
-                className={cn(
-                  "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
-                  activeRightTab === "matches"
-                    ? "border-white bg-white text-black"
-                    : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
-                )}
-              >
-                Mecze
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveRightTab("table")}
-                disabled={selectedLeague === "ALL"}
-                className={cn(
-                  "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
-                  selectedLeague === "ALL"
-                    ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
-                    : activeRightTab === "table"
-                      ? "border-white bg-white text-black"
-                      : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
-                )}
-              >
-                Tabela
-              </button>
+            <div className="mt-3 text-2xl font-semibold text-white">
+              Oferta dnia
             </div>
-          </div>
-        </div>
 
-        <div className="px-4 pb-5 text-sm sm:px-5">
-          {loadingMatches ? (
-            <span className="text-neutral-400">Ładowanie meczów…</span>
-          ) : matchesError ? (
-            <span className="text-red-300">{matchesError}</span>
-          ) : beyondHorizon ? (
-            <span className="text-neutral-400">
-              Jeszcze brak meczów, wkrótce się pojawią. Horyzont danych:{" "}
-              <span className="font-semibold text-white">{horizonYmd ?? "—"}</span>
-            </span>
-          ) : (
-            <span className="text-neutral-500">
-              Wyświetlasz{" "}
-              <span className="font-semibold text-white">
-                {filteredMatches.length}
-              </span>{" "}
-              meczów dla filtra{" "}
-              <span className="font-semibold text-white">
-                {selectedLeagueLabel}
-              </span>
-              .
-            </span>
-          )}
-        </div>
-      </SurfaceCard>
+            <p className="mt-3 text-sm leading-6 text-neutral-400">
+              Wybierz ligę, sprawdź liczbę spotkań i szybko przejdź do kursów
+              1X2.
+            </p>
 
-      <div className="grid gap-5 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className="hidden xl:block min-w-0">
-          <div className="sticky top-24 space-y-4">
-            {renderCalendarPanel()}
-
-            <SurfaceCard className="p-4">
-              <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
-                Ligi i filtry
+            <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
+                Wybrany dzień
               </div>
 
-              <div className="mt-3 text-2xl font-semibold text-white">
-                Oferta dnia
+              <div className="mt-2 text-2xl font-semibold text-white">
+                {selectedDate}
               </div>
 
-              <p className="mt-3 text-sm leading-6 text-neutral-400">
-                Wybierz ligę, sprawdź liczbę spotkań i szybko przejdź do kursów
-                1X2.
-              </p>
-
-              <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-4">
-                <div className="text-[11px] uppercase tracking-[0.18em] text-neutral-500">
-                  Wybrany dzień
-                </div>
-                <div className="mt-2 text-2xl font-semibold text-white">
-                  {selectedDate}
-                </div>
-
-            {!checkingAdmin && isAdmin ? (
+              {!checkingAdmin && isAdmin ? (
                 <div className="mt-4 flex flex-wrap gap-2">
                   <SmallPill tone="red">LIVE {liveMatches.length}</SmallPill>
                   <SmallPill tone="green">Open {openMatches.length}</SmallPill>
                   <SmallPill>Finished {finishedMatches.length}</SmallPill>
                 </div>
-                ) : null}
-              </div>
+              ) : null}
+            </div>
 
-              <div className="mt-5 space-y-2">
-                <LeagueButton
-                  active={selectedLeague === "ALL"}
-                  label="Wszystkie ligi"
-                  count={leagueCounts.ALL ?? 0}
-                  emblem={null}
-                  onClick={() => {
-                    setSelectedLeague("ALL");
-                    setActiveRightTab("matches");
-                  }}
-                />
+            <div className="mt-5 space-y-2">
+              <LeagueButton
+                active={selectedLeague === "ALL"}
+                label="Wszystkie ligi"
+                count={leagueCounts.ALL ?? 0}
+                emblem={null}
+                onClick={() => {
+                  setSelectedLeague("ALL");
+                  setActiveRightTab("matches");
+                }}
+              />
 
               {availableLeagues.map((lg) => (
                 <LeagueButton
@@ -2936,31 +2772,197 @@ export default function EventsPage() {
                   }}
                 />
               ))}
+            </div>
+          </SurfaceCard>
+        </div>
+      </aside>
+
+      <div className="min-w-0 space-y-5">
+        <SurfaceCard className="overflow-hidden">
+          <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.11),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
+            <div className="min-w-0">
+              <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
+                VirtualBook Football
               </div>
-            </SurfaceCard>
-          </div>
-        </aside>
 
-        <div className="min-w-0 space-y-5">
-          <div className="xl:hidden">
-            {renderCalendarPanel()}
+              <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+                Mecze, kursy i typy
+              </h1>
+
+              {!checkingAdmin && isAdmin ? (
+                <>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <StatMiniCard
+                      label="Mecze"
+                      value={filteredMatches.length}
+                      hint={selectedLeagueLabel}
+                    />
+                    <StatMiniCard
+                      label="LIVE"
+                      value={liveMatches.length}
+                      tone={liveMatches.length > 0 ? "red" : "neutral"}
+                    />
+                    <StatMiniCard
+                      label="Otwarte"
+                      value={openMatches.length}
+                      tone="green"
+                    />
+                    <StatMiniCard
+                      label="Z kursami"
+                      value={`${matchesWithOddsCount}/${filteredMatches.length}`}
+                      hint="1X2"
+                      tone="blue"
+                    />
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <SmallPill>
+                      Liga:{" "}
+                      <span className="ml-1 font-semibold text-white">
+                        {selectedLeagueLabel}
+                      </span>
+                    </SmallPill>
+
+                    {matchesLoadedAt ? (
+                      <SmallPill>
+                        Aktualizacja:{" "}
+                        {new Date(matchesLoadedAt).toLocaleTimeString("pl-PL", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </SmallPill>
+                    ) : null}
+
+                    <SmallPill
+                      tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}
+                    >
+                      AI predictions:{" "}
+                      <span className="ml-1 font-semibold text-white">
+                        {matchesWithPredictionsCount}
+                      </span>
+                    </SmallPill>
+
+                    {beyondHorizon ? (
+                      <SmallPill tone="yellow">Poza horyzontem danych</SmallPill>
+                    ) : null}
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
 
-          <div className="overflow-x-auto pb-1 xl:hidden">
-            <div className="flex w-max gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedLeague("ALL");
-                  setActiveRightTab("matches");
-                }}
-                className={cn(
-                  "flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition",
-                  selectedLeague === "ALL"
-                    ? "border-white bg-white text-black"
-                    : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
-                )}
+          <div className="grid gap-3 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-500">
+                Szukaj meczu, drużyny albo ligi
+              </label>
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="np. Arsenal, Serie A, Real..."
+                className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-neutral-600"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-500">
+                Sortowanie
+              </label>
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none focus:border-neutral-600"
               >
+                <option value="smart">Smart: LIVE i najbliższe</option>
+                <option value="time">Godzina meczu</option>
+                <option value="league">Liga</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-500">
+                Widok
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("matches")}
+                  className={cn(
+                    "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                    activeRightTab === "matches"
+                      ? "border-white bg-white text-black"
+                      : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
+                  )}
+                >
+                  Mecze
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab("table")}
+                  disabled={selectedLeague === "ALL"}
+                  className={cn(
+                    "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                    selectedLeague === "ALL"
+                      ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+                      : activeRightTab === "table"
+                        ? "border-white bg-white text-black"
+                        : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
+                  )}
+                >
+                  Tabela
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-4 pb-5 text-sm sm:px-5">
+            {loadingMatches ? (
+              <span className="text-neutral-400">Ładowanie meczów…</span>
+            ) : matchesError ? (
+              <span className="text-red-300">{matchesError}</span>
+            ) : beyondHorizon ? (
+              <span className="text-neutral-400">
+                Jeszcze brak meczów, wkrótce się pojawią. Horyzont danych:{" "}
+                <span className="font-semibold text-white">
+                  {horizonYmd ?? "—"}
+                </span>
+              </span>
+            ) : (
+              <span className="text-neutral-500">
+                Wyświetlasz{" "}
+                <span className="font-semibold text-white">
+                  {filteredMatches.length}
+                </span>{" "}
+                meczów dla filtra{" "}
+                <span className="font-semibold text-white">
+                  {selectedLeagueLabel}
+                </span>
+                .
+              </span>
+            )}
+          </div>
+        </SurfaceCard>
+
+        <div className="xl:hidden">
+          {renderCalendarPanel()}
+        </div>
+
+        <div className="overflow-x-auto pb-1 xl:hidden">
+          <div className="flex w-max gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedLeague("ALL");
+                setActiveRightTab("matches");
+              }}
+              className={cn(
+                "flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                selectedLeague === "ALL"
+                  ? "border-white bg-white text-black"
+                  : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+              )}
+            >
               <LeagueIcon
                 src={null}
                 alt="Wszystkie ligi"
@@ -2985,23 +2987,23 @@ export default function EventsPage() {
               >
                 {leagueCounts.ALL ?? 0}
               </span>
-              </button>
+            </button>
 
-              {availableLeagues.map((lg) => (
-                <button
-                  key={lg.code}
-                  type="button"
-                  onClick={() => {
-                    setSelectedLeague(lg.code);
-                    setActiveRightTab("matches");
-                  }}
-                  className={cn(
-                    "flex items-center gap-2 whitespace-nowrap rounded-2xl border px-4 py-3 text-sm font-semibold transition",
-                    selectedLeague === lg.code
-                      ? "border-white bg-white text-black"
-                      : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
-                  )}
-                >
+            {availableLeagues.map((lg) => (
+              <button
+                key={lg.code}
+                type="button"
+                onClick={() => {
+                  setSelectedLeague(lg.code);
+                  setActiveRightTab("matches");
+                }}
+                className={cn(
+                  "flex items-center gap-2 whitespace-nowrap rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                  selectedLeague === lg.code
+                    ? "border-white bg-white text-black"
+                    : "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                )}
+              >
                 <LeagueIcon
                   src={competitionMetaByCode[lg.code]?.emblem ?? null}
                   alt={lg.name}
@@ -3026,115 +3028,114 @@ export default function EventsPage() {
                 >
                   {leagueCounts[lg.code] ?? 0}
                 </span>
-                </button>
-              ))}
-            </div>
+              </button>
+            ))}
           </div>
-
-          {activeRightTab === "matches" ? (
-            loadingMatches ? (
-              <LoadingMatchesSkeleton />
-            ) : matchesError ? (
-              <SurfaceCard className="border-red-500/20 bg-red-500/10 p-6">
-                <div className="text-sm font-semibold text-red-200">
-                  Nie udało się pobrać meczów
-                </div>
-                <div className="mt-1 text-sm text-red-300">{matchesError}</div>
-                <button
-                  type="button"
-                  onClick={refreshCurrentDay}
-                  className="mt-4 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm text-neutral-200 transition hover:bg-neutral-900"
-                >
-                  Spróbuj ponownie
-                </button>
-              </SurfaceCard>
-            ) : filteredMatches.length === 0 ? (
-              <EmptyStateCard
-                title={
-                  beyondHorizon
-                    ? "Mecze pojawią się później"
-                    : "Brak meczów dla tego filtra"
-                }
-                description={
-                  beyondHorizon ? (
-                    <>
-                      Dodajemy mecze z wyprzedzeniem. Obecny horyzont danych:{" "}
-                      <span className="font-semibold text-white">
-                        {horizonYmd ?? "—"}
-                      </span>
-                      .
-                    </>
-                  ) : normalizedSearchQuery ? (
-                    <>
-                      Nie znaleziono spotkań dla wyszukiwania{" "}
-                      <span className="font-semibold text-white">
-                        „{searchQuery.trim()}”
-                      </span>
-                      . Wyczyść wyszukiwarkę albo zmień ligę.
-                    </>
-                  ) : (
-                    "Nie ma spotkań dla wybranego dnia lub ligi."
-                  )
-                }
-                action={
-                  normalizedSearchQuery ? (
-                    <button
-                      type="button"
-                      onClick={() => setSearchQuery("")}
-                      className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 hover:bg-neutral-900"
-                    >
-                      Wyczyść wyszukiwanie
-                    </button>
-                  ) : null
-                }
-              />
-            ) : (
-              <div className="space-y-5">
-                {liveMatches.length > 0 ? (
-                  <div className="space-y-3">
-                    <SectionHeader
-                      title="LIVE"
-                      count={liveMatches.length}
-                      badgeClassName="border-red-500/30 bg-red-500/10 text-red-300"
-                    />
-                    <div className="space-y-3">
-                      {liveMatches.map((m) => renderMatchCard(m))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {regularOpenMatches.length > 0 ? (
-                  <div className="space-y-3">
-                    <SectionHeader
-                      title={openSectionTitle}
-                      count={regularOpenMatches.length}
-                      subtitle="Zakłady zamykają się minutę przed startem meczu."
-                    />
-                    <div className="space-y-3">
-                      {regularOpenMatches.map((m) => renderMatchCard(m))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {finishedMatches.length > 0 ? (
-                  <div className="space-y-3">
-                    <SectionHeader
-                      title="Zakończone"
-                      count={finishedMatches.length}
-                    />
-                    <div className="space-y-3">
-                      {finishedMatches.map((m) => renderMatchCard(m))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {!checkingAdmin && isAdmin ? dayToolsPanel : null}
-              </div>
-            )
-          ) : (
-            renderStandingsPanel()
-          )}
         </div>
+
+        {activeRightTab === "matches" ? (
+          loadingMatches ? (
+            <LoadingMatchesSkeleton />
+          ) : matchesError ? (
+            <SurfaceCard className="border-red-500/20 bg-red-500/10 p-6">
+              <div className="text-sm font-semibold text-red-200">
+                Nie udało się pobrać meczów
+              </div>
+              <div className="mt-1 text-sm text-red-300">{matchesError}</div>
+              <button
+                type="button"
+                onClick={refreshCurrentDay}
+                className="mt-4 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm text-neutral-200 transition hover:bg-neutral-900"
+              >
+                Spróbuj ponownie
+              </button>
+            </SurfaceCard>
+          ) : filteredMatches.length === 0 ? (
+            <EmptyStateCard
+              title={
+                beyondHorizon
+                  ? "Mecze pojawią się później"
+                  : "Brak meczów dla tego filtra"
+              }
+              description={
+                beyondHorizon ? (
+                  <>
+                    Dodajemy mecze z wyprzedzeniem. Obecny horyzont danych:{" "}
+                    <span className="font-semibold text-white">
+                      {horizonYmd ?? "—"}
+                    </span>
+                    .
+                  </>
+                ) : normalizedSearchQuery ? (
+                  <>
+                    Nie znaleziono spotkań dla wyszukiwania{" "}
+                    <span className="font-semibold text-white">
+                      „{searchQuery.trim()}”
+                    </span>
+                    . Wyczyść wyszukiwarkę albo zmień ligę.
+                  </>
+                ) : (
+                  "Nie ma spotkań dla wybranego dnia lub ligi."
+                )
+              }
+              action={
+                normalizedSearchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-2.5 text-sm font-semibold text-neutral-200 hover:bg-neutral-900"
+                  >
+                    Wyczyść wyszukiwanie
+                  </button>
+                ) : null
+              }
+            />
+          ) : (
+            <div className="space-y-5">
+              {liveMatches.length > 0 ? (
+                <div className="space-y-3">
+                  <SectionHeader
+                    title="LIVE"
+                    count={liveMatches.length}
+                    badgeClassName="border-red-500/30 bg-red-500/10 text-red-300"
+                  />
+                  <div className="space-y-3">
+                    {liveMatches.map((m) => renderMatchCard(m))}
+                  </div>
+                </div>
+              ) : null}
+
+              {regularOpenMatches.length > 0 ? (
+                <div className="space-y-3">
+                  <SectionHeader
+                    title={openSectionTitle}
+                    count={regularOpenMatches.length}
+                    subtitle="Zakłady zamykają się minutę przed startem meczu."
+                  />
+                  <div className="space-y-3">
+                    {regularOpenMatches.map((m) => renderMatchCard(m))}
+                  </div>
+                </div>
+              ) : null}
+
+              {finishedMatches.length > 0 ? (
+                <div className="space-y-3">
+                  <SectionHeader
+                    title="Zakończone"
+                    count={finishedMatches.length}
+                  />
+                  <div className="space-y-3">
+                    {finishedMatches.map((m) => renderMatchCard(m))}
+                  </div>
+                </div>
+              ) : null}
+
+              {!checkingAdmin && isAdmin ? dayToolsPanel : null}
+            </div>
+          )
+        ) : (
+          renderStandingsPanel()
+        )}
       </div>
     </div>
   );
