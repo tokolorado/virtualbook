@@ -2403,12 +2403,16 @@ export default function EventsPage() {
         <div className="border-t border-white/10 bg-black/28 px-5 py-5 sm:px-7">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <MatchDataQualityStrip match={m} />
-              <PredictionInlineStrip
-                prediction={m.prediction}
-                homeTeam={m.home}
-                awayTeam={m.away}
-              />
+              {!checkingAdmin && isAdmin ? (
+              <>
+                <MatchDataQualityStrip match={m} />
+                <PredictionInlineStrip
+                  prediction={m.prediction}
+                  homeTeam={m.home}
+                  awayTeam={m.away}
+                />
+              </>
+              ) : null}
             </div>
             <div className="text-[11px] font-semibold text-neutral-500">
               Kliknij kurs, zeby dodac typ do kuponu.
@@ -2473,6 +2477,32 @@ export default function EventsPage() {
         ) : null}
       </div>
     </details>
+  );
+
+    const renderCalendarPanel = () => (
+    <SurfaceCard className="p-4">
+      <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
+        Kalendarz
+      </div>
+
+      <div className="mt-3 text-2xl font-semibold text-white">
+        Wybierz dzień
+      </div>
+
+      <p className="mt-3 text-sm leading-6 text-neutral-400">
+        Przełącz dzień i sprawdź dostępne mecze.
+      </p>
+
+      <div className="mt-5 rounded-2xl border border-neutral-800 bg-neutral-950/80 p-2">
+        <DayBar
+          value={selectedDate}
+          onChange={setSelectedDate}
+          enabledDates={enabledDates}
+          enabledDatesLoaded={enabledDatesLoaded}
+          showCalendarInline
+        />
+      </div>
+    </SurfaceCard>
   );
 
   const renderStandingsPanel = () => {
@@ -2684,82 +2714,72 @@ export default function EventsPage() {
     <div className="space-y-5">
       <SurfaceCard className="overflow-hidden">
         <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.11),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] 2xl:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
-                VirtualBook Football
-              </div>
+          <div className="min-w-0">
+            <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
+              VirtualBook Football
+            </div>
 
-              <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
-                Mecze, kursy i typy
-              </h1>
+            <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+              Mecze, kursy i typy
+            </h1>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <StatMiniCard
-                  label="Mecze"
-                  value={filteredMatches.length}
-                  hint={selectedLeagueLabel}
-                />
-                <StatMiniCard
-                  label="LIVE"
-                  value={liveMatches.length}
-                  tone={liveMatches.length > 0 ? "red" : "neutral"}
-                />
-                <StatMiniCard
-                  label="Otwarte"
-                  value={openMatches.length}
-                  tone="green"
-                />
-                <StatMiniCard
-                  label="Z kursami"
-                  value={`${matchesWithOddsCount}/${filteredMatches.length}`}
-                  hint="1X2"
-                  tone="blue"
-                />
-              </div>
+            {!checkingAdmin && isAdmin ? (
+              <>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <StatMiniCard
+                    label="Mecze"
+                    value={filteredMatches.length}
+                    hint={selectedLeagueLabel}
+                  />
+                  <StatMiniCard
+                    label="LIVE"
+                    value={liveMatches.length}
+                    tone={liveMatches.length > 0 ? "red" : "neutral"}
+                  />
+                  <StatMiniCard
+                    label="Otwarte"
+                    value={openMatches.length}
+                    tone="green"
+                  />
+                  <StatMiniCard
+                    label="Z kursami"
+                    value={`${matchesWithOddsCount}/${filteredMatches.length}`}
+                    hint="1X2"
+                    tone="blue"
+                  />
+                </div>
 
-              <div className="mt-5 flex flex-wrap gap-2">
-                <SmallPill>
-                  Liga:{" "}
-                  <span className="ml-1 font-semibold text-white">
-                    {selectedLeagueLabel}
-                  </span>
-                </SmallPill>
-
-                {matchesLoadedAt ? (
+                <div className="mt-5 flex flex-wrap gap-2">
                   <SmallPill>
-                    Aktualizacja:{" "}
-                    {new Date(matchesLoadedAt).toLocaleTimeString("pl-PL", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
+                    Liga:{" "}
+                    <span className="ml-1 font-semibold text-white">
+                      {selectedLeagueLabel}
+                    </span>
                   </SmallPill>
-                ) : null}
 
-                <SmallPill tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}>
-                  AI predictions:{" "}
-                  <span className="ml-1 font-semibold text-white">
-                    {matchesWithPredictionsCount}
-                  </span>
-                </SmallPill>
+                  {matchesLoadedAt ? (
+                    <SmallPill>
+                      Aktualizacja:{" "}
+                      {new Date(matchesLoadedAt).toLocaleTimeString("pl-PL", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </SmallPill>
+                  ) : null}
 
-                {beyondHorizon ? (
-                  <SmallPill tone="yellow">Poza horyzontem danych</SmallPill>
-                ) : null}
-              </div>
-            </div>
+                  <SmallPill tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}>
+                    AI predictions:{" "}
+                    <span className="ml-1 font-semibold text-white">
+                      {matchesWithPredictionsCount}
+                    </span>
+                  </SmallPill>
 
-            <div className="space-y-3">
-              <div className="rounded-2xl border border-neutral-800 bg-neutral-950/80 p-2">
-                <DayBar
-                  value={selectedDate}
-                  onChange={setSelectedDate}
-                  enabledDates={enabledDates}
-                  enabledDatesLoaded={enabledDatesLoaded}
-                  showCalendarInline
-                />
-              </div>
-            </div>
+                  {beyondHorizon ? (
+                    <SmallPill tone="yellow">Poza horyzontem danych</SmallPill>
+                  ) : null}
+                </div>
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -2857,6 +2877,8 @@ export default function EventsPage() {
       <div className="grid gap-5 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="hidden xl:block min-w-0">
           <div className="sticky top-24 space-y-4">
+            {renderCalendarPanel()}
+
             <SurfaceCard className="p-4">
               <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
                 Ligi i filtry
@@ -2879,11 +2901,13 @@ export default function EventsPage() {
                   {selectedDate}
                 </div>
 
+            {!checkingAdmin && isAdmin ? (
                 <div className="mt-4 flex flex-wrap gap-2">
                   <SmallPill tone="red">LIVE {liveMatches.length}</SmallPill>
                   <SmallPill tone="green">Open {openMatches.length}</SmallPill>
                   <SmallPill>Finished {finishedMatches.length}</SmallPill>
                 </div>
+                ) : null}
               </div>
 
               <div className="mt-5 space-y-2">
@@ -2918,6 +2942,10 @@ export default function EventsPage() {
         </aside>
 
         <div className="min-w-0 space-y-5">
+          <div className="xl:hidden">
+            {renderCalendarPanel()}
+          </div>
+
           <div className="overflow-x-auto pb-1 xl:hidden">
             <div className="flex w-max gap-2">
               <button
@@ -3100,7 +3128,7 @@ export default function EventsPage() {
                   </div>
                 ) : null}
 
-                {dayToolsPanel}
+                {!checkingAdmin && isAdmin ? dayToolsPanel : null}
               </div>
             )
           ) : (
