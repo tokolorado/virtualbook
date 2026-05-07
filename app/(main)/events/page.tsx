@@ -12,7 +12,6 @@ import { LeagueIcon } from "@/components/LeagueIcon";
 import { todayLocalYYYYMMDD, localDateKeyFromISO } from "@/lib/date";
 import { useBetSlip } from "@/lib/BetSlipContext";
 
-
 type Pick = "1" | "X" | "2";
 type SortMode = "smart" | "time" | "league";
 
@@ -924,15 +923,18 @@ async function hydrateMatchesWithDbOdds(baseMatches: Match[]) {
     const selection = String(row.selection) as Pick;
 
     if (selection !== "1" && selection !== "X" && selection !== "2") continue;
+
     const isBsd =
       row.source === "bsd" && row.pricing_method === "bsd_market_normalized";
     const isModel =
       row.source === "internal_model" &&
       row.pricing_method === "internal_model_fallback";
+
     if (!isBsd && !isModel) continue;
 
     const odd = safeNum(row.book_odds);
     if (odd === null || odd <= 0) continue;
+
     const existingMeta = metaByMatch.get(matchId);
     if (existingMeta?.source === "bsd" && !isBsd) continue;
 
@@ -1185,22 +1187,22 @@ function PosterTeam({
         <LeagueIcon
           src={crest}
           alt={name}
-          size={76}
+          size={52}
           fallback={name.slice(0, 1)}
-          className="relative rounded-full border-white/15 bg-white p-3 shadow-[0_14px_38px_rgba(0,0,0,0.42)]"
+          className="relative rounded-2xl border-white/15 bg-white p-2 shadow-[0_10px_24px_rgba(0,0,0,0.34)] sm:p-3"
         />
       </div>
 
-      <div className="mt-3 max-w-full truncate text-sm font-semibold tracking-tight text-white sm:text-lg">
+      <div className="mt-2 max-w-full truncate text-[13px] font-semibold tracking-tight text-white sm:mt-3 sm:text-lg">
         {name}
       </div>
 
-      <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-neutral-500 sm:text-[10px]">
+      <div className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.2em] text-neutral-500 sm:mt-1 sm:text-[10px]">
         {side === "home" ? "HOME" : "AWAY"}
       </div>
 
       {showScore ? (
-        <div className="mt-2 min-w-11 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-1.5 text-center text-lg font-semibold text-white shadow-inner sm:text-xl">
+        <div className="mt-1 min-w-9 rounded-lg border border-white/10 bg-white/[0.06] px-2 py-1 text-center text-sm font-semibold text-white shadow-inner sm:mt-2 sm:min-w-11 sm:px-3 sm:py-1.5 sm:text-xl">
           {score ?? 0}
         </div>
       ) : null}
@@ -1827,7 +1829,8 @@ export default function EventsPage() {
     };
   }, [normalizedSearchQuery, searchActive, searchReloadKey]);
 
-  async function manualSyncOddsForDay(args: { date: string; league: string }) {
+
+async function manualSyncOddsForDay(args: { date: string; league: string }) {
     if (oddsSyncInFlightRef.current) return;
 
     oddsSyncInFlightRef.current = true;
@@ -2320,7 +2323,7 @@ export default function EventsPage() {
                   });
                 }}
                 className={cn(
-                  "group rounded-2xl border px-2 py-2 text-center transition sm:px-3 sm:py-2.5",
+                  "group rounded-2xl border px-2 py-1.5 text-center transition sm:px-3 sm:py-2.5",
                   disabled
                     ? "cursor-not-allowed border-neutral-800 bg-neutral-950/70 text-neutral-600"
                     : active
@@ -2335,13 +2338,13 @@ export default function EventsPage() {
                   hasOdd ? formatOdd(odd) : "brak kursu"
                 }`}
               >
-                <div className="text-sm font-semibold leading-none">
+                <div className="text-xs font-semibold leading-none sm:text-sm">
                   {shortPickLabel(pick)}
                 </div>
-                <div className="mt-1 text-[10px] opacity-70 sm:text-[11px]">
+                <div className="mt-0.5 text-[9px] opacity-70 sm:mt-1 sm:text-[11px]">
                   {pickLabel(pick)}
                 </div>
-                <div className="mt-1 text-sm font-semibold">
+                <div className="mt-0.5 text-xs font-semibold sm:mt-1 sm:text-sm">
                   {hasOdd ? formatOdd(odd) : "—"}
                 </div>
               </button>
@@ -2369,7 +2372,7 @@ export default function EventsPage() {
       <article
         key={m.id}
         className={cn(
-          "group overflow-hidden rounded-[26px] border shadow-[0_20px_70px_rgba(0,0,0,0.42)] transition duration-300 hover:-translate-y-0.5 hover:border-cyan-300/35 hover:shadow-[0_28px_95px_rgba(6,182,212,0.16)]",
+          "group overflow-hidden rounded-[22px] border shadow-[0_14px_42px_rgba(0,0,0,0.34)] transition duration-300 hover:border-cyan-300/35 sm:rounded-[26px] sm:shadow-[0_20px_70px_rgba(0,0,0,0.42)] sm:hover:-translate-y-0.5 sm:hover:shadow-[0_28px_95px_rgba(6,182,212,0.16)]",
           isLive
             ? "border-red-400/30 bg-red-950/10"
             : m.oddsMeta?.isModel
@@ -2377,12 +2380,12 @@ export default function EventsPage() {
               : "border-white/10 bg-[#07090f]"
         )}
       >
-        <div className="relative min-h-[255px] overflow-hidden bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.26),transparent_38%),linear-gradient(120deg,#050810,#0a1020_48%,#05070c)] bg-[size:72px_72px,72px_72px,100%_100%,100%_100%] px-4 py-4 sm:min-h-[300px] sm:px-7 sm:py-6 lg:min-h-[320px]">
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-black/55 to-transparent" />
+        <div className="relative overflow-hidden bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.26),transparent_38%),linear-gradient(120deg,#050810,#0a1020_48%,#05070c)] bg-[size:48px_48px,48px_48px,100%_100%,100%_100%] px-3 py-3 sm:min-h-[260px] sm:bg-[size:72px_72px,72px_72px,100%_100%,100%_100%] sm:px-6 sm:py-5 lg:min-h-[300px]">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-black/55 to-transparent sm:h-24" />
           <div className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-[radial-gradient(circle_at_30%_50%,rgba(20,184,166,0.16),transparent_52%)]" />
           <div className="pointer-events-none absolute inset-y-0 right-0 w-1/3 bg-[radial-gradient(circle_at_70%_50%,rgba(59,130,246,0.18),transparent_52%)]" />
 
-          <div className="relative z-10 grid min-h-[225px] grid-cols-2 items-center gap-4 lg:min-h-[270px] lg:grid-cols-[1fr_1.05fr_1fr] lg:gap-7">
+          <div className="relative z-10 grid grid-cols-[minmax(0,1fr)_minmax(105px,0.85fr)_minmax(0,1fr)] items-center gap-2 sm:min-h-[230px] sm:grid-cols-2 sm:gap-4 lg:min-h-[250px] lg:grid-cols-[1fr_1.05fr_1fr] lg:gap-6">
             <PosterTeam
               name={m.home}
               crest={m.homeCrest}
@@ -2392,30 +2395,32 @@ export default function EventsPage() {
               className="order-1"
             />
 
-            <div className="order-3 col-span-2 flex min-w-0 flex-col items-center text-center lg:order-2 lg:col-span-1">
-              <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/12 bg-white/[0.07] px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-neutral-200 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur sm:px-4 sm:py-2 sm:text-[11px]">
+            <div className="order-2 flex min-w-0 flex-col items-center text-center sm:order-3 sm:col-span-2 lg:order-2 lg:col-span-1">
+              <div className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/12 bg-white/[0.07] px-2 py-1 text-[8px] font-bold uppercase tracking-[0.12em] text-neutral-200 shadow-[0_10px_30px_rgba(0,0,0,0.25)] backdrop-blur sm:gap-2 sm:px-4 sm:py-2 sm:text-[11px]">
                 <span
                   className={cn(
-                    "h-2 w-2 rounded-full",
+                    "h-1.5 w-1.5 shrink-0 rounded-full sm:h-2 sm:w-2",
                     isLive ? "animate-pulse bg-red-400" : "bg-emerald-400"
                   )}
                 />
-                <span>{isLive ? "LIVE" : "Featured"}</span>
+                <span className="hidden sm:inline">{isLive ? "LIVE" : "Featured"}</span>
                 {distance ? (
                   <>
-                    <span className="text-neutral-500">/</span>
-                    <span>{distance}</span>
+                    <span className="hidden text-neutral-500 sm:inline">/</span>
+                    <span className="max-w-[90px] truncate sm:max-w-none">
+                      {distance}
+                    </span>
                   </>
                 ) : null}
               </div>
 
-              <div className="mt-3 flex max-w-full items-center justify-center gap-2 text-base font-semibold tracking-tight text-white sm:mt-4 sm:text-xl lg:text-2xl">
+              <div className="mt-2 flex max-w-full items-center justify-center gap-1.5 text-[13px] font-semibold tracking-tight text-white sm:mt-4 sm:gap-2 sm:text-xl lg:text-2xl">
                 <LeagueIcon
                   src={competitionMetaByCode[m.competitionCode]?.emblem ?? null}
                   alt={m.competitionName}
-                  size={20}
+                  size={16}
                   fallback={m.competitionCode.slice(0, 2)}
-                  className="rounded-full bg-white/8"
+                  className="rounded-full bg-white/8 sm:size-auto"
                 />
                 <span className="truncate">{m.competitionName}</span>
               </div>
@@ -2424,21 +2429,21 @@ export default function EventsPage() {
                 VS
               </div>
 
-              <div className="mt-2 text-xs font-semibold text-neutral-300 sm:text-sm">
+              <div className="mt-1 text-[10px] font-semibold text-neutral-300 sm:mt-2 sm:text-sm">
                 {formatLocalDateTime(m.kickoffUtc)}
               </div>
 
-              <div className="mt-2 flex justify-center">
+              <div className="mt-1.5 flex justify-center sm:mt-2">
                 <MatchStatusPill match={m} nowMs={nowMs} />
               </div>
 
               {isLive ? (
-                <div className="mt-3 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-2 text-xs font-semibold text-red-100 shadow-[0_0_32px_rgba(248,113,113,0.14)] sm:text-sm">
+                <div className="mt-2 rounded-xl border border-red-400/30 bg-red-500/10 px-2 py-1 text-[10px] font-semibold text-red-100 shadow-[0_0_32px_rgba(248,113,113,0.14)] sm:mt-3 sm:rounded-2xl sm:px-4 sm:py-2 sm:text-sm">
                   Na żywo {liveClock ? `- ${liveClock}` : ""}
                 </div>
               ) : countdown ? (
                 <div
-                  className="mt-3 grid gap-2"
+                  className="mt-2 grid gap-1 sm:mt-3 sm:gap-2"
                   style={{
                     gridTemplateColumns: `repeat(${countdown.length}, minmax(0, 1fr))`,
                   }}
@@ -2446,12 +2451,12 @@ export default function EventsPage() {
                   {countdown.map((part) => (
                     <div
                       key={part.label}
-                      className="min-w-12 rounded-xl border border-white/10 bg-white/[0.07] px-2 py-2 text-center shadow-inner backdrop-blur sm:min-w-14 sm:rounded-2xl sm:px-3"
+                      className="min-w-9 rounded-lg border border-white/10 bg-white/[0.07] px-1.5 py-1.5 text-center shadow-inner backdrop-blur sm:min-w-14 sm:rounded-2xl sm:px-3 sm:py-2"
                     >
-                      <div className="text-lg font-black leading-none text-white sm:text-2xl">
+                      <div className="text-sm font-black leading-none text-white sm:text-2xl">
                         {part.value}
                       </div>
-                      <div className="mt-1 text-[8px] font-bold uppercase tracking-[0.18em] text-neutral-500 sm:text-[9px]">
+                      <div className="mt-0.5 text-[7px] font-bold uppercase tracking-[0.16em] text-neutral-500 sm:mt-1 sm:text-[9px]">
                         {part.label}
                       </div>
                     </div>
@@ -2462,9 +2467,9 @@ export default function EventsPage() {
               <button
                 type="button"
                 onClick={() => goMatch(m)}
-                className="mt-3 rounded-full bg-white px-5 py-2.5 text-xs font-bold text-neutral-950 shadow-[0_12px_36px_rgba(255,255,255,0.16)] transition hover:scale-[1.02] hover:bg-cyan-50 sm:mt-4 sm:px-6 sm:py-3 sm:text-sm"
+                className="mt-2 rounded-full bg-white px-3 py-1.5 text-[10px] font-bold text-neutral-950 shadow-[0_12px_36px_rgba(255,255,255,0.16)] transition hover:scale-[1.02] hover:bg-cyan-50 sm:mt-4 sm:px-6 sm:py-3 sm:text-sm"
               >
-                Otwórz mecz &rarr;
+                Otwórz <span className="hidden sm:inline">mecz</span> &rarr;
               </button>
             </div>
 
@@ -2474,12 +2479,12 @@ export default function EventsPage() {
               side="away"
               score={m.awayScore}
               showScore={showScore}
-              className="order-2 lg:order-3"
+              className="order-3 sm:order-2 lg:order-3"
             />
           </div>
         </div>
 
-        <div className="border-t border-white/10 bg-black/28 px-4 py-3 sm:px-6 sm:py-4">
+        <div className="border-t border-white/10 bg-black/28 px-3 py-2.5 sm:px-6 sm:py-4">
           {!checkingAdmin && isAdmin ? (
             <div className="mb-3 flex flex-wrap items-center gap-2">
               <MatchDataQualityStrip match={m} />
@@ -2769,8 +2774,7 @@ export default function EventsPage() {
 
   const visibleLoading = searchActive ? loadingSearch : loadingMatches;
   const visibleError = searchActive ? searchError : matchesError;
-
-    const showAdminPanel = !checkingAdmin && isAdmin;
+  const showAdminPanel = !checkingAdmin && isAdmin;
 
   return (
     <div className="space-y-5">
@@ -3174,7 +3178,7 @@ export default function EventsPage() {
                 }
               />
             ) : (
-              <div className="space-y-5">
+              <div className="space-y-3 sm:space-y-5">
                 {liveMatches.length > 0 ? (
                   <div className="space-y-3">
                     <SectionHeader
