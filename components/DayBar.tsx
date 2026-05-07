@@ -1,29 +1,99 @@
 // components/DayBar.tsx
 "use client";
 
-import React, { useMemo, useState } from "react";
-import MonthCalendar from "@/components/MonthCalendar";
-import { addDaysLocal, todayLocalYYYYMMDD } from "@/lib/date";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { todayLocalYYYYMMDD } from "@/lib/date";
 
-type Props = {
-  value: string; // YYYY-MM-DD
-  onChange: (v: string) => void;
+type DayBarProps = {
+  value: string;
+  onChange: (value: string) => void;
   enabledDates?: string[];
   enabledDatesLoaded?: boolean;
   showCalendarInline?: boolean;
+  days?: number;
 };
 
-function weekdayShortPL(d: Date) {
-  return d.toLocaleDateString("pl-PL", { weekday: "short" });
+type DateItem = {
+  ymd: string;
+  dayLabel: string;
+  dateLabel: string;
+  isToday: boolean;
+  isTomorrow: boolean;
+  hasMatches: boolean;
+};
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(" ");
 }
 
-function monthShortPL(d: Date) {
-  return d.toLocaleDateString("pl-PL", { month: "short" });
+function isYYYYMMDD(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
-function parseLocalYYYYMMDD(s: string): Date {
-  const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, (m ?? 1) - 1, d ?? 1);
+function parseYmdLocal(ymd: string) {
+  const [year, month, day] = ymd.split("-").map(Number);
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
+}
+
+function formatYmdLocal(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function addDaysYmd(ymd: string, days: number) {
+  const date = parseYmdLocal(ymd);
+  date.setDate(date.getDate() + days);
+  return formatYmdLocal(date);
+}
+
+function addMonthsYmd(ymd: string, months: number) {
+  const date = parseYmdLocal(`${ymd.slice(0, 7)}-01`);
+  date.setMonth(date.getMonth() + months);
+  return formatYmdLocal(date);
+}
+
+function sameMonth(a: string, b: string) {
+  return a.slice(0, 7) === b.slice(0, 7);
+}
+
+function dateLabel(ymd: string) {
+  const date = parseYmdLocal(ymd);
+  return `${date.getDate()}.${String(date.getMonth() + 1).padStart(2, "0")}.`;
+}
+
+function monthTitle(ymd: string) {
+  return parseYmdLocal(ymd).toLocaleDateString("pl-PL", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function weekdayLabel(ymd: string) {
+  const date = parseYmdLocal(ymd);
+
+  return date
+    .toLocaleDateString("pl-PL", {
+      weekday: "short",
+    })
+    .replace(".", "")
+    .toUpperCase();
+}
+
+function buildMonthGrid(monthYmd: string) {
+  const firstDay = parseYmdLocal(`${monthYmd.slice(0, 7)}-01`);
+  const firstGridDay = new Date(firstDay);
+  const mondayOffset = (firstDay.getDay() + 6) % 7;
+
+  firstGridDay.setDate(firstGridDay.getDate() - mondayOffset);
+
+  return Array.from({ length: 42 }).map((_, index) => {
+    const date = new Date(firstGridDay);
+    date.setDate(firstGridDay.getDate() + index);
+    return formatYmdLocal(date);
+  });
 }
 
 export default function DayBar({
@@ -32,170 +102,228 @@ export default function DayBar({
   enabledDates = [],
   enabledDatesLoaded = false,
   showCalendarInline = false,
-}: Props) {
-  const [open, setOpen] = useState(false);
+  days = 14,
+}: DayBarProps) {
+  const today = todayLocalYYYYMMDD();
+  const tomorrow = addDaysYmd(today, 1);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(
+    isYYYYMMDD(value) ? value : today
+  );
 
-  const sortedEnabledDates = useMemo(() => {
-    return [...enabledDates].sort();
-  }, [enabledDates]);
+  const buttonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  const label = useMemo(() => {
-    const today = todayLocalYYYYMMDD();
-    const tomorrow = addDaysLocal(today, 1);
-    const yesterday = addDaysLocal(today, -1);
+  const enabledSet = useMemo(() => new Set(enabledDates), [enabledDates]);
 
-    if (value === today) return "Dzisiaj";
-    if (value === tomorrow) return "Jutro";
-    if (value === yesterday) return "Wczoraj";
+  const visibleDates = useMemo<DateItem[]>(() => {
+    return Array.from({ length: days + 1 }).map((_, index) => {
+      const ymd = addDaysYmd(today, index);
+      const hasMatches = !enabledDatesLoaded || enabledSet.has(ymd);
 
-    const d = parseLocalYYYYMMDD(value);
-    const dd = String(d.getDate()).padStart(2, "0");
+      return {
+        ymd,
+        dayLabel:
+          ymd === today ? "DZIŚ" : ymd === tomorrow ? "JUTRO" : weekdayLabel(ymd),
+        dateLabel: dateLabel(ymd),
+        isToday: ymd === today,
+        isTomorrow: ymd === tomorrow,
+        hasMatches,
+      };
+    });
+  }, [days, enabledDatesLoaded, enabledSet, today, tomorrow]);
 
-    return `${weekdayShortPL(d)} ${dd} ${monthShortPL(d)} ${d.getFullYear()}`;
+  const horizonStart = visibleDates[0]?.ymd ?? today;
+  const horizonEnd = visibleDates[visibleDates.length - 1]?.ymd ?? today;
+
+  useEffect(() => {
+    if (isYYYYMMDD(value)) {
+      setCalendarMonth(value);
+    }
   }, [value]);
 
-  const previousEnabledDate = useMemo(() => {
-    if (!enabledDatesLoaded || sortedEnabledDates.length === 0) return null;
+  useEffect(() => {
+    const node = buttonRefs.current[value];
 
-    for (let i = sortedEnabledDates.length - 1; i >= 0; i--) {
-      if (sortedEnabledDates[i] < value) {
-        return sortedEnabledDates[i];
-      }
-    }
+    if (!node) return;
 
-    return null;
-  }, [enabledDatesLoaded, sortedEnabledDates, value]);
+    node.scrollIntoView({
+      behavior: "smooth",
+      inline: "center",
+      block: "nearest",
+    });
+  }, [value]);
 
-  const nextEnabledDate = useMemo(() => {
-    if (!enabledDatesLoaded || sortedEnabledDates.length === 0) return null;
+  const monthDays = useMemo(() => buildMonthGrid(calendarMonth), [calendarMonth]);
 
-    return sortedEnabledDates.find((date) => date > value) ?? null;
-  }, [enabledDatesLoaded, sortedEnabledDates, value]);
-
-  const canGoPrev =
-    !enabledDatesLoaded || sortedEnabledDates.length === 0 || !!previousEnabledDate;
-
-  const canGoNext =
-    !enabledDatesLoaded || sortedEnabledDates.length === 0 || !!nextEnabledDate;
-
-  const handleCenterClick = () => {
-    if (showCalendarInline) {
-      onChange(todayLocalYYYYMMDD());
-      return;
-    }
-
-    setOpen(true);
-  };
-
-  const goPrev = () => {
-    if (!canGoPrev) return;
-
-    if (previousEnabledDate) {
-      onChange(previousEnabledDate);
-      return;
-    }
-
-    onChange(addDaysLocal(value, -1));
-  };
-
-  const goNext = () => {
-    if (!canGoNext) return;
-
-    if (nextEnabledDate) {
-      onChange(nextEnabledDate);
-      return;
-    }
-
-    onChange(addDaysLocal(value, 1));
-  };
+  const canGoPrevMonth = addMonthsYmd(calendarMonth, -1).slice(0, 7) >= horizonStart.slice(0, 7);
+  const canGoNextMonth = addMonthsYmd(calendarMonth, 1).slice(0, 7) <= horizonEnd.slice(0, 7);
 
   return (
-    <>
-      <div className={showCalendarInline ? "space-y-3" : ""}>
-        <div className="flex items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-900/40 p-3">
-          <button
-            type="button"
-            onClick={goPrev}
-            disabled={!canGoPrev}
-            className={[
-              "rounded-xl border px-2.5 py-1.5 text-sm transition",
-              canGoPrev
-                ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
-                : "cursor-not-allowed border-neutral-900 bg-neutral-950/40 text-neutral-600",
-            ].join(" ")}
-            aria-label="Poprzedni dzień z meczami"
-          >
-            ←
-          </button>
+    <div className="overflow-hidden rounded-3xl border border-neutral-800 bg-neutral-950/70">
+      <div className="border-b border-neutral-800/80 bg-white/[0.025]">
+        <div className="no-scrollbar flex snap-x snap-proximity overflow-x-auto overscroll-x-contain px-2">
+          {visibleDates.map((item) => {
+            const active = item.ymd === value;
 
-          <button
-            type="button"
-            onClick={handleCenterClick}
-            className="rounded-xl border border-neutral-800 bg-neutral-950 px-3 py-1.5 text-sm transition hover:bg-neutral-800"
-            title={showCalendarInline ? "Przejdź do dzisiaj" : "Wybierz dzień"}
-          >
-            {label}
-          </button>
+            return (
+              <button
+                key={item.ymd}
+                ref={(node) => {
+                  buttonRefs.current[item.ymd] = node;
+                }}
+                type="button"
+                onClick={() => onChange(item.ymd)}
+                className={cn(
+                  "relative flex min-w-[76px] shrink-0 snap-start flex-col items-center gap-1 border-b-[3px] px-2 py-3 text-center transition",
+                  active
+                    ? "border-red-500"
+                    : "border-transparent hover:border-neutral-700",
+                  !item.hasMatches && "opacity-45 hover:opacity-70"
+                )}
+                title={
+                  item.hasMatches
+                    ? item.ymd
+                    : `${item.ymd} — brak meczów w aktualnej ofercie`
+                }
+              >
+                <span
+                  className={cn(
+                    "text-[10px] font-black uppercase tracking-[0.16em] leading-none",
+                    active ? "text-white" : "text-neutral-500"
+                  )}
+                >
+                  {item.dayLabel}
+                </span>
 
-          <button
-            type="button"
-            onClick={goNext}
-            disabled={!canGoNext}
-            className={[
-              "rounded-xl border px-2.5 py-1.5 text-sm transition",
-              canGoNext
-                ? "border-neutral-800 bg-neutral-950 hover:bg-neutral-800"
-                : "cursor-not-allowed border-neutral-900 bg-neutral-950/40 text-neutral-600",
-            ].join(" ")}
-            aria-label="Następny dzień z meczami"
-          >
-            →
-          </button>
+                <span
+                  className={cn(
+                    "text-lg font-black leading-none tracking-tight",
+                    active ? "text-white" : "text-neutral-300"
+                  )}
+                >
+                  {item.dateLabel}
+                </span>
+
+                {!item.hasMatches ? (
+                  <span className="mt-0.5 h-1 w-1 rounded-full bg-neutral-700" />
+                ) : null}
+              </button>
+            );
+          })}
         </div>
-
-        {showCalendarInline ? (
-          <MonthCalendar
-            value={value}
-            enabledDates={enabledDates}
-            enabledDatesLoaded={enabledDatesLoaded}
-            onChange={onChange}
-            compact
-          />
-        ) : null}
       </div>
 
-      {!showCalendarInline && open ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
-          onMouseDown={() => setOpen(false)}
-        >
-          <div
-            className="w-full max-w-md"
-            onMouseDown={(e) => e.stopPropagation()}
+      {showCalendarInline ? (
+        <div className="p-3">
+          <button
+            type="button"
+            onClick={() => setCalendarOpen((v) => !v)}
+            className="flex w-full items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-left transition hover:border-neutral-700 hover:bg-neutral-900"
           >
-            <MonthCalendar
-              value={value}
-              enabledDates={enabledDates}
-              enabledDatesLoaded={enabledDatesLoaded}
-              onChange={(v) => {
-                onChange(v);
-                setOpen(false);
-              }}
-            />
+            <span>
+              <span className="block text-[10px] font-bold uppercase tracking-[0.22em] text-neutral-500">
+                Kalendarz
+              </span>
+              <span className="mt-1 block text-sm font-semibold text-white">
+                {value}
+              </span>
+            </span>
 
-            <button
-              type="button"
-              onClick={() => {
-                onChange(todayLocalYYYYMMDD());
-                setOpen(false);
-              }}
-              className="mt-3 w-full rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm transition hover:bg-neutral-800"
-            >
-              Dzisiaj
-            </button>
-          </div>
+            <span className="rounded-full border border-neutral-800 px-3 py-1 text-xs font-semibold text-neutral-300">
+              {calendarOpen ? "Ukryj" : "Pokaż"}
+            </span>
+          </button>
+
+          {calendarOpen ? (
+            <div className="mt-3 rounded-2xl border border-neutral-800 bg-black/20 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  disabled={!canGoPrevMonth}
+                  onClick={() => setCalendarMonth(addMonthsYmd(calendarMonth, -1))}
+                  className={cn(
+                    "rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                    canGoPrevMonth
+                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                      : "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-700"
+                  )}
+                >
+                  ←
+                </button>
+
+                <div className="text-sm font-semibold capitalize text-white">
+                  {monthTitle(calendarMonth)}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={!canGoNextMonth}
+                  onClick={() => setCalendarMonth(addMonthsYmd(calendarMonth, 1))}
+                  className={cn(
+                    "rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                    canGoNextMonth
+                      ? "border-neutral-800 bg-neutral-950 text-neutral-200 hover:bg-neutral-900"
+                      : "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-700"
+                  )}
+                >
+                  →
+                </button>
+              </div>
+
+              <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-600">
+                {["Pn", "Wt", "Śr", "Cz", "Pt", "So", "Nd"].map((day) => (
+                  <div key={day}>{day}</div>
+                ))}
+              </div>
+
+              <div className="mt-2 grid grid-cols-7 gap-1">
+                {monthDays.map((ymd) => {
+                  const active = ymd === value;
+                  const inMonth = sameMonth(ymd, calendarMonth);
+                  const inHorizon = ymd >= horizonStart && ymd <= horizonEnd;
+                  const hasMatches = !enabledDatesLoaded || enabledSet.has(ymd);
+                  const disabled = !inHorizon;
+
+                  return (
+                    <button
+                      key={ymd}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => onChange(ymd)}
+                      className={cn(
+                        "relative flex h-9 items-center justify-center rounded-xl border text-xs font-semibold transition",
+                        active
+                          ? "border-red-500 bg-red-500 text-white"
+                          : "border-neutral-900 bg-neutral-950 text-neutral-300 hover:border-neutral-700 hover:bg-neutral-900",
+                        !inMonth && "text-neutral-700",
+                        !hasMatches && inHorizon && "opacity-45",
+                        disabled && "cursor-not-allowed opacity-20"
+                      )}
+                    >
+                      {Number(ymd.slice(8, 10))}
+
+                      {hasMatches && inHorizon ? (
+                        <span className="absolute bottom-1 h-1 w-1 rounded-full bg-yellow-400" />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
-    </>
+
+      <style jsx>{`
+        .no-scrollbar {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+      `}</style>
+    </div>
   );
 }
