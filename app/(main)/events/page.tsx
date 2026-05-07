@@ -2770,10 +2770,12 @@ export default function EventsPage() {
   const visibleLoading = searchActive ? loadingSearch : loadingMatches;
   const visibleError = searchActive ? searchError : matchesError;
 
+    const showAdminPanel = !checkingAdmin && isAdmin;
+
   return (
     <div className="space-y-5">
       <div className="grid gap-5 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
-        <aside className="hidden xl:block min-w-0">
+        <aside className="hidden min-w-0 xl:block">
           <div className="sticky top-24 space-y-4">
             <SurfaceCard className="p-4">
               <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
@@ -2797,7 +2799,7 @@ export default function EventsPage() {
                   {selectedDate}
                 </div>
 
-                {!checkingAdmin && isAdmin ? (
+                {showAdminPanel ? (
                   <div className="mt-4 flex flex-wrap gap-2">
                     <SmallPill tone="red">LIVE {liveMatches.length}</SmallPill>
                     <SmallPill tone="green">Open {openMatches.length}</SmallPill>
@@ -2840,182 +2842,184 @@ export default function EventsPage() {
         <div className="min-w-0 space-y-5">
           <ResultsTicker />
 
-          <SurfaceCard className="overflow-hidden">
-            <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.11),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
-              <div className="min-w-0">
-                <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
-                  VirtualBook Football
-                </div>
-                <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
-                  Mecze, kursy i typy
-                </h1>
+          <SurfaceCard className="p-4 sm:p-5">
+            <label className="mb-2 block text-xs font-medium text-neutral-500">
+              Szukaj meczu, drużyny albo ligi
+            </label>
 
-                {!checkingAdmin && isAdmin ? (
-                  <>
-                    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                      <StatMiniCard
-                        label="Mecze"
-                        value={filteredMatches.length}
-                        hint={selectedLeagueLabel}
-                      />
-                      <StatMiniCard
-                        label="LIVE"
-                        value={liveMatches.length}
-                        tone={liveMatches.length > 0 ? "red" : "neutral"}
-                      />
-                      <StatMiniCard
-                        label="Otwarte"
-                        value={openMatches.length}
-                        tone="green"
-                      />
-                      <StatMiniCard
-                        label="Z kursami"
-                        value={`${matchesWithOddsCount}/${filteredMatches.length}`}
-                        hint="1X2"
-                        tone="blue"
-                      />
-                    </div>
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="np. Arsenal, Serie A, Real..."
+              className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-neutral-600"
+            />
+          </SurfaceCard>
 
-                    <div className="mt-5 flex flex-wrap gap-2">
+          {showAdminPanel ? (
+            <SurfaceCard className="overflow-hidden">
+              <div className="border-b border-neutral-800 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.11),transparent_34%),linear-gradient(135deg,rgba(23,23,23,0.95),rgba(5,5,5,0.98))] p-5 sm:p-6">
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-[0.25em] text-neutral-500">
+                    VirtualBook Football
+                  </div>
+
+                  <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-5xl">
+                    Mecze, kursy i typy
+                  </h1>
+
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <StatMiniCard
+                      label="Mecze"
+                      value={filteredMatches.length}
+                      hint={selectedLeagueLabel}
+                    />
+                    <StatMiniCard
+                      label="LIVE"
+                      value={liveMatches.length}
+                      tone={liveMatches.length > 0 ? "red" : "neutral"}
+                    />
+                    <StatMiniCard
+                      label="Otwarte"
+                      value={openMatches.length}
+                      tone="green"
+                    />
+                    <StatMiniCard
+                      label="Z kursami"
+                      value={`${matchesWithOddsCount}/${filteredMatches.length}`}
+                      hint="1X2"
+                      tone="blue"
+                    />
+                  </div>
+
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    <SmallPill>
+                      Liga:{" "}
+                      <span className="ml-1 font-semibold text-white">
+                        {selectedLeagueLabel}
+                      </span>
+                    </SmallPill>
+
+                    {matchesLoadedAt && !searchActive ? (
                       <SmallPill>
-                        Liga:{" "}
-                        <span className="ml-1 font-semibold text-white">
-                          {selectedLeagueLabel}
-                        </span>
+                        Aktualizacja:{" "}
+                        {new Date(matchesLoadedAt).toLocaleTimeString("pl-PL", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                       </SmallPill>
+                    ) : null}
 
-                      {matchesLoadedAt && !searchActive ? (
-                        <SmallPill>
-                          Aktualizacja:{" "}
-                          {new Date(matchesLoadedAt).toLocaleTimeString("pl-PL", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </SmallPill>
-                      ) : null}
+                    <SmallPill
+                      tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}
+                    >
+                      AI predictions:{" "}
+                      <span className="ml-1 font-semibold text-white">
+                        {matchesWithPredictionsCount}
+                      </span>
+                    </SmallPill>
 
-                      <SmallPill
-                        tone={matchesWithPredictionsCount > 0 ? "blue" : "neutral"}
-                      >
-                        AI predictions:{" "}
-                        <span className="ml-1 font-semibold text-white">
-                          {matchesWithPredictionsCount}
-                        </span>
-                      </SmallPill>
-
-                      {beyondHorizon && !searchActive ? (
-                        <SmallPill tone="yellow">Poza horyzontem danych</SmallPill>
-                      ) : null}
-                    </div>
-                  </>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="grid gap-3 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_220px_180px]">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-500">
-                  Szukaj meczu, drużyny albo ligi
-                </label>
-                <input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="np. Arsenal, Serie A, Real..."
-                  className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-600 focus:border-neutral-600"
-                />
+                    {beyondHorizon && !searchActive ? (
+                      <SmallPill tone="yellow">Poza horyzontem danych</SmallPill>
+                    ) : null}
+                  </div>
+                </div>
               </div>
 
-              <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-500">
-                  Sortowanie
-                </label>
-                <select
-                  value={sortMode}
-                  onChange={(e) => setSortMode(e.target.value as SortMode)}
-                  className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none focus:border-neutral-600"
-                >
-                  <option value="smart">Smart: LIVE i najbliższe</option>
-                  <option value="time">Godzina meczu</option>
-                  <option value="league">Liga</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-medium text-neutral-500">
-                  Widok
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setActiveRightTab("matches")}
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
-                      activeRightTab === "matches"
-                        ? "border-white bg-white text-black"
-                        : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
-                    )}
+              <div className="grid gap-3 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_180px]">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-neutral-500">
+                    Sortowanie
+                  </label>
+                  <select
+                    value={sortMode}
+                    onChange={(e) => setSortMode(e.target.value as SortMode)}
+                    className="w-full rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm text-white outline-none focus:border-neutral-600"
                   >
-                    Mecze
-                  </button>
+                    <option value="smart">Smart: LIVE i najbliższe</option>
+                    <option value="time">Godzina meczu</option>
+                    <option value="league">Liga</option>
+                  </select>
+                </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setActiveRightTab("table")}
-                    disabled={selectedLeague === "ALL"}
-                    className={cn(
-                      "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
-                      selectedLeague === "ALL"
-                        ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
-                        : activeRightTab === "table"
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-neutral-500">
+                    Widok
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab("matches")}
+                      className={cn(
+                        "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                        activeRightTab === "matches"
                           ? "border-white bg-white text-black"
                           : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
-                    )}
-                  >
-                    Tabela
-                  </button>
+                      )}
+                    >
+                      Mecze
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveRightTab("table")}
+                      disabled={selectedLeague === "ALL"}
+                      className={cn(
+                        "rounded-2xl border px-4 py-3 text-sm font-semibold transition",
+                        selectedLeague === "ALL"
+                          ? "cursor-not-allowed border-neutral-800 bg-neutral-950 text-neutral-600"
+                          : activeRightTab === "table"
+                            ? "border-white bg-white text-black"
+                            : "border-neutral-800 bg-neutral-950 text-neutral-300 hover:bg-neutral-900"
+                      )}
+                    >
+                      Tabela
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="px-4 pb-5 text-sm sm:px-5">
-              {visibleLoading ? (
-                <span className="text-neutral-400">
-                  {searchActive ? "Szukam meczów…" : "Ładowanie meczów…"}
-                </span>
-              ) : visibleError ? (
-                <span className="text-red-300">{visibleError}</span>
-              ) : beyondHorizon && !searchActive ? (
-                <span className="text-neutral-400">
-                  Jeszcze brak meczów, wkrótce się pojawią. Horyzont danych:{" "}
-                  <span className="font-semibold text-white">{horizonYmd ?? "—"}</span>
-                </span>
-              ) : searchActive ? (
-                <span className="text-neutral-500">
-                  Wyniki wyszukiwania dla{" "}
-                  <span className="font-semibold text-white">
-                    „{searchQuery.trim()}”
+              <div className="px-4 pb-5 text-sm sm:px-5">
+                {visibleLoading ? (
+                  <span className="text-neutral-400">
+                    {searchActive ? "Szukam meczów…" : "Ładowanie meczów…"}
                   </span>
-                  :{" "}
-                  <span className="font-semibold text-white">
-                    {filteredMatches.length}
-                  </span>{" "}
-                  meczów w najbliższych 14 dniach.
-                </span>
-              ) : (
-                <span className="text-neutral-500">
-                  Wyświetlasz{" "}
-                  <span className="font-semibold text-white">
-                    {filteredMatches.length}
-                  </span>{" "}
-                  meczów dla filtra{" "}
-                  <span className="font-semibold text-white">
-                    {selectedLeagueLabel}
+                ) : visibleError ? (
+                  <span className="text-red-300">{visibleError}</span>
+                ) : beyondHorizon && !searchActive ? (
+                  <span className="text-neutral-400">
+                    Jeszcze brak meczów, wkrótce się pojawią. Horyzont danych:{" "}
+                    <span className="font-semibold text-white">
+                      {horizonYmd ?? "—"}
+                    </span>
                   </span>
-                  .
-                </span>
-              )}
-            </div>
-          </SurfaceCard>
+                ) : searchActive ? (
+                  <span className="text-neutral-500">
+                    Wyniki wyszukiwania dla{" "}
+                    <span className="font-semibold text-white">
+                      „{searchQuery.trim()}”
+                    </span>
+                    :{" "}
+                    <span className="font-semibold text-white">
+                      {filteredMatches.length}
+                    </span>{" "}
+                    meczów w najbliższych 14 dniach.
+                  </span>
+                ) : (
+                  <span className="text-neutral-500">
+                    Wyświetlasz{" "}
+                    <span className="font-semibold text-white">
+                      {filteredMatches.length}
+                    </span>{" "}
+                    meczów dla filtra{" "}
+                    <span className="font-semibold text-white">
+                      {selectedLeagueLabel}
+                    </span>
+                    .
+                  </span>
+                )}
+              </div>
+            </SurfaceCard>
+          ) : null}
 
           <div className="overflow-x-auto pb-1 xl:hidden">
             <div className="flex w-max gap-2">
@@ -3102,9 +3106,7 @@ export default function EventsPage() {
             </div>
           </div>
 
-          <div>
-            {renderCalendarPanel()}
-          </div>
+          <div>{renderCalendarPanel()}</div>
 
           {activeRightTab === "matches" ? (
             visibleLoading ? (
@@ -3206,7 +3208,7 @@ export default function EventsPage() {
                   </div>
                 ) : null}
 
-                {!checkingAdmin && isAdmin && !searchActive ? dayToolsPanel : null}
+                {showAdminPanel && !searchActive ? dayToolsPanel : null}
               </div>
             )
           ) : (

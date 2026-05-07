@@ -28,11 +28,7 @@ function cleanResultName(value: string | null | undefined) {
   return text || "—";
 }
 
-export default function ResultsTicker({
-  className,
-}: {
-  className?: string;
-}) {
+export default function ResultsTicker({ className }: { className?: string }) {
   const [items, setItems] = useState<ResultTickerItem[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -82,7 +78,10 @@ export default function ResultsTicker({
 
   const tickerItems = useMemo(() => {
     if (!items.length) return [];
-    return [...items, ...items];
+
+    // Minimum 3 kopie, żeby animacja działała też na szerokim desktopie,
+    // nawet gdy lista wyników jest krótka.
+    return [...items, ...items, ...items];
   }, [items]);
 
   if (!loaded || !items.length) {
@@ -96,8 +95,8 @@ export default function ResultsTicker({
         className
       )}
     >
-      <div className="flex items-center overflow-hidden border-b border-neutral-800/60 bg-white/[0.025] py-2">
-        <div className="flex shrink-0 items-center gap-2 border-r border-neutral-800 px-4">
+      <div className="flex h-11 items-center overflow-hidden bg-white/[0.025]">
+        <div className="flex h-full shrink-0 items-center gap-2 border-r border-neutral-800 px-4">
           <span className="flex h-4 w-4 items-center justify-center rounded-full border border-neutral-700 text-[10px] text-neutral-500">
             ✓
           </span>
@@ -107,11 +106,11 @@ export default function ResultsTicker({
         </div>
 
         <div className="relative min-w-0 flex-1 overflow-hidden">
-          <div className="vb-results-ticker inline-flex whitespace-nowrap pl-6">
+          <div className="vb-results-ticker flex w-max min-w-max whitespace-nowrap pl-6">
             {tickerItems.map((item, index) => (
               <span
                 key={`${item.id}-${index}`}
-                className="mr-12 inline-flex items-center gap-2 text-xs font-bold text-neutral-300"
+                className="mr-12 inline-flex shrink-0 items-center gap-2 text-xs font-bold text-neutral-300"
               >
                 <span className="h-1.5 w-1.5 rounded-full border border-neutral-600" />
                 <span className="text-neutral-500">FT</span>
@@ -129,15 +128,22 @@ export default function ResultsTicker({
       <style jsx>{`
         @keyframes vb-results-ticker {
           from {
-            transform: translateX(0);
+            transform: translate3d(0, 0, 0);
           }
           to {
-            transform: translateX(-50%);
+            transform: translate3d(-33.333%, 0, 0);
           }
         }
 
         .vb-results-ticker {
-          animation: vb-results-ticker 32s linear infinite;
+          animation: vb-results-ticker 38s linear infinite;
+          will-change: transform;
+        }
+
+        @media (hover: hover) {
+          .vb-results-ticker:hover {
+            animation-play-state: paused;
+          }
         }
 
         @media (prefers-reduced-motion: reduce) {
