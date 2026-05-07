@@ -113,7 +113,9 @@ function formatStakeInput(v: string) {
   return `${formattedInt},${decimals}`;
 }
 
-export default function BetSlip({ variant }: { variant?: string }) {
+type BetSlipVariant = "desktop" | "desktop-edge" | "mobile";
+
+export default function BetSlip({ variant }: { variant?: BetSlipVariant }) {
   const {
     slip,
     stake,
@@ -126,7 +128,8 @@ export default function BetSlip({ variant }: { variant?: string }) {
   } = useBetSlip();
 
   const isMobile = variant === "mobile";
-  const isDesktop = variant === "desktop";
+  const isDesktop = variant === "desktop" || variant === "desktop-edge";
+  const isEdgeDesktop = variant === "desktop-edge";
 
   const [open, setOpen] = useState(false);
   const [stakeInput, setStakeInput] = useState(formatStakeInput(stake || ""));
@@ -1196,10 +1199,13 @@ export default function BetSlip({ variant }: { variant?: string }) {
         {successModalNode}
         {errorModalNode}
         <div className="h-full min-h-0">
-          {cardWrap(
-            slipContent,
-            "flex h-full min-h-0 flex-col overflow-hidden"
-          )}
+        {cardWrap(
+          slipContent,
+          cx(
+            "flex h-full min-h-0 flex-col overflow-hidden",
+            isEdgeDesktop && "rounded-none border-y-0 border-r-0 xl:rounded-l-3xl"
+          )
+        )}
         </div>
       </>
     );
@@ -1244,7 +1250,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
               className="absolute inset-0 bg-black/60"
               onClick={() => setOpen(false)}
             />
-            <div className="absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-hidden rounded-t-3xl border border-neutral-800 bg-neutral-950 pb-[env(safe-area-inset-bottom)]">
+            <div className="absolute bottom-0 left-0 right-0 max-h-[92dvh] overflow-hidden rounded-t-3xl border border-neutral-800 bg-neutral-950 pb-[env(safe-area-inset-bottom)]">
               <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
                 <div className="text-sm font-semibold">Kupon</div>
                 <button
@@ -1257,7 +1263,7 @@ export default function BetSlip({ variant }: { variant?: string }) {
                 </button>
               </div>
 
-              <div className="max-h-[calc(85vh-58px)] overflow-y-auto overscroll-contain p-4">
+              <div className="max-h-[calc(92dvh-58px)] overflow-y-auto overscroll-contain p-4">
                 {slipContent}
               </div>
             </div>

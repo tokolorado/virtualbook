@@ -2791,11 +2791,12 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
   const showAdminPanel = !checkingAdmin && isAdmin;
 
   return (
-    <div className="space-y-5">
-      <div className="grid gap-5 2xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[300px_minmax(0,1fr)]">
+    <div className="w-full min-w-0">
+      <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)] 2xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="hidden min-w-0 xl:block">
-          <div className="sticky top-24 space-y-4">
-            <SurfaceCard className="p-4">
+          <div className="sticky top-[76px] h-[calc(100vh-76px)] min-h-0 overflow-hidden">
+            <SurfaceCard className="h-full overflow-hidden rounded-none border-y-0 border-l-0 p-0 xl:rounded-r-3xl">
+              <div className="h-full overflow-y-auto overscroll-contain p-4">
               <div className="text-[11px] uppercase tracking-[0.22em] text-neutral-500">
                 Ligi i filtry
               </div>
@@ -2853,11 +2854,12 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
                   />
                 ))}
               </div>
+            </div>
             </SurfaceCard>
           </div>
         </aside>
 
-        <div className="min-w-0 space-y-5">
+        <div className="min-w-0 space-y-5 xl:py-4">
           <ResultsTicker />
 
           <SurfaceCard className="p-4 sm:p-5">
