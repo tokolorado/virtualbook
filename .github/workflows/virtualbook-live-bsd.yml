@@ -15,11 +15,15 @@ jobs:
     timeout-minutes: 6
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Run live BSD sync loop
         shell: bash
         env:
           CRON_BASE_URL: ${{ secrets.CRON_BASE_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           LIVE_BSD_INTERVAL_SECONDS: "15"
-          LIVE_BSD_MAX_RUNTIME_SECONDS: "270"
+          LIVE_BSD_MAX_RUNTIME_SECONDS: "285"
+          LIVE_BSD_TICK_TIMEOUT_SECONDS: "28"
         run: bash scripts/cron/live-bsd-sync.sh

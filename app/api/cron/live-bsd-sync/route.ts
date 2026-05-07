@@ -119,28 +119,66 @@ async function run(request: NextRequest) {
     const qs = new URLSearchParams();
     qs.set("date", date);
 
-    const response = await fetch(
-      `${baseUrl}/api/admin/bsd/matches/sync?${qs.toString()}`,
-      {
-        method: "GET",
-        headers: {
-          "x-cron-secret": cronSecret,
-        },
-        cache: "no-store",
-      }
-    );
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 22_000);
 
-    const payload = await response.json().catch(() => null);
+    try {
+      const response = await fetch(
+        `${baseUrl}/api/admin/bsd/matches/sync?${qs.toString()}`,
+        {
+          method: "GET",
+          headers: {
+            "x-cron-secret": cronSecret,
+          },
+          cache: "no-store",
+          signal: controller.signal,
+        }
+      );
 
-    results.push({
-      date,
-      ok: response.ok && payload?.ok !== false,
-      status: response.status,
-      upsertedMatchesCount: Number(payload?.upsertedMatchesCount ?? 0) || 0,
-      upsertedOddsCount: Number(payload?.upsertedOddsCount ?? 0) || 0,
-      error: payload?.error ?? payload?.message ?? null,
-      payload,
-    });
+      const payload = await response.json().catch(() => null);
+
+      results.push({
+        date,
+        ok: response.ok && payload?.ok !== false,
+        status: response.status,
+        upsertedMatchesCount: Number(payload?.upsertedMatchesCount ?? 0) || 0,
+        upsertedOddsCount: Number(payload?.upsertedOddsCount ?? 0) || 0,
+        builtMatchResultRowsCount:
+          Number(payload?.builtMatchResultRowsCount ?? 0) || 0,
+        syncedMatchResultsCount:
+          Number(payload?.syncedMatchResultsCount ?? 0) || 0,
+        insertedMatchResultsCount:
+          Number(payload?.insertedMatchResultsCount ?? 0) || 0,
+        updatedMatchResultsCount:
+          Number(payload?.updatedMatchResultsCount ?? 0) || 0,
+        unchangedMatchResultsCount:
+          Number(payload?.unchangedMatchResultsCount ?? 0) || 0,
+        error: payload?.error ?? payload?.message ?? null,
+        payload,
+      });
+    } catch (error) {
+      results.push({
+        date,
+        ok: false,
+        status: 599,
+        upsertedMatchesCount: 0,
+        upsertedOddsCount: 0,
+        builtMatchResultRowsCount: 0,
+        syncedMatchResultsCount: 0,
+        insertedMatchResultsCount: 0,
+        updatedMatchResultsCount: 0,
+        unchangedMatchResultsCount: 0,
+        error:
+          error instanceof Error && error.name === "AbortError"
+            ? "live-bsd-sync timeout"
+            : error instanceof Error
+              ? error.message
+              : "live-bsd-sync failed",
+        payload: null,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   const failed = results.filter((item) => !item.ok);

@@ -5,7 +5,8 @@ set -euo pipefail
 : "${CRON_SECRET:?Missing CRON_SECRET}"
 
 INTERVAL_SECONDS="${LIVE_BSD_INTERVAL_SECONDS:-15}"
-MAX_RUNTIME_SECONDS="${LIVE_BSD_MAX_RUNTIME_SECONDS:-270}"
+MAX_RUNTIME_SECONDS="${LIVE_BSD_MAX_RUNTIME_SECONDS:-285}"
+TICK_TIMEOUT_SECONDS="${LIVE_BSD_TICK_TIMEOUT_SECONDS:-28}"
 
 started_at="$(date +%s)"
 tick=1
@@ -21,12 +22,10 @@ while true; do
 
   echo "LIVE BSD sync tick ${tick}, elapsed ${elapsed}s"
 
-  # ZOSTAW TU SWÓJ OBECNY CURL DO LIVE BSD SYNC
-  # Przykład:
-  curl -fsS --max-time 25 -X POST "${CRON_BASE_URL}/api/cron/live-bsd-sync" \
+  curl -fsS --max-time "$TICK_TIMEOUT_SECONDS" -X POST "${CRON_BASE_URL}/api/cron/live-bsd-sync" \
     -H "content-type: application/json" \
     -H "x-cron-secret: ${CRON_SECRET}" \
-    --data '{"tz":"Europe/Warsaw"}' \
+    --data '{}' \
     || echo "LIVE BSD sync tick ${tick} failed"
 
   tick=$((tick + 1))
