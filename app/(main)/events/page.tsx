@@ -1447,6 +1447,7 @@ export default function EventsPage() {
   const matchesLoadedAtCacheRef = useRef<Record<string, string | null>>({});
   const horizonCacheRef = useRef<Record<string, string | null>>({});
   const beyondCacheRef = useRef<Record<string, boolean>>({});
+  const silentRefreshRef = useRef(false);
 
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1_000);
@@ -1532,6 +1533,8 @@ export default function EventsPage() {
       });
 
       if (!shouldRefreshToday) return;
+
+      silentRefreshRef.current = true;
 
       delete matchesCacheRef.current[selectedDate];
       delete matchesLoadedAtCacheRef.current[selectedDate];
@@ -1961,10 +1964,15 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
     let cancelled = false;
 
     const load = async () => {
-      setLoadingMatches(true);
-      setMatchesError(null);
-      setBeyondHorizon(false);
-      setHorizonYmd(null);
+      const silent = silentRefreshRef.current;
+      silentRefreshRef.current = false;
+
+      if (!silent) {
+        setLoadingMatches(true);
+        setMatchesError(null);
+        setBeyondHorizon(false);
+        setHorizonYmd(null);
+    }
 
       const cachedMatches = matchesCacheRef.current[selectedDate];
       const cachedLoadedAt = matchesLoadedAtCacheRef.current[selectedDate];
@@ -2052,10 +2060,16 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
         }
       } catch (e: unknown) {
         if (!cancelled) {
-          setMatchesError(getErrorMessage(e, "Nie udało się pobrać meczów."));
+          if (!silent) {
+            setMatchesError(getErrorMessage(e, "Nie udało się pobrać meczów."));
+          } else {
+            console.warn("[events] Silent refresh failed:", e);
+          }
         }
       } finally {
-        if (!cancelled) setLoadingMatches(false);
+        if (!cancelled && !silent) {
+          setLoadingMatches(false);
+        }
       }
     };
 
