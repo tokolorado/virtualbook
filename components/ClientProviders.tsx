@@ -1,4 +1,3 @@
-// components/ClientProviders.tsx
 "use client";
 
 import { useEffect } from "react";
@@ -35,6 +34,7 @@ export default function ClientProviders({
 }) {
   const pathname = usePathname() || "";
   const hideSlip = shouldHideSlip(pathname);
+  const isEventsPage = pathname.startsWith("/events");
 
   useEffect(() => {
     if (shouldSkipWeeklyGrant(pathname)) return;
@@ -58,13 +58,31 @@ export default function ClientProviders({
         <>{children}</>
       ) : (
         <>
-          <main className="w-full min-w-0 px-4 py-6 sm:px-5 lg:px-6 2xl:px-8">
-            <div className="w-full min-w-0 lg:pr-[376px] xl:pr-[396px]">
+          <main
+            className={
+              isEventsPage
+                ? "w-full min-w-0 py-6 px-0"
+                : "w-full min-w-0 px-4 py-6 sm:px-5 lg:px-6 2xl:px-8"
+            }
+          >
+            <div
+              className={
+                isEventsPage
+                  ? "w-full min-w-0 lg:pr-[380px] xl:pr-[400px]"
+                  : "w-full min-w-0 lg:pr-[376px] xl:pr-[396px]"
+              }
+            >
               {children}
             </div>
           </main>
 
-          <aside className="fixed bottom-6 right-6 top-[100px] z-40 hidden w-[360px] xl:w-[380px] 2xl:right-8 lg:block">
+          <aside
+            className={
+              isEventsPage
+                ? "fixed bottom-0 right-0 top-[100px] z-40 hidden w-[360px] xl:w-[380px] lg:block"
+                : "fixed bottom-6 right-6 top-[100px] z-40 hidden w-[360px] xl:w-[380px] 2xl:right-8 lg:block"
+            }
+          >
             <div className="h-full min-h-0">
               <BetSlip variant="desktop" />
             </div>
