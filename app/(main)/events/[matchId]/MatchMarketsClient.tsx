@@ -1506,7 +1506,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="w-full min-w-0">
       <section
         className={cn(
           "relative overflow-hidden rounded-[34px] border bg-[#050505]",
@@ -1657,9 +1657,10 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           )}
         </section>
 
-      <section
-        className={cn(
-          "overflow-hidden rounded-[28px] border shadow-[0_18px_70px_rgba(0,0,0,0.35)]",
+      <div className="mt-4 space-y-4 px-3 sm:px-4 lg:px-5 2xl:px-6">
+        <section
+          className={cn(
+            "overflow-hidden rounded-[28px] border shadow-[0_18px_70px_rgba(0,0,0,0.35)]",
           effectiveIsLive
             ? "border-red-400/25 bg-[linear-gradient(135deg,rgba(239,68,68,0.18),rgba(14,165,233,0.08)_42%,rgba(0,0,0,0.5))]"
             : "border-white/10 bg-[linear-gradient(135deg,rgba(14,165,233,0.12),rgba(255,255,255,0.035)_42%,rgba(0,0,0,0.45))]"
@@ -1868,6 +1869,7 @@ export default function MatchMarketsClient({ matchId }: { matchId: string }) {
           {NO_ODDS_MESSAGE}
         </div>
       )}
+      </div>
     </div>
   );
 }
