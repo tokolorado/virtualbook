@@ -805,25 +805,6 @@ export default function BetSlip({ variant }: { variant?: BetSlipVariant }) {
       isDesktop ? "h-full min-h-0" : "space-y-4"
     )}
   >
-    {isMobile ? (
-      <div className="sticky top-0 z-20 -mx-1 mb-2 flex items-center justify-between rounded-2xl border border-neutral-800 bg-neutral-950/95 px-3 py-2 shadow-[0_12px_36px_rgba(0,0,0,0.35)] backdrop-blur">
-        <div>
-          <div className="text-sm font-semibold text-white">Kupon</div>
-          <div className="text-xs text-neutral-500">
-            {slip.length} zdarzeń
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          aria-label="Zamknij kupon"
-          className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition active:scale-[0.98]"
-        >
-          Zamknij
-        </button>
-      </div>
-    ) : null}
       <style jsx global>{`
         @keyframes vb-shake {
           0% {
@@ -1247,25 +1228,34 @@ export default function BetSlip({ variant }: { variant?: BetSlipVariant }) {
         <div className="h-20" />
 
         {open ? (
-          <div className="fixed inset-0 z-50">
-            <div
-              className="absolute inset-0 bg-black/60"
+          <div className="fixed inset-0 z-[999] flex items-end">
+            <button
+              type="button"
+              aria-label="Zamknij kupon"
+              className="absolute inset-0 bg-black/70"
               onClick={() => setOpen(false)}
             />
-            <div className="absolute bottom-0 left-0 right-0 max-h-[92dvh] overflow-hidden rounded-t-3xl border border-neutral-800 bg-neutral-950 pb-[env(safe-area-inset-bottom)]">
-              <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-                <div className="text-sm font-semibold">Kupon</div>
+
+            <div className="relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-3xl border border-neutral-800 bg-neutral-950 pb-[env(safe-area-inset-bottom)] shadow-[0_-24px_80px_rgba(0,0,0,0.55)]">
+              <div className="shrink-0 flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-white">Kupon</div>
+                  <div className="text-xs text-neutral-500">
+                    {slip.length} zdarzeń
+                  </div>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setOpen(false)}
                   aria-label="Zamknij kupon"
-                  className="rounded-xl border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-200 transition hover:bg-neutral-800"
+                  className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black transition active:scale-[0.98]"
                 >
                   Zamknij
                 </button>
               </div>
 
-              <div className="max-h-[calc(92dvh-58px)] overflow-y-auto overscroll-contain p-4">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
                 {slipContent}
               </div>
             </div>
