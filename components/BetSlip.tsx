@@ -159,12 +159,6 @@ export default function BetSlip({ variant }: { variant?: BetSlipVariant }) {
     setStakeInput(formatStakeInput(stake || ""));
   }, [stake]);
 
-  useEffect(() => {
-    if (slip.length > 0 && (!stake || !String(stake).trim())) {
-      setStake("10");
-      setStakeInput(formatStakeInput("10"));
-    }
-  }, [slip.length, stake, setStake]);
 
   useEffect(() => {
     const prev = prevSlipRef.current;
@@ -345,10 +339,11 @@ export default function BetSlip({ variant }: { variant?: BetSlipVariant }) {
 
   const stakeError = useMemo(() => {
     if (!slip.length) return null;
-    if (stakeInput.trim() === "") return "Wpisz stawkę.";
-    if (stakeNum == null) return "Nieprawidłowa stawka.";
-    if (stakeNum < MIN_STAKE) return `Minimalna stawka: ${MIN_STAKE}.`;
-    if (stakeNum > MAX_STAKE) return `Maksymalna stawka: ${MAX_STAKE}.`;
+    if (stakeInput.trim() === "") return "Stawka nie może być pusta.";
+    if (stakeNum == null) return "Podaj poprawną stawkę.";
+    if (stakeNum <= 0) return "Stawka nie może wynosić 0.";
+    if (stakeNum < MIN_STAKE) return `Minimalna stawka: ${MIN_STAKE} VB.`;
+    if (stakeNum > MAX_STAKE) return `Maksymalna stawka: ${MAX_STAKE} VB.`;
     return null;
   }, [stakeInput, stakeNum, slip.length]);
 
@@ -405,14 +400,14 @@ export default function BetSlip({ variant }: { variant?: BetSlipVariant }) {
     if (isMobile) setOpen(true);
   };
 
-  function addStake(amount: number) {
-    const current = parseStake(stakeInput) ?? 0;
-    const next = Math.min(current + amount, MAX_STAKE);
-
+  function setFixedStake(amount: number) {
+    const next = Math.min(amount, MAX_STAKE);
     const formatted = formatStakeInput(String(next));
 
     setStakeInput(formatted);
     setStake(String(next));
+    setSubmitError(null);
+    setErrorModal(null);
   }
 
   const onSubmit = async () => {
@@ -1096,7 +1091,7 @@ export default function BetSlip({ variant }: { variant?: BetSlipVariant }) {
                 }}
                 disabled={submitting}
                 inputMode="decimal"
-                placeholder={`np. ${MIN_STAKE}`}
+                placeholder="Wybierz lub wpisz stawkę"
                 className={cx(
                   "w-full rounded-2xl border bg-black/30 px-4 py-3 pr-14 text-sm text-white outline-none transition placeholder:text-neutral-600",
                   submitting && "cursor-not-allowed opacity-70",
@@ -1112,22 +1107,29 @@ export default function BetSlip({ variant }: { variant?: BetSlipVariant }) {
             </div>
 
             <div className="mt-2 grid grid-cols-4 gap-2">
-              {[10, 50, 100, 500].map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => addStake(v)}
-                  disabled={submitting}
-                  className={cx(
-                    "rounded-xl border px-2 py-2 text-xs font-semibold transition",
-                    submitting
-                      ? "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-600"
-                      : "border-neutral-800 bg-black/30 text-neutral-300 hover:border-neutral-700 hover:bg-white/5"
-                  )}
-                >
-                  +{v}
-                </button>
-              ))}
+              {[10, 50, 100, 200].map((v) => {
+                const activeStake = stakeNum === v;
+
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setFixedStake(v)}
+                    disabled={submitting}
+                    aria-pressed={activeStake}
+                    className={cx(
+                      "rounded-xl border px-2 py-2 text-xs font-semibold transition",
+                      submitting
+                        ? "cursor-not-allowed border-neutral-900 bg-neutral-950 text-neutral-600"
+                        : activeStake
+                          ? "border-white bg-white text-black"
+                          : "border-neutral-800 bg-black/30 text-neutral-300 hover:border-neutral-700 hover:bg-white/5"
+                    )}
+                  >
+                    {v}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
