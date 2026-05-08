@@ -2395,8 +2395,11 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
     const hasAnyOdds = hasDisplayable1x2Odds(m.odds);
     const isModelOdds = m.oddsMeta?.isModel === true;
 
-    return (
-      <div onClick={(e) => e.stopPropagation()}>
+      return (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
         {isModelOdds ? (
           <div className="mb-2 flex items-center justify-between gap-2 rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-[11px] font-semibold text-cyan-200">
             <span>Kurs modelowy</span>
@@ -2493,17 +2496,26 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
     const isLive = isEffectivelyLiveMatch(m, nowMs);
 
     return (
-      <article
-        key={m.id}
-        className={cn(
-          "group overflow-hidden rounded-[20px] border shadow-[0_12px_34px_rgba(0,0,0,0.34)] transition duration-300 hover:border-cyan-300/35 sm:rounded-[26px] sm:shadow-[0_20px_70px_rgba(0,0,0,0.42)] sm:hover:-translate-y-0.5 sm:hover:shadow-[0_28px_95px_rgba(6,182,212,0.16)]",
-          isLive
-            ? "border-red-400/30 bg-red-950/10"
-            : m.oddsMeta?.isModel
-              ? "border-cyan-400/25 bg-cyan-950/10"
-              : "border-white/10 bg-[#07090f]"
-        )}
-      >
+        <article
+          key={m.id}
+          role="button"
+          tabIndex={0}
+          onClick={() => goMatch(m)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              goMatch(m);
+            }
+          }}
+          className={cn(
+            "group cursor-pointer overflow-hidden rounded-[20px] border shadow-[0_12px_34px_rgba(0,0,0,0.34)] transition duration-300 hover:border-cyan-300/35 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400 sm:rounded-[26px] sm:shadow-[0_20px_70px_rgba(0,0,0,0.42)] sm:hover:-translate-y-0.5 sm:hover:shadow-[0_28px_95px_rgba(6,182,212,0.16)]",
+            isLive
+              ? "border-red-400/30 bg-red-950/10"
+              : m.oddsMeta?.isModel
+                ? "border-cyan-400/25 bg-cyan-950/10"
+                : "border-white/10 bg-[#07090f]"
+          )}
+        >
         <div className="relative overflow-hidden bg-[linear-gradient(rgba(255,255,255,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.035)_1px,transparent_1px),radial-gradient(circle_at_50%_0%,rgba(37,99,235,0.24),transparent_38%),linear-gradient(120deg,#050810,#0a1020_48%,#05070c)] bg-[size:44px_44px,44px_44px,100%_100%,100%_100%] px-2.5 py-2.5 sm:min-h-[260px] sm:bg-[size:72px_72px,72px_72px,100%_100%,100%_100%] sm:px-6 sm:py-5 lg:min-h-[300px]">
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/55 to-transparent sm:h-24" />
           <div className="pointer-events-none absolute inset-y-0 left-0 w-1/3 bg-[radial-gradient(circle_at_30%_50%,rgba(20,184,166,0.16),transparent_52%)]" />
@@ -2590,7 +2602,11 @@ async function manualSyncOddsForDay(args: { date: string; league: string }) {
 
               <button
                 type="button"
-                onClick={() => goMatch(m)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  goMatch(m);
+                }}
+                onKeyDown={(e) => e.stopPropagation()}
                 className="mt-1.5 rounded-full bg-white px-3 py-1.5 text-[9px] font-bold text-neutral-950 shadow-[0_12px_36px_rgba(255,255,255,0.16)] transition hover:scale-[1.02] hover:bg-cyan-50 sm:mt-4 sm:px-6 sm:py-3 sm:text-sm"
               >
                 Otwórz <span className="hidden sm:inline">mecz</span> &rarr;
