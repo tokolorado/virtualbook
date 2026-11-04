@@ -206,20 +206,15 @@ async function backfillMissingMatchResults(
 }
 
 export async function POST(req: Request) {
+  const auth = getCronSecretAuthResult(req);
+  if (!auth.ok) {
+    return json(auth.status, { ok: false, error: auth.error });
+  }
+
   let logId: number | null = null;
 
   try {
     logId = await cronLogStart("settle", "github-actions");
-
-    const auth = getCronSecretAuthResult(req);
-    if (!auth.ok) {
-      await cronLogSuccess(logId, {
-        ok: false,
-        job: "settle",
-        reason: auth.reason,
-      });
-      return json(auth.status, { ok: false, error: auth.error });
-    }
 
     const supabase = supabaseAdmin();
     const nowIso = new Date().toISOString();

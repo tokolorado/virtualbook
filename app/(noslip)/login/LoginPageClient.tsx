@@ -14,13 +14,6 @@ import { supabase } from "@/lib/supabase";
 type NoticeTone = "success" | "error" | "warning" | "info";
 type AuthView = "login" | "forgot-password";
 
-type AccountCheckResponse = {
-  exists: boolean;
-  confirmed: boolean;
-  email?: string | null;
-  error?: string;
-};
-
 function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
@@ -198,7 +191,7 @@ export default function LoginPageClient() {
       setNotice({
         tone: "success",
         text:
-          "Wiadomość z potwierdzeniem została wysłana na Twój adres e-mail. Potwierdź konto, klikając link w wiadomości.",
+          "Jeśli ten adres może zostać zarejestrowany, otrzymasz wiadomość z dalszymi instrukcjami. Jeśli masz już konto, możesz się zalogować.",
       });
     }
   }, [searchParams]);
@@ -241,7 +234,7 @@ export default function LoginPageClient() {
     try {
       setResending(true);
 
-      const { error } = await supabase.auth.resend({
+      await supabase.auth.resend({
         type: "signup",
         email: cleanEmail,
         options: {
@@ -249,14 +242,9 @@ export default function LoginPageClient() {
         },
       });
 
-      if (error) {
-        setFieldError(error.message);
-        return;
-      }
-
       setNotice({
         tone: "success",
-        text: "Wysłaliśmy nowy link potwierdzający na Twój adres e-mail.",
+        text: "Jeśli konto wymaga potwierdzenia, otrzymasz wiadomość z linkiem. Sprawdź swoją skrzynkę.",
       });
     } catch (e: unknown) {
       setFieldError(
@@ -286,57 +274,21 @@ export default function LoginPageClient() {
     try {
       setLoading(true);
 
-      const checkRes = await fetch(
-        `/api/auth/check-email?email=${encodeURIComponent(cleanEmail)}`,
-        { cache: "no-store" }
-      );
-
-      let checkData: AccountCheckResponse | null = null;
-
-      try {
-        checkData = await checkRes.json();
-      } catch {
-        checkData = null;
-      }
-
-      if (checkRes.ok && checkData) {
-        if (!checkData.exists) {
-          setFieldError("Nie znaleziono konta w bazie.");
-          return;
-        }
-
-        if (!checkData.confirmed) {
-          setFieldError(
-            "Konto istnieje, ale adres e-mail nie został jeszcze potwierdzony."
-          );
-          setCanResend(true);
-          return;
-        }
-      }
-
       const { error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password,
       });
 
       if (error) {
-        const msg = String(error.message || "").toLowerCase();
-
-        if (msg.includes("email not confirmed")) {
-          setFieldError("Musisz potwierdzić adres e-mail, aby się zalogować.");
-          setCanResend(true);
-        } else if (msg.includes("invalid login credentials")) {
-          setFieldError("Niepoprawne hasło.");
-        } else {
-          setFieldError("Nie udało się zalogować. Spróbuj ponownie.");
-        }
+        setFieldError("Nieprawidłowy adres e-mail lub hasło. Jeśli konto wymaga potwierdzenia, sprawdź swoją skrzynkę.");
+        setCanResend(true);
 
         return;
       }
 
       router.replace("/events");
-    } catch (err: unknown) {
-      setFieldError(messageFromUnknown(err, "Wystąpił błąd podczas logowania."));
+    } catch {
+      setFieldError("Nie udało się zalogować. Spróbuj ponownie za chwilę.");
     } finally {
       setLoading(false);
     }
@@ -371,56 +323,11 @@ export default function LoginPageClient() {
     try {
       setForgotLoading(true);
 
-      const checkRes = await fetch(
-        `/api/auth/check-email?email=${encodeURIComponent(cleanForgotEmail)}`,
-        { cache: "no-store" }
-      );
-
-      let checkData: AccountCheckResponse | null = null;
-
-      try {
-        checkData = await checkRes.json();
-      } catch {
-        checkData = null;
-      }
-
-      if (!checkRes.ok || !checkData) {
-        setForgotError(
-          "Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę."
-        );
-        return;
-      }
-
-      if (checkData.exists) {
-        const { error } = await supabase.auth.resetPasswordForEmail(
-          cleanForgotEmail,
-          {
-            redirectTo: `${window.location.origin}/reset-password`,
-          }
-        );
-
-        if (error) {
-          console.error("[forgot-password] resetPasswordForEmail error:", error);
-
-          const msg = String(error.message || "").toLowerCase();
-
-          if (
-            msg.includes("rate") ||
-            msg.includes("too many") ||
-            msg.includes("security purposes")
-          ) {
-            setForgotError(
-              "Link resetujący był wysyłany zbyt często. Odczekaj chwilę i spróbuj ponownie."
-            );
-            return;
-          }
-
-          setForgotError(
-            "Nie udało się teraz wysłać linku resetującego. Spróbuj ponownie za chwilę."
-          );
-          return;
-        }
-      }
+      // Supabase handles delivery and rate limits. Never look up account existence.
+      // Use the same conditional confirmation for provider errors and success.
+      await supabase.auth.resetPasswordForEmail(cleanForgotEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
 
       setForgotSent(true);
     } catch (e: unknown) {
