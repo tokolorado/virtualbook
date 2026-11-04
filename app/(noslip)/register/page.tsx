@@ -282,38 +282,7 @@ export default function RegisterPage() {
       return;
     }
 
-    try {
-      setLoading(true);
-
-      const emailCheckRes = await fetch(
-        `/api/auth/check-email?email=${encodeURIComponent(cleanEmail)}`,
-        { cache: "no-store" }
-      );
-
-      const emailCheck = await emailCheckRes.json().catch(() => null);
-
-      if (emailCheckRes.ok && emailCheck?.exists) {
-        setNotice({
-          tone: "error",
-          text: emailCheck.confirmed
-            ? "Konto z tym adresem e-mail już istnieje."
-            : "Konto z tym adresem e-mail już istnieje, ale nie zostało jeszcze potwierdzone. Możesz wrócić do logowania i wysłać link potwierdzający ponownie.",
-        });
-        return;
-      }
-
-      setStep("profile");
-    } catch (e: unknown) {
-      setNotice({
-        tone: "error",
-        text:
-          e instanceof Error
-            ? e.message
-            : "Nie udało się sprawdzić adresu e-mail.",
-      });
-    } finally {
-      setLoading(false);
-    }
+    setStep("profile");
   };
 
   const checkProfileAndContinue = async () => {
@@ -459,22 +428,14 @@ export default function RegisterPage() {
         },
       });
 
-      if (error) {
-        const msg = String(error.message || "").toLowerCase();
-
-        if (msg.includes("user already registered")) {
-          setNotice({
-            tone: "error",
-            text: "Konto z tym adresem e-mail już istnieje.",
-          });
-          setStep("email");
-        } else {
-          setNotice({
-            tone: "error",
-            text: error.message,
-          });
-        }
-
+      // A duplicate address gets the same completion screen as a new signup.
+      // Email confirmation and Supabase Auth rate limits must remain enabled.
+      if (error && !["user_already_exists", "email_exists"].includes(error.code ?? "") &&
+          !String(error.message).toLowerCase().includes("already registered")) {
+        setNotice({
+          tone: "error",
+          text: "Nie udało się zakończyć rejestracji. Spróbuj ponownie za chwilę.",
+        });
         return;
       }
 
@@ -529,8 +490,7 @@ export default function RegisterPage() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-neutral-400">
-            Podaj swój adres e-mail. Sprawdzimy, czy możesz użyć go do utworzenia
-            konta.
+            Podaj swój adres e-mail, aby przejść do tworzenia konta.
           </p>
         </div>
 
@@ -796,7 +756,7 @@ export default function RegisterPage() {
     return (
       <>
         <div className="rounded-full border border-green-500/30 bg-green-500/10 px-4 py-2 text-center text-xs font-semibold uppercase tracking-[0.18em] text-green-300">
-          Konto utworzone
+          Sprawdź swoją skrzynkę
         </div>
 
         <div className="text-center">
@@ -805,7 +765,7 @@ export default function RegisterPage() {
           </h1>
 
           <p className="mt-4 text-sm leading-7 text-neutral-400">
-            Wysłaliśmy wiadomość aktywacyjną na adres:
+            Jeśli ten adres może zostać zarejestrowany, otrzymasz wiadomość aktywacyjną:
           </p>
 
           <div className="mt-3 rounded-2xl border border-neutral-800 bg-neutral-950 px-4 py-3 text-sm font-semibold text-white">
@@ -813,8 +773,8 @@ export default function RegisterPage() {
           </div>
 
           <p className="mt-4 text-sm leading-7 text-neutral-400">
-            Otwórz swoją skrzynkę pocztową i kliknij link potwierdzający. Dopiero
-            po potwierdzeniu adresu e-mail konto będzie gotowe do logowania.
+            Otwórz swoją skrzynkę pocztową i postępuj zgodnie z instrukcjami.
+            Jeśli masz już konto, przejdź do logowania lub zresetuj hasło.
           </p>
         </div>
 

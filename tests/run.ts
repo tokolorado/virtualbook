@@ -1,4 +1,5 @@
 import "./bet-builder-pricing.test";
+import "./account-privacy.test";
 import "./cron-settle.test";
 import "./cron-secret.test";
 import "./internal-fallback-odds.test";

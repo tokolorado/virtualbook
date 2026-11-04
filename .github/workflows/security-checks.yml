@@ -1,0 +1,49 @@
+name: Security checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify security fixes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Build-only placeholders, never production credentials.
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-not-a-secret
+      SUPABASE_URL: https://example.supabase.co
+      SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-not-a-secret
+      CRON_SECRET: ci-placeholder-not-a-secret
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm audit --audit-level=high
+      - run: npm test
+      # Existing UI lint debt is reported visibly; security, tests and build still block.
+      - name: Report existing UI lint debt
+        run: npm run lint
+        continue-on-error: true
+      - run: npm run build
+      - name: Test access controls over HTTP
+        run: |
+          npm run start -- --hostname 127.0.0.1 --port 3210 > /tmp/virtualbook-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          SECURITY_SMOKE_LOG=/tmp/virtualbook-server.log node scripts/security-smoke.mjs

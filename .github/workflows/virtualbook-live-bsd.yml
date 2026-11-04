@@ -9,6 +9,9 @@ concurrency:
   group: virtualbook-live-bsd-sync
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   live-bsd-sync:
     runs-on: ubuntu-latest
@@ -16,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Run live BSD sync loop
         shell: bash
