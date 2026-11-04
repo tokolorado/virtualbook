@@ -16,7 +16,7 @@
     "@supabase/supabase-js": "^2.97.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
-    "next": "^16.2.4",
+    "next": "^16.4.5",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^3.8.0"
@@ -29,7 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "tsx": "^4.21.0",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   },
   "overrides": {
